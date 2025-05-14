@@ -68,6 +68,11 @@ def build(bld):
     obj = bld.create_ns3_program('lena-radio-link-failure',
                                  ['lte'])
     obj.source = 'lena-radio-link-failure.cc'
+    # needs `winner-plus-propagation-loss-model`. To install 
+    # cd src
+    # wget -c https://github.com/tudo-cni/ns3-propagation-winner-plus/archive/refs/heads/master.zip
+    # unzip master.zip
+    # mv ns3-propagation-winner-plus-master propagation
     obj = bld.create_ns3_program('lena-nb-5G-scenario',
                                  ['lte'])
     obj.source = 'lena-nb-5G-scenario.cc'
