@@ -658,6 +658,10 @@ void LteUeRrc::LogEnergyRemaining(){
         std::string logfile_path = m_logdir+"Energy.log";
         std::ofstream logfile;
         logfile.open(logfile_path, std::ios_base::app);
+        // 1. International Mobile Subscriber Identity (IMSI)
+        // 2. Coverage Enhancement Level (CEL)
+        // 3. Energy Remaining (ER)
+        // 4. Energy Remaining Fraction (ERF)
         logfile <<  m_imsi << "," << uint(m_cmacSapProvider.at(0)->GetCoverageEnhancementLevel())<< "," << std::setprecision(15) << m_energyModel.GetEnergyRemaining() << "," << m_energyModel.GetEnergyRemainingFraction() <<"\n";
         logfile.close();
 }
@@ -3921,6 +3925,9 @@ LteUeRrc::ResetRlfParams ()
 void 
 LteUeRrc::DoNotifyEnergyState(NbiotEnergyModel::PowerState state){
   m_energyModel.DoNotifyStateChange(state);
+  if(m_logging){
+    LogEnergyRemaining();
+  }
 }
 NbiotEnergyModel::PowerState
 LteUeRrc::DoGetEnergyState(){
