@@ -701,7 +701,7 @@ public:
   void EnableRrcLogging();
 
   /**
-   * Ste the directory for logging Messages
+   * Set the directory for logging Messages
    */
   void SetLogDir(std::string dirname);
 
