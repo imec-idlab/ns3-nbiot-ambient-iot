@@ -275,7 +275,12 @@ main (int argc, char *argv[])
 
       Ptr<LteUeNetDevice> ueLteDevice = ueLteDevs.Get(i)->GetObject<LteUeNetDevice> ();
       Ptr<LteUeRrc> ueRrc = ueLteDevice->GetRrc();
-      ueRrc->m_energyModel = *CreateObject<NbiotEnergyModel>(BG96(), 0);
+
+      // NOTE: you can create your own energy model
+      // ueRrc->m_energyModel = *CreateObject<NbiotEnergyModel>(BG96(), 0);
+      //
+      // but NbiotEnergyModel does not allow to change the energy source
+      ueRrc->m_energyModel.m_battery->SetInitialEnergy(180.0);
 
       ueRrc->EnableLogging();
       if(ciot == true){
@@ -359,23 +364,26 @@ main (int argc, char *argv[])
     }
   }
 
-
+  /* **********************************
+   * Start the simulation
+   */
   auto start = std::chrono::system_clock::now(); 
   std::time_t start_time = std::chrono::system_clock::to_time_t(start);
   std::cout << "Started computation at " << std::ctime(&start_time);
-  
+
+  // create the log directory structure 
   std::string logdir = "logs/";
   std::string makedir = "mkdir -p ";
   std::string techdir = makedir;
 
   // create logdir
   techdir += logdir;
-  int z = std::system(techdir.c_str());
+  int z = std::system(techdir.c_str());  // mkdir
   NS_LOG(LOG_DEBUG, "cmd: " << techdir << " :" << z);
 
   // create logdir / simName
   techdir += "/" + simName + "/";
-  z = std::system(techdir.c_str());
+  z = std::system(techdir.c_str());  // mkdir
   NS_LOG_DEBUG("cmd: " << techdir <<" : " << z);
 
   // logdir / simName / num_ues _ simTime _ ciot _ edt
@@ -386,7 +394,7 @@ main (int argc, char *argv[])
   logdir += "_" + std::to_string(edt);
   // create the directory
   techdir = makedir + logdir; 
-  z = std::system(techdir.c_str());
+  z = std::system(techdir.c_str());  // mkdir
   NS_LOG_DEBUG("cmd: " << techdir <<" : " << z);
 
   // create folder with date
@@ -395,7 +403,7 @@ main (int argc, char *argv[])
   ss << std::put_time(&tm, "%d_%m_%Y_%H_%M_%S");
   logdir += "/" + ss.str();
   techdir = makedir + logdir; 
-  z = std::system(techdir.c_str());
+  z = std::system(techdir.c_str());  // mkdir
   NS_LOG_DEBUG("cmd: " << techdir <<" : " << z);
   
   // define path + initial part of the the log filenames used
