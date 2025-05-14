@@ -113,6 +113,8 @@ public:
     double GetEnergyRemaining();
     double GetEnergyRemainingFraction();
     void SetImsi(uint32_t imsi);
+    
+    void SetEnergySource(Ptr<LiIonEnergySource> new_battery);
 
 private:
     Ptr<LiIonEnergySource> m_battery; // Battery model

@@ -113,9 +113,26 @@ double NbiotEnergyModel::GetEnergyRemaining(){
     DoNotifyStateChange(m_lastState);
     return m_battery->GetRemainingEnergy();
 }
+
+/**
+ * Return the fraction of energy remaining in the device.
+ *
+ * \return the fraction of energy remaining in the device.
+ */
 double NbiotEnergyModel::GetEnergyRemainingFraction(){
     // Update Power when reading
     DoNotifyStateChange(m_lastState);
     return m_battery->GetEnergyFraction();
 }
+
+/**
+ * Set the energy source for this device.
+ *
+ * \param new_battery the new energy source.
+ */
+void NbiotEnergyModel::SetEnergySource(Ptr<LiIonEnergySource> new_battery){
+    m_battery = nullptr;  // to force deallocation
+    m_battery = new_battery;
+}
+
 }
