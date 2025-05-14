@@ -279,8 +279,11 @@ main (int argc, char *argv[])
       // NOTE: you can create your own energy model
       // ueRrc->m_energyModel = *CreateObject<NbiotEnergyModel>(BG96(), 0);
       //
-      // but NbiotEnergyModel does not allow to change the energy source
-      ueRrc->m_energyModel.m_battery->SetInitialEnergy(180.0);
+      // NbiotEnergyModel was adapted to change the energy source
+      // TODO: create general energy source (not onlye LiIonEnergySource)
+      Ptr<LiIonEnergySource> battery = CreateObject<LiIonEnergySource> ();
+      battery->SetInitialEnergy (100);
+      ueRrc->m_energyModel.SetEnergySource(battery);
 
       ueRrc->EnableLogging();
       if(ciot == true){
