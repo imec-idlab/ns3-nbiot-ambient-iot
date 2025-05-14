@@ -16,7 +16,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Marco Miozzo  <marco.miozzo@cttc.es>,
- *         Nicola Baldo <nbaldo@cttc.es>
+ *         Nicola Baldo <nbaldo@cttc.es>beep
  * 
  */
 #include "ns3/log.h"

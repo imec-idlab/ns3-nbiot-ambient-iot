@@ -15,6 +15,7 @@ def build(bld):
         'model/kun-2600-mhz-propagation-loss-model.cc',
         'model/channel-condition-model.cc',
         'model/three-gpp-propagation-loss-model.cc',
+        'model/winner-plus-propagation-loss-model.cc',
         ]
 
     module_test = bld.create_ns3_module_test_library('propagation')
@@ -50,6 +51,7 @@ def build(bld):
         'model/kun-2600-mhz-propagation-loss-model.h',
         'model/channel-condition-model.h',
         'model/three-gpp-propagation-loss-model.h',
+        'model/winner-plus-propagation-loss-model.h',
         ]
 
     if (bld.env['ENABLE_EXAMPLES']):

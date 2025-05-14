@@ -51,6 +51,29 @@ enum CitySize
   };
 
 
+  /**
+ * \ingroup propagation
+ *
+ * The size of the city in which propagation takes place
+ * 
+ */
+enum WinnerPlusEnvironmentType
+  {
+    UMiEnvironment,  O2IaEnvironment, SMaEnvironment, UMaEnvironment, O2IbEnvironment
+  };
+
+  /**
+ * \ingroup propagation
+ *
+ * The size of the city in which propagation takes place
+ * 
+ */
+enum WinnerPlusLayoutType
+  {
+    Hexagonal
+  };
+
+
 } // namespace ns3
 
 
