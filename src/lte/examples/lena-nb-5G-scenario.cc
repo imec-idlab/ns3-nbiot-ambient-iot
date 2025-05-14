@@ -165,7 +165,7 @@ main (int argc, char *argv[])
     pos_a.Set ("Z", DoubleValue (1.5));
     pos_a.Set ("rho", DoubleValue (cellsize/2));
     Ptr<PositionAllocator> m_position = pos_a.Create ()->GetObject<PositionAllocator> ();
-    for (uint32_t i = 0; i < num_ues_app_a; ++i){
+    for (int i = 0; i < num_ues_app_a; ++i){
       Vector position = m_position->GetNext ();
       positionAllocUe->Add (position);
       //std::cout << "a," << position.x << "," << position.y << "," << position.z << std::endl;
@@ -178,7 +178,7 @@ main (int argc, char *argv[])
     pos_b.Set ("Z", DoubleValue (0.0)); // For devices with height 0.0, Winner+ will add a predefined additional indoor attenation
     pos_b.Set ("rho", DoubleValue (cellsize/2));    
     m_position = pos_b.Create ()->GetObject<PositionAllocator> ();
-    for (uint32_t i = 0; i < num_ues_app_b; ++i){
+    for (int i = 0; i < num_ues_app_b; ++i){
       Vector position = m_position->GetNext ();
       positionAllocUe->Add (position);
       //std::cout << "b," << position.x << "," << position.y << "," << position.z << std::endl;
@@ -191,7 +191,7 @@ main (int argc, char *argv[])
     pos_c.Set ("Z", DoubleValue (-1.5)); // For devices with height < 0.0, Winner+ will add a predefined additional deep indoor attenation
     pos_c.Set ("rho", DoubleValue (cellsize/2));    
     m_position = pos_c.Create ()->GetObject<PositionAllocator> ();
-    for (uint32_t i = 0; i < num_ues_app_c; ++i){
+    for (int i = 0; i < num_ues_app_c; ++i){
       Vector position = m_position->GetNext ();
       positionAllocUe->Add (position);
       //std::cout << "c," << position.x << "," << position.y << "," << position.z << std::endl;
