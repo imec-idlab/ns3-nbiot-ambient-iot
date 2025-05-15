@@ -16,7 +16,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
- * Authors: 
+ * Authors: Henrique Duarte Moura <henrique.duartemoura@imec.be>
  */
 
 #include <chrono>
@@ -280,10 +280,10 @@ main (int argc, char *argv[])
       // ueRrc->m_energyModel = *CreateObject<NbiotEnergyModel>(BG96(), 0);
       //
       // NbiotEnergyModel was adapted to change the energy source
-      // TODO: create general energy source (not onlye LiIonEnergySource)
       Ptr<LiIonEnergySource> battery = CreateObject<LiIonEnergySource> ();
       battery->SetInitialEnergy (100);
       ueRrc->m_energyModel.SetEnergySource(battery);
+      battery->SetNode(ueNodes.Get(i)); // you MUST set the node to the battery
 
       ueRrc->EnableLogging();
       if(ciot == true){
