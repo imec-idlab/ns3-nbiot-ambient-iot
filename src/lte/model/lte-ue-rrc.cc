@@ -662,7 +662,12 @@ void LteUeRrc::LogEnergyRemaining(){
         // 2. Coverage Enhancement Level (CEL)
         // 3. Energy Remaining (ER)
         // 4. Energy Remaining Fraction (ERF)
-        logfile <<  m_imsi << "," << uint(m_cmacSapProvider.at(0)->GetCoverageEnhancementLevel())<< "," << std::setprecision(15) << m_energyModel.GetEnergyRemaining() << "," << m_energyModel.GetEnergyRemainingFraction() <<"\n";
+        logfile << std::fixed << 
+          Simulator::Now () <<  "," << 
+          m_imsi << "," << 
+          uint(m_cmacSapProvider.at(0)->GetCoverageEnhancementLevel())<< "," << std::setprecision(15) << 
+          m_energyModel.GetEnergyRemaining() << "," << 
+          m_energyModel.GetEnergyRemainingFraction() <<"\n";
         logfile.close();
 }
 
