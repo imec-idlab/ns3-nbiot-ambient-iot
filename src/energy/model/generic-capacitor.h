@@ -15,11 +15,11 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
- * Author: Andrea Sacco <andrea.sacco85@gmail.com>
+ * Author: Henrique Duarte Moura <henrique.duartemoura@imec.be>
  */
 
-#ifndef LI_ION_ENERGY_SOURCE_H
-#define LI_ION_ENERGY_SOURCE_H
+#ifndef GENERIC_CAPACITOR_H
+#define GENERIC_CAPACITOR_H
 
 #include "ns3/traced-value.h"
 #include "ns3/energy-source.h"
@@ -57,7 +57,7 @@ public:
   void SetInitialEnergy (double initialEnergyJ);
 
   /**
-   * \returns Supply voltage at the energy source.
+   * \returns Current voltage at the capacitor.
    *
    * Implements GetSupplyVoltage.
    */
@@ -69,7 +69,9 @@ public:
    * Sets the initial supply voltage of the energy source.
    * To be called only once.
    */
-  void SetInitialSupplyVoltage (double supplyVoltageV);
+  void SetInitialVoltage (double initialVoltageV);
+
+  virtual double GetInitialVoltage (void) const;
 
   /**
    * \return Remaining energy in energy source, in Joules
@@ -139,29 +141,33 @@ private:
   /**
    *  \param current the actual discharge current value.
    *
-   *  Get the cell voltage in function of the discharge current.
+   *  Get the capacitor voltage in function of the discharge current.
    *  It consider different discharge curves for different discharge currents
-   *  and the remaining energy of the cell.
+   *  and the remaining energy of the capacitor.
    */
   double GetVoltage (double current) const;
 
+  double GetCapacitorEnergy (double voltageV) const;
+
+  double LowCapacitorEnergyTh(void) const;
+
+  double GetCapacitorModelVoltage(double ih, double t) const;
+
 private:
-  double m_capacitanceF;                  // capacity of the cell, in Farads
+  double m_capacitanceF;                  // size of the capacitor, in Farads
+  double m_initialVoltage;                // initial voltage of the capacitor, in Volts
+  TracedValue<double> m_currentVoltage;   // nominal voltage of the capacitor, in Volts
+  double m_maxVoltage;                    // maximum voltage of the capacitor, in Volts
+  double m_minVoltTh;                     // minimum threshold voltage to consider the battery depleted
+  double m_internalResistance;            // internal resistance of the capacitor, in Ohms
+  double m_leakageResistance;             // leakage resistance of the capacitor, in Ohms 
   double m_initialEnergyJ;                // initial energy, in Joules
   TracedValue<double> m_remainingEnergyJ; // remaining energy, in Joules
-  double m_drainedCapacity;               // capacity drained from the cell, in Ah
-  double m_supplyVoltageV;                // actual voltage of the cell
-  double m_lowBatteryTh;                  // low battery threshold, as a fraction of the initial energy
   EventId m_energyUpdateEvent;            // energy update event
   Time m_lastUpdateTime;                  // last update time
   Time m_energyUpdateInterval;            // energy update interval
-  double m_eFull;                         // initial voltage of the cell, in Volts
-  double m_eNom;                          // nominal voltage of the cell, in Volts
-  double m_internalResistance;            // internal resistance of the cell, in Ohms
-  double m_typCurrent;                    // typical discharge current used to fit the curves
-  double m_minVoltTh;                     // minimum threshold voltage to consider the battery depleted
 };
 
 } // namespace ns3
 
-#endif /* LI_ION_ENERGY_SOURCE_H */
+#endif /* GENERIC_CAPACITOR_H */
