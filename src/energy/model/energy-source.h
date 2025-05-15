@@ -181,6 +181,10 @@ public:
   void ConnectEnergyHarvester (Ptr<EnergyHarvester> energyHarvesterPtr);
 
 
+  virtual void DecreaseRemainingEnergy(double lostEnergy);
+
+  virtual void SetInitialEnergy(double initialEnergy);
+
 private:
   /**
    * All child's implementation must call BreakDeviceEnergyModelRefCycle to

@@ -144,6 +144,19 @@ EnergySource::ConnectEnergyHarvester (Ptr<EnergyHarvester> energyHarvesterPtr)
   m_harvesters.push_back (energyHarvesterPtr);
 }
 
+
+void 
+EnergySource::DecreaseRemainingEnergy(double lostEnergy)
+{
+  NS_LOG_FUNCTION (this);
+}
+
+void 
+EnergySource::SetInitialEnergy(double initialEnergy)
+{
+  NS_LOG_FUNCTION (this);
+}
+
 /*
  * Private function starts here.
  */
