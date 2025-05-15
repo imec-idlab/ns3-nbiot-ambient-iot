@@ -114,10 +114,12 @@ public:
     double GetEnergyRemainingFraction();
     void SetImsi(uint32_t imsi);
     
-    void SetEnergySource(Ptr<LiIonEnergySource> new_battery);
+    void SetEnergySource(Ptr<EnergySource> new_battery);
+
+    void DecreaseRemainingEnergy(double lostEnergy);
 
 private:
-    Ptr<LiIonEnergySource> m_battery; // Battery model
+    Ptr<EnergySource> m_battery; // Battery model
     NbiotChip m_module; // Current Nbiot Module
     uint32_t m_imsi;
     PowerState m_lastState; // Current Powerstate

@@ -108,6 +108,7 @@ void NbiotEnergyModel::DoNotifyStateChange(PowerState newState){
     m_lastState = newState;
 
 }
+
 double NbiotEnergyModel::GetEnergyRemaining(){
     // Update Power when reading
     DoNotifyStateChange(m_lastState);
@@ -130,7 +131,7 @@ double NbiotEnergyModel::GetEnergyRemainingFraction(){
  *
  * \param new_battery the new energy source.
  */
-void NbiotEnergyModel::SetEnergySource(Ptr<LiIonEnergySource> new_battery){
+void NbiotEnergyModel::SetEnergySource(Ptr<EnergySource> new_battery){
     m_battery = nullptr;  // to force deallocation
     m_battery = new_battery;
 }
