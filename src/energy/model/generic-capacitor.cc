@@ -55,7 +55,7 @@ GenericCapacitor::GetTypeId (void)
                    "Maximym voltage of the capacitor.",
                    DoubleValue (5.0), // in Volts
                    MakeDoubleAccessor (&GenericCapacitor::m_maxVoltage),
-                   MakeDoubleChecker<double> ())                   
+                   MakeDoubleChecker<double> ())
     .AddAttribute ("ThresholdVoltage",
                    "Minimum threshold voltage to consider the battery depleted.",
                    DoubleValue (2.0), // in Volts
@@ -87,6 +87,12 @@ GenericCapacitor::GetTypeId (void)
                      "Remaining energy at BasicEnergySource.",
                      MakeTraceSourceAccessor (&GenericCapacitor::m_remainingEnergyJ),
                      "ns3::TracedValueCallback::Double")
+    .AddAttribute ("SupplyVoltage",
+                   "Voltage applied to the capacitor by the PMU.",
+                   DoubleValue (5.0), // in Volts
+                   MakeDoubleAccessor (&GenericCapacitor::SetSupplyVoltage,
+                                       &GenericCapacitor::GetSupplyVoltage),
+                   MakeDoubleChecker<double> ())
   ;
   return tid;
 }
@@ -159,7 +165,7 @@ GenericCapacitor::GetInitialEnergy (void) const
  *
  * Sets the initial voltage of the capacitor. The energy stored in the capacitor is then
  * calculated by GetCapacitorEnergy().
- * 
+ *
  * This method allows you to set the energy of the capacitor by providing the initial voltage.
  */
 void
@@ -178,31 +184,48 @@ GenericCapacitor::SetInitialVoltage (double initialVoltageV)
  *
  * This method is used to access the initial voltage at the capacitor.
  */
-double 
+double
 GenericCapacitor::GetInitialVoltage (void) const
 {
   return m_initialVoltage;
 }
 
-/**
- * \returns Current voltage at the capacitor.
- *
- * This method is used to access the current voltage at the capacitor.
- * 
- */
+//  * This method is used to access the current voltage at the capacitor.
 double
-GenericCapacitor::GetSupplyVoltage (void) const
+GenericCapacitor::GetCapacitorVoltage (void) const
 {
   NS_LOG_FUNCTION (this);
   return m_currentVoltage;
 }
 
+
+/**
+ * \returns Voltage supplied to the capacitor.
+ *
+ * This method returns the voltage supplied to charge the capacitor.
+ * Since there can be several harvesters, the idea is that a PMU
+ * regulates the voltage while providing the sum of current to the capacitor.
+ */
+double
+GenericCapacitor::GetSupplyVoltage (void) const
+{
+  NS_LOG_FUNCTION (this);
+  return m_supplyVoltageV;
+}
+
+void
+GenericCapacitor::SetSupplyVoltage (double supplyVoltageV)
+{
+  NS_LOG_FUNCTION (this << supplyVoltageV);
+  m_supplyVoltageV = supplyVoltageV;
+}
+
 /*
-- The interval set by SetEnergyUpdateInterval determines when the energy source recalculates 
+- The interval set by SetEnergyUpdateInterval determines when the energy source recalculates
   the remaining power. If you set a short interval, updates happen more frequently in simulation time.
-- The simulation time itself progresses based on events scheduled in the event queue. 
+- The simulation time itself progresses based on events scheduled in the event queue.
   The energy updates occur as scheduled events at regular intervals.
-- A smaller interval leads to more precise tracking but may increase computational overhead. 
+- A smaller interval leads to more precise tracking but may increase computational overhead.
 - A larger interval reduces update frequency, potentially making energy consumption tracking less granular.
  */
 void
@@ -237,13 +260,53 @@ GenericCapacitor::GetEnergyFraction (void)
   return m_remainingEnergyJ / m_initialEnergyJ;
 }
 
+
+double
+GenericCapacitor::GetCapacitorModelVoltage(double ih, double t) const
+{
+  // compute the capacitor voltage
+  // if ih is positive, the capacitor is being charged
+  // if ih is negative, the capacitor is being drained
+  double req = m_leakageResistance;
+  double tau = req * m_capacitanceF;  // TODO: obtain the correct req and update tau
+  double Vc = req * ih * (1 - std::exp(-t / tau)) + m_currentVoltage * std::exp(-t / tau);
+  Vc = (Vc > m_maxVoltage) ? m_maxVoltage : Vc;   // clip voltage to maximum
+  Vc = (Vc < 0) ? 0 : Vc;  // no negative voltage for us
+  return Vc;
+}
+
+bool
+GenericCapacitor::UpdateVoltageBasedOnEnergy(double energyJ)
+{
+  if (energyJ == 0)
+  {
+    return false;  // nothing to do
+  }
+
+  Time now = Simulator::Now ();
+  Time duration = now - m_lastUpdateTime;
+  // I = E / (V . t)
+  double current = energyJ / (m_currentVoltage * duration.GetSeconds ());
+  m_currentVoltage = GetCapacitorModelVoltage(current, duration.GetSeconds ());
+  m_remainingEnergyJ = GetCapacitorEnergy(m_currentVoltage);
+  m_lastUpdateTime = now;
+
+  return true;  // Yes, there is an update
+}
+
 void
 GenericCapacitor::DecreaseRemainingEnergy (double energyJ)
 {
   NS_LOG_FUNCTION (this << energyJ);
   NS_ASSERT (energyJ >= 0);
-  m_remainingEnergyJ -= energyJ;
-  // TODO: update the voltage based on the remaining energy
+
+  // negative energyJ means draining capacitor
+  if (UpdateVoltageBasedOnEnergy(-energyJ))
+  {
+    NS_LOG_DEBUG ("GenericCapacitor("<< GetNode ()->GetId () << "): DecreaseRemainingEnergy " <<
+      " Remaining energy: " << m_remainingEnergyJ <<
+      " J, V: " << m_currentVoltage << " V");
+  }
 
   // check if remaining energy is 0
   if (m_currentVoltage <= m_minVoltTh)
@@ -257,9 +320,14 @@ GenericCapacitor::IncreaseRemainingEnergy (double energyJ)
 {
   NS_LOG_FUNCTION (this << energyJ);
   NS_ASSERT (energyJ >= 0);
-  m_remainingEnergyJ += energyJ;
 
-  // TODO: update the voltage based on the remaining energy  
+  // positive energyJ means charging capacitor
+  if (UpdateVoltageBasedOnEnergy(+energyJ))
+  {
+    NS_LOG_DEBUG ("GenericCapacitor("<< GetNode ()->GetId () << "): IncreaseRemainingEnergy " <<
+      " Remaining energy: " << m_remainingEnergyJ <<
+      " J, V: " << m_currentVoltage << " V");
+  }
 }
 
 
@@ -280,8 +348,7 @@ void
 GenericCapacitor::UpdateEnergySource (void)
 {
   NS_LOG_FUNCTION (this);
-  NS_LOG_DEBUG ("GenericCapacitor:Updating remaining energy at node #" <<
-                GetNode ()->GetId ());
+  NS_LOG_DEBUG ("GenericCapacitor("<< GetNode ()->GetId () << "): Updating remaining energy");
 
   // do not update if simulation has finished
   if (Simulator::IsFinished ())
@@ -331,7 +398,7 @@ void
 GenericCapacitor::HandleEnergyDrainedEvent (void)
 {
   NS_LOG_FUNCTION (this);
-  NS_LOG_DEBUG ("GenericCapacitor:Energy depleted at node #" << GetNode ()->GetId ());
+  NS_LOG_DEBUG ("GenericCapacitor("<< GetNode ()->GetId () << "): Energy depleted");
   NotifyEnergyDrained (); // notify DeviceEnergyModel objects
   if (m_remainingEnergyJ <= 0)
   {
@@ -339,16 +406,6 @@ GenericCapacitor::HandleEnergyDrainedEvent (void)
   }
 }
 
-double
-GenericCapacitor::GetCapacitorModelVoltage(double ih, double t) const
-{
-  double req = m_leakageResistance;
-  double tau = req * m_capacitanceF;
-  double Vc = req * ih * (1 - std::exp(-t / tau)) + m_currentVoltage * std::exp(-t / tau);
-  Vc = (Vc > m_maxVoltage) ? m_maxVoltage : Vc;   // clip voltage to maximum
-  Vc = (Vc < 0) ? 0 : Vc;  // no negative voltage for us
-  return Vc;
-}
 
 void
 GenericCapacitor::CalculateRemainingEnergy (void)
@@ -356,17 +413,20 @@ GenericCapacitor::CalculateRemainingEnergy (void)
   NS_LOG_FUNCTION (this);
   // compute total current, i.e.,
   // all current harvest minus all current drained by the devices attached
-  double totalCurrentA = CalculateTotalCurrent (); 
-  
+  double totalCurrentA = CalculateTotalCurrent ();
+  NS_LOG_DEBUG ("GenericCapacitor("<< GetNode ()->GetId () << "): Total current: " << totalCurrentA << " A");
+
   Time now = Simulator::Now ();
-  Time duration = now - m_lastUpdateTime;  
+  Time duration = now - m_lastUpdateTime;
   NS_ASSERT (duration.GetSeconds () >= 0);
-  
+
   // update the supply voltage
-  m_currentVoltage = GetCapacitorModelVoltage(totalCurrentA, duration.GetSeconds ());
+  m_currentVoltage = GetCapacitorModelVoltage(-totalCurrentA, duration.GetSeconds ());
   m_remainingEnergyJ = GetCapacitorEnergy(m_currentVoltage);
 
-  NS_LOG_DEBUG ("GenericCapacitor:Remaining energy = " << m_remainingEnergyJ << " with V: " << m_currentVoltage << std::fixed << " at " << now.GetSeconds());
+  NS_LOG_DEBUG ("GenericCapacitor("<< GetNode ()->GetId () << "): Remaining energy: " <<
+    m_remainingEnergyJ << " J, V: " << m_currentVoltage << std::fixed <<
+    " V, at " << now.GetSeconds() << " s");
 }
 
 /**
@@ -378,7 +438,9 @@ double
 GenericCapacitor::GetVoltage (double i) const
 {
   NS_LOG_FUNCTION (this << i);
-  NS_LOG_DEBUG ("At " << std::fixed << Simulator::Now ().GetSeconds() << std::defaultfloat << " Voltage: " << m_currentVoltage << " with E: " << m_remainingEnergyJ);
+  NS_LOG_DEBUG ("GenericCapacitor(" << GetNode ()->GetId () << "): " <<
+    std::fixed << Simulator::Now ().GetSeconds() << std::defaultfloat <<
+    "s, Voltage: " << m_currentVoltage << " V, E: " << m_remainingEnergyJ << " J");
 
   return m_currentVoltage;
 }

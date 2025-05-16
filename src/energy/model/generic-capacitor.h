@@ -61,7 +61,15 @@ public:
    *
    * Implements GetSupplyVoltage.
    */
+  double GetCapacitorVoltage (void) const;
+
+  /**
+   * \returns Supply voltage at the energy source.
+   *
+   * the voltage supplied to charge the capacitor.
+   */
   virtual double GetSupplyVoltage (void) const;
+  void SetSupplyVoltage (double supplyVoltageV);
 
   /**
    * \param supplyVoltageV Initial Supply voltage at the energy source, in Volts.
@@ -153,6 +161,8 @@ private:
 
   double GetCapacitorModelVoltage(double ih, double t) const;
 
+  bool UpdateVoltageBasedOnEnergy(double energyJ);
+
 private:
   double m_capacitanceF;                  // size of the capacitor, in Farads
   double m_initialVoltage;                // initial voltage of the capacitor, in Volts
@@ -160,12 +170,13 @@ private:
   double m_maxVoltage;                    // maximum voltage of the capacitor, in Volts
   double m_minVoltTh;                     // minimum threshold voltage to consider the battery depleted
   double m_internalResistance;            // internal resistance of the capacitor, in Ohms
-  double m_leakageResistance;             // leakage resistance of the capacitor, in Ohms 
+  double m_leakageResistance;             // leakage resistance of the capacitor, in Ohms
   double m_initialEnergyJ;                // initial energy, in Joules
   TracedValue<double> m_remainingEnergyJ; // remaining energy, in Joules
   EventId m_energyUpdateEvent;            // energy update event
   Time m_lastUpdateTime;                  // last update time
   Time m_energyUpdateInterval;            // energy update interval
+  double m_supplyVoltageV;                // supply voltage, in Volts
 };
 
 } // namespace ns3
