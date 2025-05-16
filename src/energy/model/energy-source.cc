@@ -182,19 +182,18 @@ EnergySource::CalculateTotalCurrent (void)
     {
       totalCurrentA += (*i)->GetCurrentA ();
     }
-  
+  NS_LOG_DEBUG ("EnergySource("<< GetNode ()->GetId () << "): Total current consumed = " << totalCurrentA);
+
   double totalHarvestedPower = 0.0;
-  
   std::vector< Ptr<EnergyHarvester> >::const_iterator harvester;
   for (harvester = m_harvesters.begin (); harvester != m_harvesters.end (); harvester++)
   {
     totalHarvestedPower += (*harvester)->GetPower ();
-  }
-  
+  }  
   NS_LOG_DEBUG ("EnergySource("<< GetNode ()->GetId () << "): Total harvested power = " << totalHarvestedPower);
 
   double currentHarvestersA = totalHarvestedPower / GetSupplyVoltage ();
-  NS_LOG_DEBUG ("EnergySource("<< GetNode ()->GetId () << "): Current from harvesters = " << currentHarvestersA);
+  NS_LOG_DEBUG ("EnergySource("<< GetNode ()->GetId () << "): Total harvester current = " << currentHarvestersA);
   
   totalCurrentA -= currentHarvestersA;
   
