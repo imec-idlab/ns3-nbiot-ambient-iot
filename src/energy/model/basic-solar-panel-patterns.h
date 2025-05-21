@@ -14,7 +14,7 @@ struct SolarPattern {
 #define SECONDS_IN_A_DAY 86400
 
 // Declare the function signature
-std::vector<SolarPattern> generate_day(int N = 1000);
+std::vector<SolarPattern> * generate_day(int N = 1000);
 
 
 #endif // BASIC_SOLAR_PANEL_PATTERNS_H

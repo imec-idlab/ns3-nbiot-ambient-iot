@@ -86404,13 +86404,12 @@ const std::vector<SolarPattern> solar_patterns = {
     {86397, 0.0, 0.0},
     {86398, 0.0, 0.0},
     {86399, 0.0, 0.0},
-    {86400, 0.0, 0.0}
+    {86400, 0.0, 0.0}  // should never be accessed.
 };
 
 
-// BUG: i == N should return element second = 86400 in the array
-std::vector<SolarPattern> generate_day(int N) {
-    std::vector<SolarPattern> generated_data;
+std::vector<SolarPattern> * generate_day(int N) {
+    std::vector<SolarPattern> *generated_data = new std::vector<SolarPattern>;
     std::random_device rd;
     std::mt19937 gen(rd());
     int _max = solar_patterns.size();
@@ -86420,7 +86419,7 @@ std::vector<SolarPattern> generate_day(int N) {
     for (int i = 0; i < N; ++i) {
         int index = (i * _max / (N - 1)) % _max;  // get the corresponding index
         std::normal_distribution<double> dist(solar_patterns[index].mean, solar_patterns[index].std_dev);
-        generated_data.push_back({index, dist(gen), solar_patterns[index].std_dev});
+        generated_data->push_back({index, dist(gen), solar_patterns[index].std_dev});
     }
 
     return generated_data;
