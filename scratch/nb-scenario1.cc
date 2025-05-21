@@ -19,6 +19,11 @@
  * Authors: Henrique Duarte Moura <henrique.duartemoura@imec.be>
  */
 
+
+//
+// uses li-ion-energy-source
+//
+
 #include <chrono>
 #include <iomanip>
 #include <stdlib.h>
