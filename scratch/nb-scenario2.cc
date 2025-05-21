@@ -21,7 +21,7 @@
 
 //
 // uses generic-capacitor
-// 
+//
 
 #include <chrono>
 #include <iomanip>
@@ -291,7 +291,7 @@ main (int argc, char *argv[])
       //
       // -------------------------------------------------------------------
       //
-      // TODO: create a harvester that simulates solar panels
+      // TODO: create a harvester that simulates solar panels (basic-solar-energy-harvester.cc)
 
       Ptr<ns3::Node> node = ueNodes.Get(i);  // node to install
 
@@ -300,6 +300,9 @@ main (int argc, char *argv[])
       capacitor->SetEnergyUpdateInterval(MilliSeconds(10));
       ueRrc->m_energyModel.SetEnergySource(capacitor);
       capacitor->SetNode(ueNodes.Get(i));  // you MUST set the node to the capacitor
+
+      // create harverster to charge the capacitor
+      // BasicEnergyHarvester provides a random energy value in an interval (default is from 0 to 2 W)
       Ptr<ns3::BasicEnergyHarvester> harvester = CreateObject<ns3::BasicEnergyHarvester>();
       // set the distribution of the harvested energy
       // Ptr<ns3::BasicEnergyHarvester> harvester = CreateObjectWithAttributes<ns3::BasicEnergyHarvester> (
@@ -476,4 +479,3 @@ main (int argc, char *argv[])
   Simulator::Destroy ();
   return 0;
 }
-
