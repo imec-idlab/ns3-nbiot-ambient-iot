@@ -71,6 +71,11 @@ GenericCapacitor::GetTypeId (void)
                    DoubleValue (1e5),  // in Ohms
                    MakeDoubleAccessor (&GenericCapacitor::m_leakageResistance),
                    MakeDoubleChecker<double> ())
+    .AddAttribute ("LoadResistance",
+                   "Load resistance of the capacitor (in parallel)",
+                   DoubleValue (0.0),  // in Ohms
+                   MakeDoubleAccessor (&GenericCapacitor::m_loadResistance),
+                   MakeDoubleChecker<double> ())
     .AddAttribute ("GenericCapacitorInitialEnergyJ",
                    "Initial energy stored in basic energy source.",
                    DoubleValue (0.05445),  // in Joules
@@ -107,7 +112,8 @@ GenericCapacitor::GenericCapacitor ()
     m_leakageResistance (1e5),
     m_initialEnergyJ (0.05445),
     m_remainingEnergyJ (0.05445),
-    m_lastUpdateTime (Seconds (0.0))
+    m_lastUpdateTime (Seconds (0.0)),
+    m_loadResistance (0.0)
 {
   NS_LOG_FUNCTION (this);
 }
@@ -267,7 +273,8 @@ GenericCapacitor::GetCapacitorModelVoltage(double ih, double t) const
   // compute the capacitor voltage
   // if ih is positive, the capacitor is being charged
   // if ih is negative, the capacitor is being drained
-  double req = m_leakageResistance;
+  // TODO: compute the correct `req`
+  double req = m_leakageResistance + m_internalResistance + m_loadResistance;
   double tau = req * m_capacitanceF;  // TODO: obtain the correct req and update tau
   double Vc = req * ih * (1 - std::exp(-t / tau)) + m_currentVoltage * std::exp(-t / tau);
   Vc = (Vc > m_maxVoltage) ? m_maxVoltage : Vc;   // clip voltage to maximum

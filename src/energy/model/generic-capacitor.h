@@ -177,6 +177,7 @@ private:
   Time m_lastUpdateTime;                  // last update time
   Time m_energyUpdateInterval;            // energy update interval
   double m_supplyVoltageV;                // supply voltage, in Volts
+  double m_loadResistance;                // load resistance, in Ohms
 };
 
 } // namespace ns3
