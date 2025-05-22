@@ -4,7 +4,7 @@
 
 // Populate the constant vector with your CSV data
 const std::vector<SolarPattern> solar_patterns = {
-    {0, 0.0, 0.0},
+    {0, 0.0, 0.0},  // 00:00:00
     {1, 0.0, 0.0},
     {2, 0.0, 0.0},
     {3, 0.0, 0.0},
@@ -86403,21 +86403,20 @@ const std::vector<SolarPattern> solar_patterns = {
     {86396, 0.0, 0.0},
     {86397, 0.0, 0.0},
     {86398, 0.0, 0.0},
-    {86399, 0.0, 0.0},
-    {86400, 0.0, 0.0}  // should never be accessed.
+    {86399, 0.0, 0.0}   // 11:59:59
 };
 
 
-std::vector<SolarPattern> * generate_day(int N) {
+std::vector<SolarPattern> * generate_day(long N) {
     std::vector<SolarPattern> *generated_data = new std::vector<SolarPattern>;
     std::random_device rd;
     std::mt19937 gen(rd());
-    int _max = solar_patterns.size();
+    long solar_patterns_size = solar_patterns.size();
     // needs at least 2 points (first and last elements)
     // cannot sample more that the number of seconds in a day
-    N = std::min(_max, std::max(N, 2));
-    for (int i = 0; i < N; ++i) {
-        int index = (i * _max / (N - 1)) % _max;  // get the corresponding index
+    N = std::min(solar_patterns_size, std::max(N, 2L));
+    for (long i = 0; i < N; ++i) {
+        long index = (i * solar_patterns_size / (N - 1)) % solar_patterns_size;  // get the corresponding index
         std::normal_distribution<double> dist(solar_patterns[index].mean, solar_patterns[index].std_dev);
         generated_data->push_back({index, dist(gen), solar_patterns[index].std_dev});
     }
