@@ -26,6 +26,10 @@
 #include "ns3/simulator.h"
 
 #include <cmath>
+#include <fstream>
+
+#define CAPACITOR_LOG_NAME "CapacitorData.log"
+
 
 namespace ns3 {
 
@@ -267,6 +271,22 @@ GenericCapacitor::GetEnergyFraction (void)
 }
 
 
+/**
+ * \brief Computes the capacitor voltage based on the input current and time.
+ *
+ * This method calculates the voltage across the capacitor given the current
+ * flowing into or out of it (ih) and the time duration (t) over which this
+ * current flows. The method considers the leakage, internal, and load
+ * resistances to compute the equivalent resistance (req). The time constant
+ * (tau) is derived from this resistance and the capacitor's capacitance.
+ * The voltage is adjusted to ensure it does not exceed the maximum or go
+ * below zero.
+ *
+ * \param ih The current flowing into (positive) or out of (negative) the capacitor.
+ * \param t The time duration for which the current flows.
+ * \return The computed voltage across the capacitor, clipped to the valid range.
+ */
+
 double
 GenericCapacitor::GetCapacitorModelVoltage(double ih, double t) const
 {
@@ -420,6 +440,7 @@ GenericCapacitor::CalculateRemainingEnergy (void)
   NS_LOG_FUNCTION (this);
   // compute total current, i.e.,
   // all current harvest minus all current drained by the devices attached
+  // totalCurrentA is positive when energy is drained, otherwise the energy should charge the capacitor
   double totalCurrentA = CalculateTotalCurrent ();
   NS_LOG_DEBUG ("GenericCapacitor("<< GetNode ()->GetId () << "): Total current: " << totalCurrentA << " A");
 
@@ -434,6 +455,10 @@ GenericCapacitor::CalculateRemainingEnergy (void)
   NS_LOG_DEBUG ("GenericCapacitor("<< GetNode ()->GetId () << "): Remaining energy: " <<
     m_remainingEnergyJ << " J, V: " << m_currentVoltage << std::fixed <<
     " V, at " << now.GetSeconds() << " s");
+
+  std::ostringstream msg;
+  msg << totalCurrentA << "," << m_currentVoltage << "," << m_remainingEnergyJ;
+  LogData(msg.str());
 }
 
 /**
@@ -450,6 +475,36 @@ GenericCapacitor::GetVoltage (double i) const
     "s, Voltage: " << m_currentVoltage << " V, E: " << m_remainingEnergyJ << " J");
 
   return m_currentVoltage;
+}
+
+void
+GenericCapacitor::SetLogDir(std::string logdir){
+  m_logdir = logdir;
+}
+
+
+/**
+ * Log energy data to a file.
+ *
+ * The log file is opened in append mode.
+ * The log entry is of the form "nodeid,logmsg,timestamp".
+ * The logmsg (see CalculateRemainingEnergy) is a comma-separated list of values:
+ * - total Current (in A)
+ * - current Voltage (in V)
+ * - remaining Energy (in J)
+ * The timestamp is in milliseconds since the start of simulation.
+ *
+ * \param logmsg a string containing the log message
+ */
+void
+GenericCapacitor::LogData(std::string logmsg){
+  std::string logfile_path = m_logdir+CAPACITOR_LOG_NAME;
+  std::ofstream logfile;
+  logfile.open(logfile_path, std::ios_base::app);
+  logfile << GetNode ()->GetId () << "," <<
+    logmsg <<  "," <<
+    Simulator::Now().GetMilliSeconds() << "\n";
+  logfile.close();
 }
 
 } // namespace ns3
