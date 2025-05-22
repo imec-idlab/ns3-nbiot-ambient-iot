@@ -51,9 +51,9 @@ BasicSolarEnergyHarvester::GetTypeId (void)
                  MakeTimeChecker ())
   .AddAttribute ("StartSecondOfDay",
                   "Initial second of the day of the simulation.",
-                  IntegerValue (0),
-                  MakeIntegerAccessor (&BasicSolarEnergyHarvester::m_startSecondOfDay),
-                  MakeIntegerChecker<long> ())
+                  UintegerValue (0),  // 12am
+                  MakeUintegerAccessor (&BasicSolarEnergyHarvester::m_startSecondOfDay),
+                  MakeUintegerChecker<uint32_t> ())
   .AddTraceSource ("HarvestedPower",
                    "Harvested power by the BasicSolarEnergyHarvester.",
                    MakeTraceSourceAccessor (&BasicSolarEnergyHarvester::m_harvestedPower),
@@ -131,7 +131,7 @@ BasicSolarEnergyHarvester::UpdateHarvestedPower (void)
 
   m_energyHarvestingUpdateEvent.Cancel ();
 
-  CalculateHarvestedPower ();
+  CalculateHarvestedPower ();  // make sure m_lastHarvestingUpdateTime is updated only after CalculateHarvestedPower
 
   energyHarvested = duration.GetSeconds () * m_harvestedPower;
 
@@ -170,23 +170,30 @@ BasicSolarEnergyHarvester::CalculateHarvestedPower (void)
 {
   NS_LOG_FUNCTION (this);
 
-  // TODO: obtain the energy harvested in the interval
+  // TODO: to be generic, this method should handle fraction of seconds
+
+  // obtain the energy harvested in the interval
   // need to loop on the harvested power in `m_daily_harvested` based on last update:
   //    (a) number of seconds in the day of last update
   //    (b) if interval is more than one day, get those intermediate days, obtain the total harvesting energy for each day updating `m_daily_harvested`
   //    (c) get `m_daily_harvested` for this last day, calculate the number of seconds in the last day of the interval, sum the energy harvested in the interval
   //    Usually, (b) will be zero.
-  // 2. calculate how many seconds in the day
   //
   m_harvestedPower = 0;
   Time now = Simulator::Now ();
 
-  long sec_1 = std::lround(m_lastHarvestingUpdateTime.GetSeconds ()) % SECONDS_IN_A_DAY;
-  long sec_2 = std::lround(now.GetSeconds ()) % SECONDS_IN_A_DAY;
 
-  long ndays = std::lround(now.GetSeconds ()) / SECONDS_IN_A_DAY -
-    std::lround(m_lastHarvestingUpdateTime.GetSeconds ()) / SECONDS_IN_A_DAY;
+  // m_startSecondOfDay shifts the start of the simulation a certain initial second
+  long sec_1 = std::lround(m_lastHarvestingUpdateTime.GetSeconds () + m_startSecondOfDay) % SECONDS_IN_A_DAY;
+  long sec_2 = std::lround(now.GetSeconds () + m_startSecondOfDay) % SECONDS_IN_A_DAY;
 
+  long ndays = std::lround(now.GetSeconds () + m_startSecondOfDay) / SECONDS_IN_A_DAY -
+  std::lround(m_lastHarvestingUpdateTime.GetSeconds ()) / SECONDS_IN_A_DAY;
+
+  std::cout << "Enter CalculateHarvestedPower @ " << now.GetSeconds ()
+    << " last update: " << m_lastHarvestingUpdateTime.GetSeconds ()
+    << " sec_1: " << sec_1 << " sec_2: " << sec_2 << " ndays: " << ndays
+    << std::endl;
 
   if (ndays == 0)
   {
