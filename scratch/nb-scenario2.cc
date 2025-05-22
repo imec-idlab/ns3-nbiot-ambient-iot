@@ -328,8 +328,12 @@ main (int argc, char *argv[])
       //   // "HarvestablePower", StringValue("ns3::ConstantRandomVariable[Constant=1.0]")
       //   "HarvestablePower", StringValue("ns3::UniformRandomVariable[Min=1.0|Max=2.0]")
       // );
-      harvester->SetAttribute("HarvestablePower", StringValue("ns3::ConstantRandomVariable[Constant=0.0]"));
-      // harvester->SetAttribute("HarvestablePower", StringValue("ns3::UniformRandomVariable[Min=1.0|Max=0.000001]"));
+      // harvester->SetAttribute("HarvestablePower", StringValue("ns3::ConstantRandomVariable[Constant=0.0]"));
+
+      // TODO: need to check if the capacitor is charging correctly
+      // TODO: create logging to file of capacitor data
+
+      harvester->SetAttribute("HarvestablePower", StringValue("ns3::UniformRandomVariable[Min=0.0|Max=0.0001]"));
       harvester->SetHarvestedPowerUpdateInterval (MilliSeconds (10));
       capacitor->ConnectEnergyHarvester(harvester);
       harvester->SetNode(node);
