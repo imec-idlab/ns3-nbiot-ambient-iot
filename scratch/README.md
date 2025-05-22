@@ -30,5 +30,9 @@ Current it uses `BasicEnergyHarvester`, which is a random harvester generator.
 
 ```bash
 cd ns3-nbiot
-./waf --run nb-scenario2.cc
+./waf --run "nb-scenario2 \
+    --harvesterType=0 \
+    --ns3::BasicEnergyHarvester::PeriodicHarvestedPowerUpdateInterval=1ms"
 ```
+
+The command above selects the BasicEnergyHarvester (type 0) and assigns its update interval to 1 ms.
