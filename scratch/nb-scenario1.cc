@@ -1,6 +1,6 @@
 /* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
- * Copyright (c) 2011-2018 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC), 
+ * Copyright (c) 2011-2018 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC),
  * Copyright (c) 2022 Communication Networks Institute at TU Dortmund University
  *
  * This program is free software; you can redistribute it and/or modify
@@ -23,11 +23,15 @@
 //
 // uses li-ion-energy-source
 //
+// This code simulates a simple IoT scenario with NB-IoT devices connected to
+// a base station. The devices are equipped with a Li-ion energy source and
+// transmit packets according to a Poisson distribution. The code measures the
+// energy consumption of the devices and the packet loss ratio.
 
 #include <chrono>
 #include <iomanip>
 #include <stdlib.h>
-#include <ctime>    
+#include <ctime>
 #include <fstream>
 
 #include "ns3/core-module.h"
@@ -64,20 +68,20 @@ main (int argc, char *argv[])
   ns3::LogComponentEnable("LenaNb5G", LOG_LEVEL_INFO);
   ns3::LogComponentDisable("LenaNb5G", LOG_LEVEL_DEBUG);
   // ns3::LogComponentEnable("LteUeRrc", LOG_LEVEL_INFO);
-  
+
   ns3::Time simTime = Minutes(6);
 
   uint8_t worker = 0;
   int seed = 1;
   std::string simName = "test";
   double cellsize = 2500; // in meters
-  
+
   // Number of UEs per application
   int num_ues = 1;  // For now, 1 UE talks to a remote host via one eNB
 
-  // 32 Bytes 5G mMTC payload + 4 Bytes CoAP Header + 13 Bytes DTLS Header 
+  // 32 Bytes 5G mMTC payload + 4 Bytes CoAP Header + 13 Bytes DTLS Header
   // UDP Header and IP Header  are added by NS-3
-  int packetsize_app_a = 49; 
+  int packetsize_app_a = 49;
 
   // Packet interval
   Time packetinterval_app_a = Days(1);
@@ -130,7 +134,7 @@ main (int argc, char *argv[])
   p2ph.SetDeviceAttribute ("Mtu", UintegerValue (1500));
   p2ph.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (10)));
   // place the PGW and the remote host on the same network
-  NetDeviceContainer internetDevices = p2ph.Install (pgw, remoteHost);    
+  NetDeviceContainer internetDevices = p2ph.Install (pgw, remoteHost);
   Ipv4AddressHelper ipv4h;
   ipv4h.SetBase ("1.0.0.0", "255.0.0.0");
   Ipv4InterfaceContainer internetIpIfaces = ipv4h.Assign (internetDevices);
@@ -154,7 +158,7 @@ main (int argc, char *argv[])
   // Install Mobility Model
   Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();
   // Place our single eNb right in the center of the cell
-  positionAlloc->Add (Vector (cellsize/2, cellsize/2, 25)); 
+  positionAlloc->Add (Vector (cellsize/2, cellsize/2, 25));
   // Install Mobility Model. Fix eNB at the center
   MobilityHelper mobilityEnb;
   mobilityEnb.SetMobilityModel("ns3::ConstantPositionMobilityModel");
@@ -166,15 +170,15 @@ main (int argc, char *argv[])
   --------------- create UEs
 
 
-  For all scenarios, 3*X minutes of simulation time are simulated, 
+  For all scenarios, 3*X minutes of simulation time are simulated,
   but only the intermediate X minutes are evaluated.
-  The first X minutes produce no significant results since devices at the beginning 
-  are scheduled in an empty cell and experience very good transmission conditions. 
-  After X minutes, new devices will find ongoing transmissions of previous devices, 
-  which enables a more realistic situation and produces significant results. 
-  Since devices that have started transmissions within the intermediate X minutes 
-  of the simulation may not complete their transmissions in this intermediate time slot, 
-  additional X minutes are simulated with more new transmissions to keep the channels busy 
+  The first X minutes produce no significant results since devices at the beginning
+  are scheduled in an empty cell and experience very good transmission conditions.
+  After X minutes, new devices will find ongoing transmissions of previous devices,
+  which enables a more realistic situation and produces significant results.
+  Since devices that have started transmissions within the intermediate X minutes
+  of the simulation may not complete their transmissions in this intermediate time slot,
+  additional X minutes are simulated with more new transmissions to keep the channels busy
   and let the intermediate devices complete their transmissions.
   */
   NodeContainer ueNodes;
@@ -228,8 +232,8 @@ main (int argc, char *argv[])
   uint16_t ulPort = 2000;
   ApplicationContainer clientApps;
   ApplicationContainer serverApps;
-  
-  
+
+
   // Set up the data transmission for the Pre-Run
   for (uint16_t i = 0; i < num_ues; i++)
     {
@@ -326,7 +330,7 @@ main (int argc, char *argv[])
         clientApps.Get(i)->SetStartTime (MilliSeconds (access));
       }
     }
-  
+
 
 
   // Set up the data transmission for the Post-Run
@@ -375,11 +379,11 @@ main (int argc, char *argv[])
   /* **********************************
    * Start the simulation
    */
-  auto start = std::chrono::system_clock::now(); 
+  auto start = std::chrono::system_clock::now();
   std::time_t start_time = std::chrono::system_clock::to_time_t(start);
   std::cout << "Started computation at " << std::ctime(&start_time);
 
-  // create the log directory structure 
+  // create the log directory structure
   std::string logdir = "logs/";
   std::string makedir = "mkdir -p ";
   std::string techdir = makedir;
@@ -401,7 +405,7 @@ main (int argc, char *argv[])
   logdir += "_" + std::to_string(ciot);
   logdir += "_" + std::to_string(edt);
   // create the directory
-  techdir = makedir + logdir; 
+  techdir = makedir + logdir;
   z = std::system(techdir.c_str());  // mkdir
   NS_LOG_DEBUG("cmd: " << techdir <<" : " << z);
 
@@ -410,13 +414,13 @@ main (int argc, char *argv[])
   std::stringstream ss;
   ss << std::put_time(&tm, "%d_%m_%Y_%H_%M_%S");
   logdir += "/" + ss.str();
-  techdir = makedir + logdir; 
+  techdir = makedir + logdir;
   z = std::system(techdir.c_str());  // mkdir
   NS_LOG_DEBUG("cmd: " << techdir <<" : " << z);
-  
+
   // define path + initial part of the the log filenames used
   logdir += "/" + std::to_string(worker);
-  logdir += "_" + std::to_string(seed) + "_";  
+  logdir += "_" + std::to_string(seed) + "_";
 
   for (uint16_t i = 0; i < ueNodes.GetN(); i++)
   {
@@ -432,7 +436,7 @@ main (int argc, char *argv[])
   Ptr<LteEnbRrc> enbRrc = enbLteDevice->GetRrc();
   enbRrc->SetLogDir(logdir);
   lteHelper->SetLogDir(logdir);
-  
+
   std::cout << "Number of UEs: " << ueNodes.GetN() / 3 << " at each stage" << std::endl;
 
   //lteHelper->EnableTraces ();

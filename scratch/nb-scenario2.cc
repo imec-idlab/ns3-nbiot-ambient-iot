@@ -19,9 +19,25 @@
  * Authors: Henrique Duarte Moura <henrique.duartemoura@imec.be>
  */
 
-//
-// uses generic-capacitor
-//
+/**
+ This code is a sample simulation script for LTE+EPC.
+ It initializes the logging system for different components such as "LenaNb5G-Cap" and "GenericCapacitor".
+ The main function sets up a simulation environment with specific parameters:
+ - simTime: Duration of the simulation, set to 3 seconds.
+ - worker: A flag for selecting a specific worker, initialized to 0.
+ - seed: The seed for random number generation, initialized to 1.
+ - simName: The name of the simulation, set to "cap".
+ - cellsize: The size of the cell in meters, set to 2500 meters.
+ - num_ues: Number of User Equipments (UEs) per application, set to 1.
+ - packetsize_app_a: The packet size for Application A, set to 49 bytes (32 bytes payload + headers).
+ - packetinterval_app_a: The interval between packets for Application A, set to 1 day.
+ The script intends to create a network setup with eNodeBs (base stations) and UEs (user devices),
+ establishing communication flows between the UEs and a remote host.
+
+ It uses a generic-capacitor as power source.
+
+
+ */
 
 #include <chrono>
 #include <iomanip>
@@ -61,6 +77,9 @@ NS_LOG_COMPONENT_DEFINE ("LenaNb5G-Cap");
 int
 main (int argc, char *argv[])
 {
+
+  // TODO: expand the parser to read more configuration parameters from the command line and make this code more general
+
   ns3::LogComponentEnable("LenaNb5G-Cap", LOG_LEVEL_INFO);
   ns3::LogComponentDisable("LenaNb5G-Cap", LOG_LEVEL_DEBUG);
   // ns3::LogComponentEnable("LteUeRrc", LOG_LEVEL_INFO);
@@ -68,8 +87,8 @@ main (int argc, char *argv[])
   ns3::LogComponentEnable("EnergySource", LOG_LEVEL_INFO);
   ns3::LogComponentDisable("EnergySource", LOG_LEVEL_DEBUG);
 
-  // ns3::Time simTime = Minutes(6);
-  ns3::Time simTime = Seconds(3);
+  ns3::Time simTime = Minutes(6);
+  // ns3::Time simTime = Seconds(3);
 
   uint8_t worker = 0;
   int seed = 1;
