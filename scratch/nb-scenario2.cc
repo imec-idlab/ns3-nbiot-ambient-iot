@@ -58,6 +58,7 @@
 #include "ns3/log.h"
 #include "ns3/nb-iot-energy.h"
 #include "ns3/basic-energy-harvester.h"
+#include "ns3/basic-solar-energy-harvester.h"
 #include "ns3/generic-capacitor.h"
 
 using namespace ns3;
@@ -72,6 +73,11 @@ using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE ("LenaNb5G-Cap");
 
+
+enum class HarvestType {
+  BasicHarvester,
+  SolarPanel
+};
 
 
 int
@@ -88,12 +94,14 @@ main (int argc, char *argv[])
   ns3::LogComponentDisable("EnergySource", LOG_LEVEL_DEBUG);
 
   ns3::Time simTime = Minutes(6);
-  // ns3::Time simTime = Seconds(3);
 
   uint8_t worker = 0;
   int seed = 1;
   std::string simName = "cap";
   double cellsize = 2500; // in meters
+
+  // HarvestType harvestType = HarvestType::SolarPanel;
+  HarvestType harvestType = HarvestType::BasicHarvester;
 
   // Number of UEs per application
   int num_ues = 1;  // For now, 1 UE talks to a remote host via one eNB
@@ -107,6 +115,7 @@ main (int argc, char *argv[])
 
   bool ciot = false;
   bool edt = false;
+  int htype = (harvestType == HarvestType::BasicHarvester) ? 0 : 1;
   // Command line arguments
   CommandLine cmd (__FILE__);
   cmd.AddValue ("simTime", "Total duration of the simulation", simTime);
@@ -116,11 +125,17 @@ main (int argc, char *argv[])
   cmd.AddValue ("numUeAppA", "Number of UEs",num_ues);
   cmd.AddValue ("ciot", "Cellular IoT Optimization",ciot);
   cmd.AddValue ("edt", "Early Data Transmission",edt);
+  cmd.AddValue ("harvesterType", "Use 1 for SolarPanel. Default is BasicHarvester",htype);
   cmd.Parse (argc, argv);
   ConfigStore inputConfig;
   inputConfig.ConfigureDefaults ();
 
   // parse again so you can override default values from the command line
+
+  harvestType = (htype == 0) ? HarvestType::BasicHarvester : HarvestType::SolarPanel;
+  std::cout << "Harvester type: " <<
+    ((harvestType == HarvestType::BasicHarvester) ? "BasicHarvester" : "SolarPanel") <<
+    std::endl;
 
   // configure LTE
   Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
@@ -367,21 +382,42 @@ main (int argc, char *argv[])
       capacitor->SetNode(ueNodes.Get(i));  // you MUST set the node to the capacitor
       capacitor->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
 
-      // create harverster to charge the capacitor
-      // BasicEnergyHarvester provides a random energy value in an interval (default is from 0 to 2 W)
-      Ptr<ns3::BasicEnergyHarvester> harvester = CreateObject<ns3::BasicEnergyHarvester>();
-      // set the distribution of the harvested energy
-      // Ptr<ns3::BasicEnergyHarvester> harvester = CreateObjectWithAttributes<ns3::BasicEnergyHarvester> (
-      //   // "HarvestablePower", StringValue("ns3::ConstantRandomVariable[Constant=1.0]")
-      //   "HarvestablePower", StringValue("ns3::UniformRandomVariable[Min=1.0|Max=2.0]")
-      // );
-      // harvester->SetAttribute("HarvestablePower", StringValue("ns3::ConstantRandomVariable[Constant=0.0]"));
 
       // TODO: need to check if the capacitor is charging correctly
       // TODO: create logging to file of capacitor data
 
-      harvester->SetAttribute("HarvestablePower", StringValue("ns3::UniformRandomVariable[Min=0.0|Max=0.0001]"));
-      harvester->SetHarvestedPowerUpdateInterval (MilliSeconds (10));
+      // create harverster to charge the capacitor
+      Ptr<ns3::EnergyHarvester> harvester;
+      if (harvestType == HarvestType::BasicHarvester)
+      {
+        // BasicEnergyHarvester provides a random energy value in an interval (default is from 0 to 2 W)
+        harvester = CreateObject<ns3::BasicEnergyHarvester>();
+        // set the distribution of the harvested energy
+        // Ptr<ns3::BasicEnergyHarvester> harvester = CreateObjectWithAttributes<ns3::BasicEnergyHarvester> (
+        //   // "HarvestablePower", StringValue("ns3::ConstantRandomVariable[Constant=1.0]")
+        //   "HarvestablePower", StringValue("ns3::UniformRandomVariable[Min=1.0|Max=2.0]")
+        // );
+        // harvester->SetAttribute("HarvestablePower", StringValue("ns3::ConstantRandomVariable[Constant=0.0]"));
+
+        harvester->SetAttribute("HarvestablePower", StringValue("ns3::UniformRandomVariable[Min=0.0|Max=0.0001]"));
+        harvester->SetAttribute("PeriodicHarvestedPowerUpdateInterval", ns3::TimeValue(MilliSeconds(10.0)));
+      }
+      else
+      {
+        std::cout << "Using BasicSolarEnergyHarvester" << std::endl;
+        harvester = CreateObject<ns3::BasicSolarEnergyHarvester>();
+        harvester->SetAttribute("PeriodicHarvestedPowerUpdateInterval", ns3::TimeValue(Seconds(1.0))); // don´t change for now. BasicSolarEnergyHarvester cannot handle shorter interval
+
+        // trick to set the start of the day
+        Ptr<BasicSolarEnergyHarvester> solarHarvester = DynamicCast<BasicSolarEnergyHarvester>(harvester);
+        solarHarvester->SetAttribute("StartSecondOfDay", UintegerValue(8 * 3600));  // 8am
+
+        // confirm update
+        UintegerValue value;
+        solarHarvester->GetAttribute("StartSecondOfDay", value);
+        std::cout << "StartSecondOfDay: " << value.Get() << std::endl;
+      }
+      std::cout << "object created" << std::endl;
       capacitor->ConnectEnergyHarvester(harvester);
       harvester->SetNode(node);
       harvester->SetEnergySource(capacitor);
