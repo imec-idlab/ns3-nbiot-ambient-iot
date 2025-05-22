@@ -126,7 +126,7 @@ private:
   EventId m_energyHarvestingUpdateEvent;        // energy harvesting event
   Time m_lastHarvestingUpdateTime;              // last harvesting time
   Time m_harvestedPowerUpdateInterval;          // harvestable energy update interval
-  long m_startSecondOfDay;                      // start second of the day
+  uint32_t m_startSecondOfDay;                      // start second of the day
 };
 
 } // namespace ns3
