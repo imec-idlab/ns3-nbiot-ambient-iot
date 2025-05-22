@@ -12,6 +12,11 @@ This code simulates a simple IoT scenario with NB-IoT devices (default is one. s
 The devices transmit packets according to a Poisson distribution.
 The code measures the energy consumption of the devices and the packet loss ratio.
 
+```bash
+cd ns3-nbiot
+./waf --run nb-scenario1.cc
+```
+
 
 # [nb-scenario2.cc](nb-scenario2.cc)
 
@@ -22,3 +27,8 @@ The capacitor is charged by a harvester.
 Current it uses `BasicEnergyHarvester`, which is a random harvester generator.
 
 > TODO: implement a solar panel harvester.
+
+```bash
+cd ns3-nbiot
+./waf --run nb-scenario2.cc
+```
