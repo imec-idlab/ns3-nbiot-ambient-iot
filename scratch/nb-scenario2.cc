@@ -252,6 +252,52 @@ main (int argc, char *argv[])
   ApplicationContainer clientApps;
   ApplicationContainer serverApps;
 
+  // --------------------------------------------------------------
+  //
+  // define log directory used by NS3 modules
+  //
+  // --------------------------------------------------------------
+  auto start = std::chrono::system_clock::now();
+  std::time_t start_time = std::chrono::system_clock::to_time_t(start);
+
+  // create the log directory structure
+  std::string logdir = "logs/";
+  std::string makedir = "mkdir -p ";
+  std::string techdir = makedir;
+
+  // create logdir
+  techdir += logdir;
+  int z = std::system(techdir.c_str());  // mkdir
+  NS_LOG(LOG_DEBUG, "cmd: " << techdir << " :" << z);
+
+  // create logdir / simName
+  techdir += "/" + simName + "/";
+  z = std::system(techdir.c_str());  // mkdir
+  NS_LOG_DEBUG("cmd: " << techdir <<" : " << z);
+
+  // logdir / simName / num_ues _ simTime _ ciot _ edt
+  logdir += simName;
+  logdir += "/" + std::to_string(ueNodes.GetN());
+  logdir += "_" + std::to_string(simTime.GetInteger());
+  logdir += "_" + std::to_string(ciot);
+  logdir += "_" + std::to_string(edt);
+  // create the directory
+  techdir = makedir + logdir;
+  z = std::system(techdir.c_str());  // mkdir
+  NS_LOG_DEBUG("cmd: " << techdir <<" : " << z);
+
+  // create folder with date
+  auto tm = *std::localtime(&start_time);
+  std::stringstream ss;
+  ss << std::put_time(&tm, "%d_%m_%Y_%H_%M_%S");
+  logdir += "/" + ss.str();
+  techdir = makedir + logdir;
+  z = std::system(techdir.c_str());  // mkdir
+  NS_LOG_DEBUG("cmd: " << techdir <<" : " << z);
+
+  // define path + initial part of the the log filenames used
+  logdir += "/" + std::to_string(worker);
+  logdir += "_" + std::to_string(seed) + "_";
 
   // Set up the data transmission for the Pre-Run
   for (uint16_t i = 0; i < num_ues; i++)
@@ -319,6 +365,7 @@ main (int argc, char *argv[])
       capacitor->SetEnergyUpdateInterval(MilliSeconds(10));
       ueRrc->m_energyModel.SetEnergySource(capacitor);
       capacitor->SetNode(ueNodes.Get(i));  // you MUST set the node to the capacitor
+      capacitor->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
 
       // create harverster to charge the capacitor
       // BasicEnergyHarvester provides a random energy value in an interval (default is from 0 to 2 W)
@@ -427,48 +474,7 @@ main (int argc, char *argv[])
   /* **********************************
    * Start the simulation
    */
-  auto start = std::chrono::system_clock::now();
-  std::time_t start_time = std::chrono::system_clock::to_time_t(start);
   std::cout << "Started computation at " << std::ctime(&start_time);
-
-  // create the log directory structure
-  std::string logdir = "logs/";
-  std::string makedir = "mkdir -p ";
-  std::string techdir = makedir;
-
-  // create logdir
-  techdir += logdir;
-  int z = std::system(techdir.c_str());  // mkdir
-  NS_LOG(LOG_DEBUG, "cmd: " << techdir << " :" << z);
-
-  // create logdir / simName
-  techdir += "/" + simName + "/";
-  z = std::system(techdir.c_str());  // mkdir
-  NS_LOG_DEBUG("cmd: " << techdir <<" : " << z);
-
-  // logdir / simName / num_ues _ simTime _ ciot _ edt
-  logdir += simName;
-  logdir += "/" + std::to_string(ueNodes.GetN());
-  logdir += "_" + std::to_string(simTime.GetInteger());
-  logdir += "_" + std::to_string(ciot);
-  logdir += "_" + std::to_string(edt);
-  // create the directory
-  techdir = makedir + logdir;
-  z = std::system(techdir.c_str());  // mkdir
-  NS_LOG_DEBUG("cmd: " << techdir <<" : " << z);
-
-  // create folder with date
-  auto tm = *std::localtime(&start_time);
-  std::stringstream ss;
-  ss << std::put_time(&tm, "%d_%m_%Y_%H_%M_%S");
-  logdir += "/" + ss.str();
-  techdir = makedir + logdir;
-  z = std::system(techdir.c_str());  // mkdir
-  NS_LOG_DEBUG("cmd: " << techdir <<" : " << z);
-
-  // define path + initial part of the the log filenames used
-  logdir += "/" + std::to_string(worker);
-  logdir += "_" + std::to_string(seed) + "_";
 
   for (uint16_t i = 0; i < ueNodes.GetN(); i++)
   {
