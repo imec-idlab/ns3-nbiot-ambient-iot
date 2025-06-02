@@ -258,6 +258,9 @@ main (int argc, char *argv[])
       Ptr<Ipv4StaticRouting> ueStaticRouting = ipv4RoutingHelper.GetStaticRouting (ueNode->GetObject<Ipv4> ());
       ueStaticRouting->SetDefaultRoute (epcHelper->GetUeDefaultGatewayAddress (), 1);
     }
+
+
+  // random seed is set manually here for repetition
   RngSeedManager::SetSeed (seed);
   Ptr<UniformRandomVariable> RaUeUniformVariable = CreateObject<UniformRandomVariable> ();
 
@@ -379,7 +382,7 @@ main (int argc, char *argv[])
       capacitor->SetInitialVoltage(3.3);
       capacitor->SetEnergyUpdateInterval(MilliSeconds(10));
       ueRrc->m_energyModel.SetEnergySource(capacitor);
-      capacitor->SetNode(ueNodes.Get(i));  // you MUST set the node to the capacitor
+      capacitor->SetNode(node);  // you MUST set the node to the capacitor
       capacitor->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
 
 
