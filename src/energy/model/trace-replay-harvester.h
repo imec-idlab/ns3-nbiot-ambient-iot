@@ -118,7 +118,9 @@ private:
   Time m_lastHarvestingUpdateTime;              // last harvesting time
   Time m_harvestedPowerUpdateInterval;          // harvestable energy update interval
 
-  DataVector data = {};
+  long m_offset = 0;  // offset of the data. allows you to play the data from a specific point in time
+
+  DataVector m_data = {};
   // read the csv file
   bool readCsvData(int col_num);
 

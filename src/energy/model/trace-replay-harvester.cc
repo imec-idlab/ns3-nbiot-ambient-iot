@@ -86,18 +86,18 @@ TraceReplayHarvester::~TraceReplayHarvester ()
 
 bool
 TraceReplayHarvester::readCsvData(int col_num){
+  // Helper vars
+  std::string line, colname;
+  double val;
+
   // Create an input filestream
-    std::ifstream csvFile(csv_filename);
+  std::ifstream csvFile(csv_filename);
+  // Make sure the file is open
+  if(!csvFile.is_open()) throw std::runtime_error("Could not open file");
 
-    // Reads a CSV file into a vector of <double>
-    data.clear();  // be sure to start with an empty vector
+  // Reads a CSV file into a vector of <double>
+  m_data.clear();  // be sure to start with an empty vector
 
-    // Make sure the file is open
-    if(!csvFile.is_open()) throw std::runtime_error("Could not open file");
-
-    // Helper vars
-    std::string line, colname;
-    double val;
 
     // Read data, line by line
     while(std::getline(csvFile, line))
@@ -113,7 +113,7 @@ TraceReplayHarvester::readCsvData(int col_num){
 
             if (col_num == colIdx) {
                 // Add the current integer to the 'colIdx' column's values vector
-                data.push_back(val);
+                m_data.push_back(val);
                 break;  // don't need to read the rest of the columns
             }
 
@@ -127,6 +127,7 @@ TraceReplayHarvester::readCsvData(int col_num){
 
     // Close file
     csvFile.close();
+    NS_LOG_INFO("Read " << m_data.size() << " values from " << csv_filename << std::endl);
     return true;
 }
 
@@ -136,7 +137,7 @@ void
 TraceReplayHarvester::SetHarvestedPowerUpdateInterval (Time updateInterval)
 {
   NS_LOG_FUNCTION (this << updateInterval);
-  std::cout << "Keep update interval to " << m_harvestedPowerUpdateInterval << std::endl;
+  std::cout << "Cannot change! Keep update interval to " << m_harvestedPowerUpdateInterval << std::endl;
 }
 
 Time
@@ -211,12 +212,19 @@ TraceReplayHarvester::CalculateHarvestedPower (void)
 {
   NS_LOG_FUNCTION (this);
 
-  std::cout << m_lastHarvestingUpdateTime << std::endl;
   Time now = Simulator::Now ();
 
   // calculate the harvested power between m_lastHarvestingUpdateTime and now
 
-  m_harvestedPower = 0;  // TODO: get the data from the vector
+  m_harvestedPower = 0;
+  long i1 = (static_cast<long>(m_lastHarvestingUpdateTime.GetSeconds() / m_harvestedPowerUpdateInterval.GetSeconds()) + m_offset) % m_data.size();
+  long i2 = (static_cast<long>(now.GetSeconds() / m_harvestedPowerUpdateInterval.GetSeconds()) + m_offset) % m_data.size();
+
+  for(long i = i1; i < i2; i++) {
+    m_harvestedPower += m_data[i];
+  }
+
+  std::cout << "m_harvestedPowerUpdateInterval: " << m_harvestedPowerUpdateInterval << " m_lastHarvestingUpdateTime: " << i1 << " Now: " << i2 << std::endl;
 
   NS_LOG_DEBUG (Simulator::Now ().GetSeconds ()
                 << "s TraceReplayHarvester:Harvested energy = " << m_harvestedPower);

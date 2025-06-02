@@ -35,6 +35,7 @@
  establishing communication flows between the UEs and a remote host.
 
  It uses a generic-capacitor as power source.
+ The harvested energy is read from a CSV file.
 
 
  */
@@ -83,15 +84,13 @@ int
 main (int argc, char *argv[])
 {
 
-  // TODO: expand the parser to read more configuration parameters from the command line and make this code more general
-
   ns3::LogComponentEnable("LenaNb5G-Cap", LOG_LEVEL_INFO);
   ns3::LogComponentDisable("LenaNb5G-Cap", LOG_LEVEL_DEBUG);
   ns3::LogComponentEnable("GenericCapacitor", LOG_LEVEL_INFO);
   ns3::LogComponentEnable("EnergySource", LOG_LEVEL_INFO);
   ns3::LogComponentDisable("EnergySource", LOG_LEVEL_DEBUG);
 
-  ns3::Time simTime = Seconds(6);
+  ns3::Time simTime = Seconds(1);
 
   uint8_t worker = 0;
   int seed = 1;
@@ -165,11 +164,8 @@ main (int argc, char *argv[])
   // interface 0 is localhost, 1 is the p2p device
   Ipv4Address remoteHostAddr = internetIpIfaces.GetAddress (1);
   std::cout << "Remote host address: " << remoteHostAddr << std::endl;
-  std::cout << "PGW address: " << std::endl;
-  for(uint32_t i = 0; i < pgw->GetObject<Ipv4>()->GetNInterfaces(); i++)
-  {
-    std::cout << " * Interface #" << i << ": " << pgw->GetObject<Ipv4>()->GetAddress(i, 0).GetLocal() << std::endl;
-  }
+  // interface 0 is localhost, 1 is the p2p device, 3 is internet
+  std::cout << "PGW address: " << pgw->GetObject<Ipv4>()->GetAddress(3, 0).GetLocal() << std::endl;
 
   Ipv4StaticRoutingHelper ipv4RoutingHelper;
   Ptr<Ipv4StaticRouting> remoteHostStaticRouting = ipv4RoutingHelper.GetStaticRouting (remoteHost->GetObject<Ipv4> ());
@@ -205,23 +201,21 @@ main (int argc, char *argv[])
   and let the intermediate devices complete their transmissions.
   */
   NodeContainer ueNodes;
-  ueNodes.Create (num_ues*3); // Pre-Run, Run, Post-Run.
+  ueNodes.Create (num_ues);
   Ptr<ListPositionAllocator> positionAllocUe = CreateObject<ListPositionAllocator> ();
 
-  for (uint32_t j = 0; j<3; j++){ // Pre-Run, Run, Post-Run.
-    // Install Mobility Model for Application A
-    ObjectFactory pos_a;
-    pos_a.SetTypeId ("ns3::UniformDiscPositionAllocator");
-    pos_a.Set ("X", StringValue (std::to_string(cellsize/2)));
-    pos_a.Set ("Y", StringValue (std::to_string(cellsize/2)));
-    pos_a.Set ("Z", DoubleValue (1.5));
-    pos_a.Set ("rho", DoubleValue (cellsize/2));
-    Ptr<PositionAllocator> m_position = pos_a.Create ()->GetObject<PositionAllocator> ();
-    for (int i = 0; i < num_ues; ++i){
+  // Install Mobility Model for Application A
+  ObjectFactory pos_a;
+  pos_a.SetTypeId ("ns3::UniformDiscPositionAllocator");
+  pos_a.Set ("X", StringValue (std::to_string(cellsize/2)));
+  pos_a.Set ("Y", StringValue (std::to_string(cellsize/2)));
+  pos_a.Set ("Z", DoubleValue (1.5));
+  pos_a.Set ("rho", DoubleValue (cellsize/2));
+  Ptr<PositionAllocator> m_position = pos_a.Create ()->GetObject<PositionAllocator> ();
+  for (int i = 0; i < num_ues; ++i){
       Vector position = m_position->GetNext ();
       positionAllocUe->Add (position);
       NS_LOG_INFO("Node#" << i << " Position:" << position.x << "," << position.y << "," << position.z);
-    }
   }
   // Install Mobility Model
   // Nodes are static. No movement is simulated.
@@ -268,89 +262,15 @@ main (int argc, char *argv[])
 
   // create the log directory structure
   std::string logdir = "logs/harvester-csv/";
-  std::string makedir = "mkdir -p ";
-  std::string techdir = makedir;
-
-  // create logdir
-  techdir += logdir;
-  int z = std::system(techdir.c_str());  // mkdir
-  NS_LOG(LOG_DEBUG, "cmd: " << techdir << " :" << z);
-
-  // create logdir / simName
-  techdir += "/" + simName + "/";
-  z = std::system(techdir.c_str());  // mkdir
-  NS_LOG_DEBUG("cmd: " << techdir <<" : " << z);
-
-  // logdir / simName / num_ues _ simTime _ ciot _ edt
-  logdir += simName;
-  logdir += "/" + std::to_string(ueNodes.GetN());
-  logdir += "_" + std::to_string(simTime.GetInteger());
-  logdir += "_" + std::to_string(ciot);
-  logdir += "_" + std::to_string(edt);
-  // create the directory
-  techdir = makedir + logdir;
-  z = std::system(techdir.c_str());  // mkdir
-  NS_LOG_DEBUG("cmd: " << techdir <<" : " << z);
-
-  // create folder with date
-  auto tm = *std::localtime(&start_time);
-  std::stringstream ss;
-  ss << std::put_time(&tm, "%d_%m_%Y_%H_%M_%S");
-  logdir += "/" + ss.str();
-  techdir = makedir + logdir;
-  z = std::system(techdir.c_str());  // mkdir
-  NS_LOG_DEBUG("cmd: " << techdir <<" : " << z);
-
-  // define path + initial part of the the log filenames used
-  logdir += "/" + std::to_string(worker);
-  logdir += "_" + std::to_string(seed) + "_";
-
-  // Set up the data transmission for the Pre-Run
-  for (uint16_t i = 0; i < num_ues; i++)
-    {
-      int access = RaUeUniformVariable->GetInteger (50, simTime.GetMilliSeconds());
-      lteHelper->AttachSuspendedNb(ueLteDevs.Get(i), enbLteDevs.Get(0));
-
-      Ptr<LteUeNetDevice> ueLteDevice = ueLteDevs.Get(i)->GetObject<LteUeNetDevice> ();
-      Ptr<LteUeRrc> ueRrc = ueLteDevice->GetRrc();
-      if(ciot == true){
-        //std::cout << "ciot" << std::endl;
-        ueRrc->SetAttribute("CIoT-Opt", BooleanValue(true));
-      }
-      else{
-        ueRrc->SetAttribute("CIoT-Opt", BooleanValue(false));
-      }
-      if(edt == true){
-        //std::cout << "EDT" << std::endl;
-        ueRrc->SetAttribute("EDT", BooleanValue(true));
-      }
-      else{
-        ueRrc->SetAttribute("EDT", BooleanValue(false));
-      }
-
-      ++ulPort;
-      UdpEchoServerHelper server (ulPort);
-      serverApps.Add(server.Install (remoteHost));
-      //
-      // Create a UdpEchoClient application to send UDP datagrams from node zero to
-      // node one.
-      //
-      uint packetsize = packetsize_app_a;
-      UdpEchoClientHelper ulClient (remoteHostAddr, ulPort);
-      ulClient.SetAttribute ("Interval", TimeValue (packetinterval_app_a));
-      ulClient.SetAttribute ("MaxPackets", UintegerValue (1000000));
-      ulClient.SetAttribute ("PacketSize", UintegerValue(packetsize));
-      clientApps.Add (ulClient.Install (ueNodes.Get(i)));
-
-      serverApps.Get(i)->SetStartTime (MilliSeconds (access));
-      clientApps.Get(i)->SetStartTime (MilliSeconds (access));
-    }
+  std::string makedir = "mkdir -p " + logdir;
+  int z = std::system(makedir.c_str());  // mkdir
+  NS_LOG(LOG_DEBUG, "cmd: " << logdir << " status:" << z);
 
 
   // Set up the data transmission for the UEs to be considered in the results
-  for (uint16_t i = num_ues; i < num_ues*2; i++)
+  for (uint16_t i = 0; i < num_ues; i++)
     {
-      int access = RaUeUniformVariable->GetInteger (simTime.GetMilliSeconds(), 2*simTime.GetMilliSeconds());
+      int access = RaUeUniformVariable->GetInteger (0, simTime.GetMilliSeconds());
       lteHelper->AttachSuspendedNb(ueLteDevs.Get(i), enbLteDevs.Get(0));
 
       Ptr<LteUeNetDevice> ueLteDevice = ueLteDevs.Get(i)->GetObject<LteUeNetDevice> ();
@@ -374,8 +294,9 @@ main (int argc, char *argv[])
       capacitor->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
 
 
-      Ptr<TraceReplayHarvester> harvester = CreateObject<TraceReplayHarvester>();
-      std::cout << "object created" << std::endl;
+      Ptr<TraceReplayHarvester> harvester = CreateObject<TraceReplayHarvester>(
+        "scratch/combined_solar_kinetic_85_solar_eff_60_degree_angle_3.csv", MilliSeconds(10)
+      );
       capacitor->ConnectEnergyHarvester(harvester);
       harvester->SetNode(node);
       harvester->SetEnergySource(capacitor);
@@ -421,50 +342,6 @@ main (int argc, char *argv[])
     }
 
 
-
-  // Set up the data transmission for the Post-Run
-  for (uint16_t i = num_ues*2; i < num_ues*3; i++)
-  {
-    int access = RaUeUniformVariable->GetInteger (simTime.GetMilliSeconds()*2, simTime.GetMilliSeconds()*3);
-    lteHelper->AttachSuspendedNb(ueLteDevs.Get(i), enbLteDevs.Get(0));
-
-    Ptr<LteUeNetDevice> ueLteDevice = ueLteDevs.Get(i)->GetObject<LteUeNetDevice> ();
-    Ptr<LteUeRrc> ueRrc = ueLteDevice->GetRrc();
-    if(ciot == true){
-      //std::cout << "ciot" << std::endl;
-      ueRrc->SetAttribute("CIoT-Opt", BooleanValue(true));
-    }
-    else{
-      ueRrc->SetAttribute("CIoT-Opt", BooleanValue(false));
-    }
-    if(edt == true){
-      //std::cout << "EDT" << std::endl;
-      ueRrc->SetAttribute("EDT", BooleanValue(true));
-    }
-    else{
-      ueRrc->SetAttribute("EDT", BooleanValue(false));
-    }
-
-    ++ulPort;
-    UdpEchoServerHelper server (ulPort);
-    serverApps.Add(server.Install (remoteHost));
-    //
-    // Create a UdpEchoClient application to send UDP datagrams from node zero to
-    // node one.
-    //
-    if (i < num_ues*2){
-      uint packetsize = packetsize_app_a;
-      UdpEchoClientHelper ulClient (remoteHostAddr, ulPort);
-      ulClient.SetAttribute ("Interval", TimeValue (packetinterval_app_a));
-      ulClient.SetAttribute ("MaxPackets", UintegerValue (1000000));
-      ulClient.SetAttribute ("PacketSize", UintegerValue(packetsize));
-      clientApps.Add (ulClient.Install (ueNodes.Get(i)));
-
-      serverApps.Get(i)->SetStartTime (MilliSeconds (access));
-      clientApps.Get(i)->SetStartTime (MilliSeconds (access));
-    }
-  }
-
   /* **********************************
    * Start the simulation
    */
@@ -485,14 +362,8 @@ main (int argc, char *argv[])
   enbRrc->SetLogDir(logdir);
   lteHelper->SetLogDir(logdir);
 
-  std::cout << "Number of UEs: " << ueNodes.GetN() / 3 << " at each stage" << std::endl;
-
-  //lteHelper->EnableTraces ();
-  // Uncomment to enable PCAP tracing
-  //p2ph.EnablePcapAll("lena-simple-epc");
-
-  Simulator::Stop (3*simTime); // Pre-Run, Run, Post-Run
-  std::cout << "Log dir: ";
+  std::cout << "Number of UEs: " << ueNodes.GetN() << std::endl;
+  Simulator::Stop (simTime); // Pre-Run, Run, Post-Run
   Simulator::Run ();
   auto end = std::chrono::system_clock::now();
   std::chrono::duration<double> elapsed_seconds = end-start;
