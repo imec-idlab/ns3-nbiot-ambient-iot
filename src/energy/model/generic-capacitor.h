@@ -168,6 +168,9 @@ private:
 
   bool UpdateVoltageBasedOnEnergy(double energyJ);
 
+  std::string GetHeader(void) const;
+
+
 private:
   double m_capacitanceF;                  // size of the capacitor, in Farads
   double m_initialVoltage;                // initial voltage of the capacitor, in Volts

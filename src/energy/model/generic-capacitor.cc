@@ -330,7 +330,7 @@ GenericCapacitor::DecreaseRemainingEnergy (double energyJ)
   // negative energyJ means draining capacitor
   if (UpdateVoltageBasedOnEnergy(-energyJ))
   {
-    NS_LOG_DEBUG ("GenericCapacitor("<< GetNode ()->GetId () << "): DecreaseRemainingEnergy " <<
+    NS_LOG_DEBUG (GetHeader() << "DecreaseRemainingEnergy " <<
       " Remaining energy: " << m_remainingEnergyJ <<
       " J, V: " << m_currentVoltage << " V");
   }
@@ -351,7 +351,7 @@ GenericCapacitor::IncreaseRemainingEnergy (double energyJ)
   // positive energyJ means charging capacitor
   if (UpdateVoltageBasedOnEnergy(+energyJ))
   {
-    NS_LOG_DEBUG ("GenericCapacitor("<< GetNode ()->GetId () << "): IncreaseRemainingEnergy " <<
+    NS_LOG_DEBUG (GetHeader() <<  "IncreaseRemainingEnergy " <<
       " Remaining energy: " << m_remainingEnergyJ <<
       " J, V: " << m_currentVoltage << " V");
   }
@@ -375,7 +375,7 @@ void
 GenericCapacitor::UpdateEnergySource (void)
 {
   NS_LOG_FUNCTION (this);
-  NS_LOG_DEBUG ("GenericCapacitor("<< GetNode ()->GetId () << "): Updating remaining energy");
+  NS_LOG_DEBUG (GetHeader() << "Updating remaining energy");
 
   // do not update if simulation has finished
   if (Simulator::IsFinished ())
@@ -425,7 +425,7 @@ void
 GenericCapacitor::HandleEnergyDrainedEvent (void)
 {
   NS_LOG_FUNCTION (this);
-  NS_LOG_DEBUG ("GenericCapacitor("<< GetNode ()->GetId () << "): Energy depleted");
+  NS_LOG_DEBUG (GetHeader() << "Energy depleted");
   NotifyEnergyDrained (); // notify DeviceEnergyModel objects
   if (m_remainingEnergyJ <= 0)
   {
@@ -442,7 +442,7 @@ GenericCapacitor::CalculateRemainingEnergy (void)
   // all current harvest minus all current drained by the devices attached
   // totalCurrentA is positive when energy is drained, otherwise the energy should charge the capacitor
   double totalCurrentA = CalculateTotalCurrent ();
-  NS_LOG_DEBUG ("GenericCapacitor("<< GetNode ()->GetId () << "): Total current: " << totalCurrentA << " A");
+  NS_LOG_DEBUG (GetHeader() << "Total current: " << totalCurrentA << " A");
 
   Time now = Simulator::Now ();
   Time duration = now - m_lastUpdateTime;
@@ -452,7 +452,7 @@ GenericCapacitor::CalculateRemainingEnergy (void)
   m_currentVoltage = GetCapacitorModelVoltage(-totalCurrentA, duration.GetSeconds ());
   m_remainingEnergyJ = GetCapacitorEnergy(m_currentVoltage);
 
-  NS_LOG_DEBUG ("GenericCapacitor("<< GetNode ()->GetId () << "): Remaining energy: " <<
+  NS_LOG_DEBUG (GetHeader() << "Remaining energy: " <<
     m_remainingEnergyJ << " J, V: " << m_currentVoltage << std::fixed <<
     " V, at " << now.GetSeconds() << " s");
 
@@ -470,7 +470,7 @@ double
 GenericCapacitor::GetVoltage (double i) const
 {
   NS_LOG_FUNCTION (this << i);
-  NS_LOG_DEBUG ("GenericCapacitor(" << GetNode ()->GetId () << "): " <<
+  NS_LOG_DEBUG (GetHeader() <<
     std::fixed << Simulator::Now ().GetSeconds() << std::defaultfloat <<
     "s, Voltage: " << m_currentVoltage << " V, E: " << m_remainingEnergyJ << " J");
 
@@ -506,5 +506,20 @@ GenericCapacitor::LogData(std::string logmsg){
     Simulator::Now().GetMilliSeconds() << "\n";
   logfile.close();
 }
+
+/**
+ * \returns A string to be used as a prefix for output messages.
+ *
+ * This function is typically used by the logging functions to provide a
+ * context for the message being logged.
+ *
+ * \see Object::GetHeader
+ */
+std::string GenericCapacitor::GetHeader(void) const {
+  std::ostringstream msg;
+  msg << "GenericCapacitor("<< (GetNode () ? GetNode ()->GetId () : 0) << "): ";
+  return msg.str();
+}
+
 
 } // namespace ns3
