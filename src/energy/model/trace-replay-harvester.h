@@ -33,9 +33,21 @@
 #include "ns3/random-variable-stream.h"
 #include "ns3/device-energy-model.h"
 
+#define TRACEREPLAYHARVESTER_CSV_FILENAME_DEFAULT "data.csv"
+
 namespace ns3 {
 
 typedef std::vector<double> DataVector;
+
+
+
+/**
+ * This class creates an object that will read a CSV file.
+ * The `col_num` column (default is first column) contains the total energy harvested
+ * in the interval between the current moment (now) and the last reading.
+ * This interval is given by `updateInterval`. Note that this value is only set in the class constructor,
+ * so `SetHarvestedPowerUpdateInterval` has no effect (it is kept only for compatibility).
+ */
 
 /**
  * \ingroup energy
@@ -51,15 +63,28 @@ class TraceReplayHarvester: public EnergyHarvester
   public:
   static TypeId GetTypeId (void);
 
-  TraceReplayHarvester ();
   /**
    * \param updateInterval Energy harvesting update interval.
    *
    * TraceReplayHarvester constructor function that sets the interval
    * between each update of the value of the power harvested by this
    * energy harvester.
+   * By default reads the first column of the file TRACEREPLAYHARVESTER_CSV_FILENAME_DEFAULT,
+   * and updates every second.
+   */
+  TraceReplayHarvester ();
+
+  /**
+   * \param updateInterval Energy harvesting update interval.
+   *
+   * TraceReplayHarvester constructor function that sets the interval
+   * between each update of the value of the power harvested by this
+   * energy harvester.
+   * By default reads the first column of the file
    */
   TraceReplayHarvester (std::string filename, Time updateInterval);
+
+  TraceReplayHarvester (std::string filename, Time updateInterval, int col_num);
 
   virtual ~TraceReplayHarvester ();
 
@@ -79,6 +104,8 @@ protected:
    *
    * This function sets the interval between each update of the value of the
    * power harvested by this energy harvester.
+   *
+   * Note: This function does nothing in this implementation. updateInterval can olny be set in the constructor.
    */
   void SetHarvestedPowerUpdateInterval (Time updateInterval);
 
@@ -108,8 +135,8 @@ private:
   void UpdateHarvestedPower (void);
 
 private:
-  std::string csv_filename;
-  int col_num = 1;
+  std::string csv_filename;  // csv filename (with path)
+  int col_num = 0;  // which column to read. zero-indexed
 
   TracedValue<double> m_harvestedPower;         // current harvested power, in Watt
   TracedValue<double> m_totalEnergyHarvestedJ;  // total harvested energy, in Joule
@@ -118,12 +145,21 @@ private:
   Time m_lastHarvestingUpdateTime;              // last harvesting time
   Time m_harvestedPowerUpdateInterval;          // harvestable energy update interval
 
-  long m_offset = 0;  // offset of the data. allows you to play the data from a specific point in time
+  unsigned m_offset = 0;  // offset of the data. allows you to play the data from a specific point in time
 
-  DataVector m_data = {};
+  DataVector m_data = {};  // data vector. each entry is the harvested power in the corresponding time interval
+
   // read the csv file
   bool readCsvData(int col_num);
 
+  // change the offset
+  void SetOffset(unsigned long new_offset);
+
+  // get the offset
+  unsigned long GetOffset(void) const;
+
+  // get the header
+  std::string GetHeader(void) const;
 };
 
 } // namespace ns3

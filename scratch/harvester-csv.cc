@@ -89,6 +89,7 @@ main (int argc, char *argv[])
   ns3::LogComponentEnable("GenericCapacitor", LOG_LEVEL_INFO);
   ns3::LogComponentEnable("EnergySource", LOG_LEVEL_INFO);
   ns3::LogComponentDisable("EnergySource", LOG_LEVEL_DEBUG);
+  ns3::LogComponentEnable("TraceReplayHarvester", LOG_LEVEL_INFO);
 
   ns3::Time simTime = Seconds(1);
 
@@ -282,8 +283,6 @@ main (int argc, char *argv[])
       //
       // -------------------------------------------------------------------
       //
-      // TODO: create a harvester that simulates solar panels (basic-solar-energy-harvester.cc)
-
       Ptr<ns3::Node> node = ueNodes.Get(i);  // node to install
 
       Ptr<GenericCapacitor> capacitor = CreateObject<GenericCapacitor> ();
@@ -295,8 +294,10 @@ main (int argc, char *argv[])
 
 
       Ptr<TraceReplayHarvester> harvester = CreateObject<TraceReplayHarvester>(
-        "scratch/combined_solar_kinetic_85_solar_eff_60_degree_angle_3.csv", MilliSeconds(10)
+        "scratch/combined_solar_kinetic_85_solar_eff_60_degree_angle_3.csv",
+        MilliSeconds(100), 1
       );
+      harvester->SetAttribute("Offset", UintegerValue(1));
       capacitor->ConnectEnergyHarvester(harvester);
       harvester->SetNode(node);
       harvester->SetEnergySource(capacitor);
@@ -369,7 +370,7 @@ main (int argc, char *argv[])
   std::chrono::duration<double> elapsed_seconds = end-start;
   std::time_t end_time = std::chrono::system_clock::to_time_t(end);
   std::cout << "Finished computation at " << std::ctime(&end_time);
-  std::cout << "elapsed time: " << elapsed_seconds.count() << "s" << std::endl;
+  std::cout << "Elapsed time: " << elapsed_seconds.count() << "s" << std::endl;
   Simulator::Destroy ();
   return 0;
 }
