@@ -214,7 +214,7 @@ LiIonEnergySource::UpdateEnergySource (void)
 {
   NS_LOG_FUNCTION (this);
   NS_LOG_DEBUG ("LiIonEnergySource:Updating remaining energy at node #" <<
-                GetNode ()->GetId ());
+                (GetNode () ? GetNode ()->GetId () : 0));
 
   // do not update if simulation has finished
   if (Simulator::IsFinished ())
@@ -262,7 +262,7 @@ LiIonEnergySource::HandleEnergyDrainedEvent (void)
 {
   NS_LOG_FUNCTION (this);
   NS_LOG_DEBUG ("LiIonEnergySource:Energy depleted at node #" <<
-                GetNode ()->GetId ());
+                (GetNode () ? GetNode ()->GetId () : 0));
   NotifyEnergyDrained (); // notify DeviceEnergyModel objects
 }
 
@@ -277,14 +277,14 @@ LiIonEnergySource::CalculateRemainingEnergy (void)
   // energy = current * voltage * time
   double energyToDecreaseJ = totalCurrentA * m_supplyVoltageV * duration.GetSeconds ();
 
-  if (m_remainingEnergyJ < energyToDecreaseJ) 
+  if (m_remainingEnergyJ < energyToDecreaseJ)
     {
       m_remainingEnergyJ = 0; // energy never goes below 0
-    } 
-  else 
+    }
+  else
     {
       m_remainingEnergyJ -= energyToDecreaseJ;
-    }  
+    }
 
   m_drainedCapacity += (totalCurrentA * duration.GetSeconds () / 3600);
   // update the supply voltage
