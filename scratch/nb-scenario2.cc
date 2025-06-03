@@ -36,6 +36,10 @@
 
  It uses a generic-capacitor as power source.
 
+ Usage:
+ ./waf --run nb-scenario2.cc 2>&1 | tee nb-scenario2.log
+
+ You can use `process_log.py` to see some outputs in the log file.
 
  */
 
@@ -74,17 +78,26 @@ using namespace ns3;
 NS_LOG_COMPONENT_DEFINE ("LenaNb5G-Cap");
 
 
+#define GENERATE_TRACES true
+
+
 enum class HarvestType {
   BasicHarvester,
   SolarPanel
 };
 
 
+//TODO: check if the device is turned off (or go to sleep) if the threshold voltage is reached. the depleated alert is raised by the capacitor!
+//TODO: add real values for the capacitor
+//BUG: it looks like the nb-iot is not consuming energy !!
+// TODO: need to check if the capacitor is charging correctly
+// TODO: check when the device transmits
+
+
 int
 main (int argc, char *argv[])
 {
 
-  // TODO: expand the parser to read more configuration parameters from the command line and make this code more general
 
   ns3::LogComponentEnable("LenaNb5G-Cap", LOG_LEVEL_INFO);
   ns3::LogComponentDisable("LenaNb5G-Cap", LOG_LEVEL_DEBUG);
@@ -92,16 +105,17 @@ main (int argc, char *argv[])
   ns3::LogComponentEnable("GenericCapacitor", LOG_LEVEL_INFO);
   ns3::LogComponentEnable("EnergySource", LOG_LEVEL_INFO);
   ns3::LogComponentDisable("EnergySource", LOG_LEVEL_DEBUG);
+  ns3::LogComponentEnable("BasicSolarEnergyHarvester", LOG_LEVEL_INFO);
 
-  ns3::Time simTime = Minutes(6);
+  ns3::Time simTime = Minutes(30);
+  std::string simName = "cap";
 
   uint8_t worker = 0;
   int seed = 1;
-  std::string simName = "cap";
   double cellsize = 2500; // in meters
 
-  // HarvestType harvestType = HarvestType::SolarPanel;
-  HarvestType harvestType = HarvestType::BasicHarvester;
+  HarvestType harvestType = HarvestType::SolarPanel;
+  // HarvestType harvestType = HarvestType::BasicHarvester;
 
   // Number of UEs per application
   int num_ues = 1;  // For now, 1 UE talks to a remote host via one eNB
@@ -111,7 +125,8 @@ main (int argc, char *argv[])
   int packetsize_app_a = 49;
 
   // Packet interval
-  Time packetinterval_app_a = Days(1);
+  // BUG: if the packet interval is too small (e.g. 1 second), the simulation will crash (on lte-enb-rrc.cc)
+  Time packetinterval_app_a = Minutes(1);
 
   bool ciot = false;
   bool edt = false;
@@ -119,7 +134,7 @@ main (int argc, char *argv[])
   // Command line arguments
   CommandLine cmd (__FILE__);
   cmd.AddValue ("simTime", "Total duration of the simulation", simTime);
-  cmd.AddValue ("simName", "Total duration of the simulation", simName);
+  cmd.AddValue ("simName", "Name of the simulation", simName);
   cmd.AddValue ("worker", "worker id when using multithreading to not confuse logging", worker);
   cmd.AddValue ("randomSeed", "randomSeed",seed);
   cmd.AddValue ("numUeAppA", "Number of UEs",num_ues);
@@ -374,8 +389,6 @@ main (int argc, char *argv[])
       //
       // -------------------------------------------------------------------
       //
-      // TODO: create a harvester that simulates solar panels (basic-solar-energy-harvester.cc)
-
       Ptr<ns3::Node> node = ueNodes.Get(i);  // node to install
 
       Ptr<GenericCapacitor> capacitor = CreateObject<GenericCapacitor> ();
@@ -384,10 +397,6 @@ main (int argc, char *argv[])
       ueRrc->m_energyModel.SetEnergySource(capacitor);
       capacitor->SetNode(node);  // you MUST set the node to the capacitor
       capacitor->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
-
-
-      // TODO: need to check if the capacitor is charging correctly
-      // TODO: create logging to file of capacitor data
 
       // create harverster to charge the capacitor
       Ptr<ns3::EnergyHarvester> harvester;
@@ -409,18 +418,19 @@ main (int argc, char *argv[])
       {
         std::cout << "Using BasicSolarEnergyHarvester" << std::endl;
         harvester = CreateObject<ns3::BasicSolarEnergyHarvester>();
-        harvester->SetAttribute("PeriodicHarvestedPowerUpdateInterval", ns3::TimeValue(Seconds(1.0))); // don´t change for now. BasicSolarEnergyHarvester cannot handle shorter interval
+        harvester->SetAttribute("PeriodicHarvestedPowerUpdateInterval", ns3::TimeValue(MilliSeconds(10.0)));  // 10 ms, the same interval as the capacitor
+        // harvester->SetAttribute("HarvestablePower", StringValue("ns3::UniformRandomVariable[Min=0.0|Max=0.001]"));
+        harvester->SetAttribute("HarvestablePower", StringValue("ns3::ConstantRandomVariable[Constant=0.005]"));
 
         // trick to set the start of the day
         Ptr<BasicSolarEnergyHarvester> solarHarvester = DynamicCast<BasicSolarEnergyHarvester>(harvester);
-        solarHarvester->SetAttribute("StartSecondOfDay", UintegerValue(8 * 3600));  // 8am
+        solarHarvester->SetAttribute("StartSecondOfDay", UintegerValue(8 * 3600 + 200));  // 8am
 
         // confirm update
         UintegerValue value;
         solarHarvester->GetAttribute("StartSecondOfDay", value);
         std::cout << "StartSecondOfDay: " << value.Get() << std::endl;
       }
-      std::cout << "object created" << std::endl;
       capacitor->ConnectEnergyHarvester(harvester);
       harvester->SetNode(node);
       harvester->SetEnergySource(capacitor);
@@ -532,9 +542,12 @@ main (int argc, char *argv[])
 
   std::cout << "Number of UEs: " << ueNodes.GetN() / 3 << " at each stage" << std::endl;
 
-  //lteHelper->EnableTraces ();
-  // Uncomment to enable PCAP tracing
-  //p2ph.EnablePcapAll("lena-simple-epc");
+  #if GENERATE_TRACES
+  lteHelper->EnableMacTraces();  // Enable MAC traces (to identify transmission patterns)
+  // lteHelper->EnableTraces();
+  // enable PCAP tracing
+  p2ph.EnablePcapAll("logs/lena-simple-epc");
+  #endif
 
   Simulator::Stop (3*simTime); // Pre-Run, Run, Post-Run
   std::cout << "Log dir: ";
