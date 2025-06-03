@@ -18,6 +18,7 @@
  *
  * Author: Henrique Moura <henrique.duartemoura@imec.be>
  */
+#include <cmath>
 
 #include "poly_predictor.h"
 #include "basic-solar-energy-harvester.h"
@@ -54,28 +55,41 @@ BasicSolarEnergyHarvester::GetTypeId (void)
                   UintegerValue (0),  // 12am
                   MakeUintegerAccessor (&BasicSolarEnergyHarvester::m_startSecondOfDay),
                   MakeUintegerChecker<uint32_t> ())
+  .AddAttribute ("HarvestablePower",
+                 "The peak harvestable power [Watts] that the energy harvester is allowed to harvest.",
+                 StringValue ("ns3::UniformRandomVariable[Min=1.0|Max=2.0]"),
+                 MakePointerAccessor (
+                  &BasicSolarEnergyHarvester::SetHarvestablePower,
+                  &BasicSolarEnergyHarvester::GetHarvestablePower
+                  // &BasicSolarEnergyHarvester::m_harvestablePower
+                ),
+                 MakePointerChecker<RandomVariableStream> ())
   .AddTraceSource ("HarvestedPower",
                    "Harvested power by the BasicSolarEnergyHarvester.",
                    MakeTraceSourceAccessor (&BasicSolarEnergyHarvester::m_harvestedPower),
                    "ns3::TracedValueCallback::Double")
   .AddTraceSource ("TotalEnergyHarvested",
-                   "Total energy harvested by the harvester.",
+                   "Initial Total energy harvested by the harvester.",
                    MakeTraceSourceAccessor (&BasicSolarEnergyHarvester::m_totalEnergyHarvestedJ),
                    "ns3::TracedValueCallback::Double")
   ;
   return tid;
 }
 
-BasicSolarEnergyHarvester::BasicSolarEnergyHarvester ()
+BasicSolarEnergyHarvester::BasicSolarEnergyHarvester () :
+  m_harvestedPowerUpdateInterval (Seconds (1.0)),
+  m_startSecondOfDay (8 * 3600), // 8am
+  peak_harvestedPower (1.0)
 {
-  NS_LOG_FUNCTION (this);
-
+  NS_LOG_DEBUG ("Peak harvestable power = " << peak_harvestedPower << " J, Harvesting interval = " << m_harvestedPowerUpdateInterval << " s");
 }
 
-BasicSolarEnergyHarvester::BasicSolarEnergyHarvester (Time updateInterval)
+BasicSolarEnergyHarvester::BasicSolarEnergyHarvester (Time updateInterval) :
+  m_harvestedPowerUpdateInterval (updateInterval),
+  m_startSecondOfDay (8 * 3600), // 8am
+  peak_harvestedPower (1.0)
 {
-  NS_LOG_FUNCTION (this << updateInterval);
-  m_harvestedPowerUpdateInterval = updateInterval;
+  NS_LOG_DEBUG ("Peak harvestable power = " << peak_harvestedPower << " J, Harvesting interval = " << m_harvestedPowerUpdateInterval << " s");
 }
 
 BasicSolarEnergyHarvester::~BasicSolarEnergyHarvester ()
@@ -83,12 +97,27 @@ BasicSolarEnergyHarvester::~BasicSolarEnergyHarvester ()
   NS_LOG_FUNCTION (this);
 }
 
+Ptr<RandomVariableStream> BasicSolarEnergyHarvester::GetHarvestablePower(void) const {
+  return m_harvestablePower;
+}
+
+void BasicSolarEnergyHarvester::SetHarvestablePower(Ptr<RandomVariableStream> new_harvestable_power) {
+  m_harvestablePower = new_harvestable_power;
+
+  peak_harvestedPower = m_harvestablePower->GetValue ();
+  daily_harvested_predictor.next(peak_harvestedPower);
+  NS_LOG_DEBUG("SetHarvestablePower: Peak harvestable power = " << peak_harvestedPower << " J, Harvesting interval = " << m_harvestedPowerUpdateInterval << " s" );
+}
+
+
 int64_t
 BasicSolarEnergyHarvester::AssignStreams (int64_t stream)
 {
   NS_LOG_FUNCTION (this << stream);
+  m_harvestablePower->SetStream (stream);
   return 1;
 }
+
 
 void
 BasicSolarEnergyHarvester::SetHarvestedPowerUpdateInterval (Time updateInterval)
@@ -178,12 +207,21 @@ BasicSolarEnergyHarvester::DoDispose (void)
   NS_LOG_FUNCTION (this);
 }
 
+/**
+ * This macro coverts a number of seconds into days (integer) and seconds (fraction).
+ */
+#define GET_FRAC_TIME(_seconds, _d, _s)  \
+  do { \
+    double _ss = (_seconds) / SECONDS_IN_A_DAY; \
+    (_d) = std::trunc(_ss); \
+    (_s) = (_ss - (_d)) * SECONDS_IN_A_DAY; \
+  } while (0)
+
+
 void
 BasicSolarEnergyHarvester::CalculateHarvestedPower (void)
 {
   NS_LOG_FUNCTION (this);
-
-  // TODO: to be generic, this method should handle fraction of seconds
 
   // obtain the energy harvested in the interval
   // need to loop on the harvested power in `m_daily_harvested` based on last update:
@@ -195,13 +233,14 @@ BasicSolarEnergyHarvester::CalculateHarvestedPower (void)
   m_harvestedPower = 0;
   Time now = Simulator::Now ();
 
-
   // m_startSecondOfDay shifts the start of the simulation a certain initial second
-  long sec_1 = std::lround(m_lastHarvestingUpdateTime.GetSeconds () + m_startSecondOfDay) % SECONDS_IN_A_DAY;
-  long sec_2 = std::lround(now.GetSeconds () + m_startSecondOfDay) % SECONDS_IN_A_DAY;
+  long day_1, day_2;
+  double sec_1, sec_2;
+  GET_FRAC_TIME(m_lastHarvestingUpdateTime.GetSeconds () + m_startSecondOfDay, day_1, sec_1);
 
-  long ndays = std::lround(now.GetSeconds () + m_startSecondOfDay) / SECONDS_IN_A_DAY -
-  std::lround(m_lastHarvestingUpdateTime.GetSeconds ()) / SECONDS_IN_A_DAY;
+  GET_FRAC_TIME(now.GetSeconds () + m_startSecondOfDay, day_2, sec_2);
+
+  long ndays = day_2 - day_1;
 
   std::cout << "Enter CalculateHarvestedPower @ " << now.GetSeconds ()
     << " last update: " << m_lastHarvestingUpdateTime.GetSeconds ()
@@ -215,6 +254,7 @@ BasicSolarEnergyHarvester::CalculateHarvestedPower (void)
     e1 = daily_harvested_predictor.areaUnderCurve(sec_1);
     e2 = daily_harvested_predictor.areaUnderCurve(sec_2);
     m_harvestedPower += (e2 - e1);
+    std::cout << "e1: " << e1 << " e2: " << e2 << std::endl;
   }
   else
   {
@@ -227,13 +267,16 @@ BasicSolarEnergyHarvester::CalculateHarvestedPower (void)
     // update the days in between
     for (long i = 0; i < ndays; i++)
     {
-      daily_harvested_predictor.next();
+      peak_harvestedPower = m_harvestablePower->GetValue ();
+
+      daily_harvested_predictor.next(peak_harvestedPower);
       e2 = daily_harvested_predictor.areaUnderCurve(SECONDS_IN_A_DAY);
       m_harvestedPower += e2;
     }
 
     // update the initial seconds of the last day (from 0 to sec_2)
-    daily_harvested_predictor.next();
+    peak_harvestedPower = m_harvestablePower->GetValue ();
+    daily_harvested_predictor.next(peak_harvestedPower);
     m_harvestedPower += daily_harvested_predictor.areaUnderCurve(sec_2);
   }
 

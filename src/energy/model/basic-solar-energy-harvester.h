@@ -117,18 +117,22 @@ private:
 
   std::string GetHeader(void) const;
 
+  Ptr<RandomVariableStream> GetHarvestablePower(void) const;
+  void SetHarvestablePower(Ptr<RandomVariableStream> new_harvestable_power);
+
 private:
 
+  Time m_harvestedPowerUpdateInterval;          // harvestable energy update interval
+  uint32_t m_startSecondOfDay;                  // start second of the day
+  Ptr<RandomVariableStream> m_harvestablePower; // Random variable for the harvestable power
   PolyPredictor daily_harvested_predictor = {}; // daily harvested energy predictor
-  bool update_harvested_energy;                 // whenever the day ends, must generate new data for `m_daily_harvested`
+  double peak_harvestedPower = 1.0;
 
   TracedValue<double> m_harvestedPower;         // current harvested power, in Watt
   TracedValue<double> m_totalEnergyHarvestedJ;  // total harvested energy, in Joule
 
   EventId m_energyHarvestingUpdateEvent;        // energy harvesting event
   Time m_lastHarvestingUpdateTime;              // last harvesting time
-  Time m_harvestedPowerUpdateInterval;          // harvestable energy update interval
-  uint32_t m_startSecondOfDay;                      // start second of the day
 };
 
 } // namespace ns3
