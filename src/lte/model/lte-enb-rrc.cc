@@ -3359,7 +3359,7 @@ LteEnbRrc::ResumeUe(uint16_t rnti, uint64_t resumeId){
   m_s1SapProvider->UeContextRelease(rnti);
   // Resume Old UeManager
   m_ueActiveMap[rnti] = m_ueResumedMap[resumeId];
-  m_ueActiveMap[rnti]->SetRnti(rnti);
+  m_ueActiveMap[rnti]->SetRnti(rnti);  // Set RNTI
   m_cmacSapProvider.at(0)->ResumeUe(rnti, resumeId);
   m_rrcSapUser->ResumeUe(rnti,resumeId);
   m_ccmRrcSapProvider->ResumeUe(rnti, resumeId);
