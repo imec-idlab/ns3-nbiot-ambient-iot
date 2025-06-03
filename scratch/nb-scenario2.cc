@@ -87,10 +87,10 @@ enum class HarvestType {
 };
 
 
-//TODO: check if the device is turned off (or go to sleep) if the threshold voltage is reached. the depleated alert is raised by the capacitor!
-//TODO: add real values for the capacitor
-//BUG: it looks like the nb-iot is not consuming energy !!
+// TODO: add real values for the capacitor
 // TODO: need to check if the capacitor is charging correctly
+// TODO: check if the device is turned off (or go to sleep) if the threshold voltage is reached. the depleated alert is raised by the capacitor!
+// BUG: it looks like the nb-iot is not consuming energy !! It seems to call DecreaseEnergy directly!
 // TODO: check when the device transmits
 
 
