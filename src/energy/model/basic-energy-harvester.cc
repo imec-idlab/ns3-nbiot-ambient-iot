@@ -111,7 +111,7 @@ BasicEnergyHarvester::UpdateHarvestedPower (void)
 {
   NS_LOG_FUNCTION (this);
   NS_LOG_DEBUG (Simulator::Now ().GetSeconds ()
-                << "s BasicEnergyHarvester(" << GetNode ()->GetId () << "): Updating harvesting power.");
+                << "s BasicEnergyHarvester(" << (GetNode () ? GetNode ()->GetId () : 0) << "): Updating harvesting power.");
 
   Time duration = Simulator::Now () - m_lastHarvestingUpdateTime;
 
@@ -179,5 +179,5 @@ BasicEnergyHarvester::DoGetPower (void) const
   NS_LOG_FUNCTION (this);
   return m_harvestedPower;
 }
-  
+
 } // namespace ns3
