@@ -1,6 +1,6 @@
 /* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
- * Copyright (c) 2011-2018 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC), 
+ * Copyright (c) 2011-2018 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC),
  * Copyright (c) 2022 Communication Networks Institute at TU Dortmund University
  *
  * This program is free software; you can redistribute it and/or modify
@@ -35,7 +35,7 @@
 #include <chrono>
 #include <iomanip>
 #include <stdlib.h>
-#include <ctime>    
+#include <ctime>
 #include <fstream>
 using namespace ns3;
 
@@ -176,7 +176,7 @@ main (int argc, char *argv[])
     pos_b.Set ("X", StringValue (std::to_string(cellsize/2)));
     pos_b.Set ("Y", StringValue (std::to_string(cellsize/2)));
     pos_b.Set ("Z", DoubleValue (0.0)); // For devices with height 0.0, Winner+ will add a predefined additional indoor attenation
-    pos_b.Set ("rho", DoubleValue (cellsize/2));    
+    pos_b.Set ("rho", DoubleValue (cellsize/2));
     m_position = pos_b.Create ()->GetObject<PositionAllocator> ();
     for (int i = 0; i < num_ues_app_b; ++i){
       Vector position = m_position->GetNext ();
@@ -189,7 +189,7 @@ main (int argc, char *argv[])
     pos_c.Set ("X", StringValue (std::to_string(cellsize/2)));
     pos_c.Set ("Y", StringValue (std::to_string(cellsize/2)));
     pos_c.Set ("Z", DoubleValue (-1.5)); // For devices with height < 0.0, Winner+ will add a predefined additional deep indoor attenation
-    pos_c.Set ("rho", DoubleValue (cellsize/2));    
+    pos_c.Set ("rho", DoubleValue (cellsize/2));
     m_position = pos_c.Create ()->GetObject<PositionAllocator> ();
     for (int i = 0; i < num_ues_app_c; ++i){
       Vector position = m_position->GetNext ();
@@ -197,7 +197,7 @@ main (int argc, char *argv[])
       //std::cout << "c," << position.x << "," << position.y << "," << position.z << std::endl;
     }
   }
-  
+
   MobilityHelper mobilityUe;
   mobilityUe.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
   mobilityUe.SetPositionAllocator(positionAllocUe);
@@ -229,8 +229,8 @@ main (int argc, char *argv[])
   uint16_t ulPort = 2000;
   ApplicationContainer clientApps;
   ApplicationContainer serverApps;
-  
-  
+
+
   // Set up the data transmission for the Pre-Run
   for (uint16_t i = 0; i < ues_to_consider; i++)
     {
@@ -363,7 +363,7 @@ main (int argc, char *argv[])
         clientApps.Get(i)->SetStartTime (MilliSeconds (access));
       }
     }
-  
+
 
 
   // Set up the data transmission for the Post-Run
@@ -434,7 +434,7 @@ main (int argc, char *argv[])
 
 
 
-  auto start = std::chrono::system_clock::now(); 
+  auto start = std::chrono::system_clock::now();
   std::time_t start_time = std::chrono::system_clock::to_time_t(start);
   std::cout << "started computation at " << std::ctime(&start_time);
      std::string logdir = "logs/";
@@ -458,12 +458,12 @@ main (int argc, char *argv[])
   logdir += std::to_string(ciot);
   logdir += "_";
   logdir += std::to_string(edt);
-  
-  std::string top_dirmakedir = makedir+logdir; 
+
+  std::string top_dirmakedir = makedir+logdir;
   int a = std::system(top_dirmakedir.c_str());
   std::cout << a << std::endl;
   logdir += "/";
-  
+
   auto tm = *std::localtime(&start_time);
   std::stringstream ss;
   ss << std::put_time(&tm, "%d_%m_%Y_%H_%M_%S");
@@ -472,7 +472,7 @@ main (int argc, char *argv[])
   logdir += std::to_string(worker);
   logdir += "_";
   logdir += std::to_string(seed);
-  logdir += "_";  
+  logdir += "_";
 
   for (uint16_t i = 0; i < ueNodes.GetN(); i++){
 
@@ -486,8 +486,8 @@ main (int argc, char *argv[])
   Ptr<LteEnbNetDevice> enbLteDevice = enbLteDevs.Get(0)->GetObject<LteEnbNetDevice>();
   Ptr<LteEnbRrc> enbRrc = enbLteDevice->GetRrc();
   enbRrc->SetLogDir(logdir);
-  
-  
+
+
   //lteHelper->EnableTraces ();
   // Uncomment to enable PCAP tracing
   //p2ph.EnablePcapAll("lena-simple-epc");
