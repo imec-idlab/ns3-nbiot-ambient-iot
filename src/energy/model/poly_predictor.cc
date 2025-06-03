@@ -10926,6 +10926,6 @@ double PolyPredictor::areaUnderCurve(double a) {
     } else {
         area = evaluateIntegralAt(a) - evaluateIntegralAt(xmin);
     }
-    std::cout << "areaUnderCurve " << a << " = " << area << " [peak_y = " << peak_y << ", scale = " << scale_y << "]" << std::endl;
+    // std::cout << "areaUnderCurve " << a << " = " << area << " [peak_y = " << peak_y << ", scale = " << scale_y << "]" << std::endl;
     return area;
 }
