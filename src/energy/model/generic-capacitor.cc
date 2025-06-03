@@ -46,7 +46,7 @@ GenericCapacitor::GetTypeId (void)
     .AddConstructor<GenericCapacitor> ()
     .AddAttribute ("Capacitance",
                    "Capacitor size in Farads.",
-                   DoubleValue (0.01),  // in Farads
+                   DoubleValue (0.1),  // in Farads
                    MakeDoubleAccessor (&GenericCapacitor::m_capacitanceF),
                    MakeDoubleChecker<double> (1e-9, 100.0))
     .AddAttribute ("InitialCapacitorVoltage",
@@ -332,7 +332,7 @@ GenericCapacitor::DecreaseRemainingEnergy (double energyJ)
   {
     NS_LOG_DEBUG (GetHeader() << "DecreaseRemainingEnergy " <<
       " Remaining energy: " << m_remainingEnergyJ <<
-      " J, V: " << m_currentVoltage << " V");
+      " J, V: " << m_currentVoltage << " V at " << Simulator::Now ().GetSeconds () << " s");
   }
 
   // check if remaining energy is 0
@@ -353,7 +353,7 @@ GenericCapacitor::IncreaseRemainingEnergy (double energyJ)
   {
     NS_LOG_DEBUG (GetHeader() <<  "IncreaseRemainingEnergy " <<
       " Remaining energy: " << m_remainingEnergyJ <<
-      " J, V: " << m_currentVoltage << " V");
+      " J, V: " << m_currentVoltage << " V  at " << Simulator::Now ().GetSeconds () << " s");
   }
 }
 
@@ -453,7 +453,7 @@ GenericCapacitor::CalculateRemainingEnergy (void)
   m_remainingEnergyJ = GetCapacitorEnergy(m_currentVoltage);
 
   NS_LOG_DEBUG (GetHeader() << "Remaining energy: " <<
-    m_remainingEnergyJ << " J, V: " << m_currentVoltage << std::fixed <<
+    m_remainingEnergyJ << " J, V: " << m_currentVoltage <<
     " V, at " << now.GetSeconds() << " s");
 
   std::ostringstream msg;
