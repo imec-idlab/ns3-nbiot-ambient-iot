@@ -22,7 +22,7 @@
  *
  * Modifications made by: Cristiano Tapparello <cristiano.tapparello@rochester.edu>
  */
-
+#include "ns3/simulator.h"
 #include "energy-source.h"
 #include "ns3/log.h"
 
@@ -206,7 +206,11 @@ EnergySource::CalculateTotalCurrent (void)
   }
 
   double currentHarvestersA = totalHarvestedPower / GetSupplyVoltage ();
-  NS_LOG_INFO ("EnergySource("<< (GetNode () ? GetNode ()->GetId () : 0) << "): Total harvested power = " << totalHarvestedPower << ", Total harvester current = " << currentHarvestersA << " Total current consumed = " << totalCurrentA);
+  NS_LOG_INFO ("EnergySource(" << (GetNode () ? GetNode ()->GetId () : 0) <<
+    "): Total harvested power = " << totalHarvestedPower <<
+    ", Total harvester current = " << currentHarvestersA <<
+    " Total current consumed = " << totalCurrentA << " at " << Simulator::Now().GetSeconds() << " s"
+  );
 
   totalCurrentA -= currentHarvestersA;
 
