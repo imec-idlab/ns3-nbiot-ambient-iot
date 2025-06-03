@@ -14,6 +14,7 @@ def build(bld):
         'model/basic-energy-harvester.cc',
         'model/generic-capacitor.cc',  # super-capacitor energy source
         'model/basic-solar-panel-patterns.cc',  # gen. daily energy harvesting patterns
+        'model/poly_predictor.cc',  # gen. daily energy harvesting patterns
         'model/basic-solar-energy-harvester.cc',  # solar panel harvester
         'model/trace-replay-harvester.cc',  # trace replay harvester
         'helper/energy-source-container.cc',
@@ -52,6 +53,7 @@ def build(bld):
         'model/basic-energy-harvester.h',
         'model/generic-capacitor.h',
         'model/basic-solar-panel-patterns.h',
+        'model/poly_predictor.h',  # gen. daily energy harvesting patterns
         'model/basic-solar-energy-harvester.h',
         'model/trace-replay-harvester.h',  # trace replay harvester
         'helper/energy-source-container.h',
