@@ -19,7 +19,7 @@
  * Author: Henrique Moura <henrique.duartemoura@imec.be>
  */
 
-#include "basic-solar-panel-patterns.h"
+#include "poly_predictor.h"
 #include "basic-solar-energy-harvester.h"
 
 #include "ns3/log.h"
@@ -70,7 +70,6 @@ BasicSolarEnergyHarvester::BasicSolarEnergyHarvester ()
 {
   NS_LOG_FUNCTION (this);
 
-  m_daily_harvested = generate_day(SECONDS_IN_A_DAY);  // initialize the harvesting of one day
 }
 
 BasicSolarEnergyHarvester::BasicSolarEnergyHarvester (Time updateInterval)
@@ -109,12 +108,26 @@ BasicSolarEnergyHarvester::GetHarvestedPowerUpdateInterval (void) const
  * Private functions start here.
  */
 
+
+
+/**
+ * \returns A string to be used as a prefix for output messages.
+ *
+ * This function is typically used by the logging functions to provide a
+ * context for the message being logged, including the node ID if available.
+ */
+std::string
+BasicSolarEnergyHarvester::GetHeader(void) const {
+  std::ostringstream stream;
+  stream << "BasicSolarEnergyHarvester("<< (GetNode () ? GetNode ()->GetId () : 0) << "): ";
+  return stream.str();
+}
+
 void
 BasicSolarEnergyHarvester::UpdateHarvestedPower (void)
 {
   NS_LOG_FUNCTION (this);
-  NS_LOG_DEBUG (Simulator::Now ().GetSeconds ()
-                << "s BasicSolarEnergyHarvester(" << GetNode ()->GetId () << "): Updating harvesting power.");
+  NS_LOG_DEBUG (GetHeader() << "Updating harvesting power at " << Simulator::Now ().GetSeconds() << "s.");
 
   Time duration = Simulator::Now () - m_lastHarvestingUpdateTime;
 
@@ -195,46 +208,36 @@ BasicSolarEnergyHarvester::CalculateHarvestedPower (void)
     << " sec_1: " << sec_1 << " sec_2: " << sec_2 << " ndays: " << ndays
     << std::endl;
 
+  double e1, e2;
   if (ndays == 0)
   {
     // same day, calculate the energy between start and end (sec_1 and sec_2)
-    for (long i = sec_1; i < sec_2; i++)
-    {
-      m_harvestedPower += (*m_daily_harvested)[i].mean;
-    }
+    e1 = daily_harvested_predictor.areaUnderCurve(sec_1);
+    e2 = daily_harvested_predictor.areaUnderCurve(sec_2);
+    m_harvestedPower += (e2 - e1);
   }
   else
   {
     // different day
     // update the rest of the first day (sec_1 until SECONDS_IN_A_DAY)
-    for (long i = sec_1; i < SECONDS_IN_A_DAY; i++)
-    {
-      m_harvestedPower += (*m_daily_harvested)[i].mean;
-    }
+    e1 = daily_harvested_predictor.areaUnderCurve(sec_1);
+    e2 = daily_harvested_predictor.areaUnderCurve(SECONDS_IN_A_DAY);
+    m_harvestedPower += (e2 - e1);
 
     // update the days in between
     for (long i = 0; i < ndays; i++)
     {
-      delete m_daily_harvested;
-      m_daily_harvested = generate_day(SECONDS_IN_A_DAY);  // initialize the harvesting of one day
-      for(long j = 0; j < SECONDS_IN_A_DAY; j++)
-      {
-        m_harvestedPower += (*m_daily_harvested)[i].mean;
-      }
+      daily_harvested_predictor.next();
+      e2 = daily_harvested_predictor.areaUnderCurve(SECONDS_IN_A_DAY);
+      m_harvestedPower += e2;
     }
-    delete m_daily_harvested;
-    m_daily_harvested = generate_day(SECONDS_IN_A_DAY);  // initialize the harvesting of one day
 
     // update the initial seconds of the last day (from 0 to sec_2)
-    m_daily_harvested = generate_day(SECONDS_IN_A_DAY);  // initialize the harvesting of one day
-    for (long i = 0; i < sec_2; i++)
-    {
-      m_harvestedPower += (*m_daily_harvested)[i].mean;
-    }
+    daily_harvested_predictor.next();
+    m_harvestedPower += daily_harvested_predictor.areaUnderCurve(sec_2);
   }
 
-  NS_LOG_DEBUG (now.GetSeconds ()
-                << "s BasicSolarEnergyHarvester:Harvested energy = " << m_harvestedPower);
+  NS_LOG_DEBUG (GetHeader() << now.GetSeconds () << "s Harvested energy: " << m_harvestedPower);
 }
 
 double

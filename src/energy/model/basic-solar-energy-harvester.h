@@ -32,7 +32,7 @@
 #include "ns3/random-variable-stream.h"
 #include "ns3/device-energy-model.h"
 
-#include "basic-solar-panel-patterns.h"
+#include "poly_predictor.h"
 
 namespace ns3 {
 
@@ -115,9 +115,11 @@ private:
    */
   void UpdateHarvestedPower (void);
 
+  std::string GetHeader(void) const;
+
 private:
 
-  std::vector<SolarPattern> * m_daily_harvested = NULL;  // daily harvested energy
+  PolyPredictor daily_harvested_predictor = {}; // daily harvested energy predictor
   bool update_harvested_energy;                 // whenever the day ends, must generate new data for `m_daily_harvested`
 
   TracedValue<double> m_harvestedPower;         // current harvested power, in Watt
