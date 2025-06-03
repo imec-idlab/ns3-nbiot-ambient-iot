@@ -33,6 +33,7 @@ struct PolyPredictor {
     void setSigmaScale(double new_sigma_scale);
 
     void next(void);
+    void next(double new_peak_value);  // change the profile of the predictor, including the new peak
 
   private:
     // coeficients of the polynomial regression

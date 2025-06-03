@@ -1,6 +1,7 @@
 #include "poly_predictor.h"
 #include <cmath>
 #include <vector>
+#include <iostream>
 
 
 // TODO: define the daytime start (xmin) and end (xmax)
@@ -10829,9 +10830,9 @@ void PolyPredictor::setSigmaScale(double new_sigma_scale){
 
 double PolyPredictor::predict(double x) const {
     // Evaluate the polynomial at position x
-    double yhat = 0.0;
-    for (size_t i = 0; i < coefs.size(); ++i) {
-        yhat += coefs[i] * std::pow(x, coefs.size() - 1 - i);
+    double yhat = coefs[POLY_DEGREE];  // constant term
+    for (size_t i = 0; i < POLY_DEGREE; ++i) {
+        yhat += coefs[i] * std::pow(x, POLY_DEGREE - i);
     }
     return yhat;  // return value without scaling
 }
@@ -10863,10 +10864,32 @@ double PolyPredictor::predict_sample(double x) const {
 }
 
 
+/**
+ * Reseeds the random number generator used by predict_sample.
+ *
+ * Useful for generating multiple different realizations of energy data.
+ */
 void PolyPredictor::next(void) {
     std::mt19937 rng{};
     seed = rng();
 }
+
+
+/**
+ * Changes the seed and the peak value of the predictor.
+ *
+ * Changing the seed allows to generate different random values for the same
+ * peak value. The seed is generated using a random number generator.
+ *
+ * @param new_peak_value the new desired peak value
+ */
+void PolyPredictor::next(double new_peak_value) {
+    std::mt19937 rng{};
+    seed = rng();
+    setPeakValue(new_peak_value);
+}
+
+
 
 /**
  * Evaluates the integral of the polynomial curve from 0 to x.
@@ -10875,9 +10898,10 @@ void PolyPredictor::next(void) {
  * @return the value of the integral
  */
 double PolyPredictor::evaluateIntegralAt(double x) {
+    long n = coefs.size();  // = POLY_DEGREE + 1
     double result = 0.0;
-    for (int i = 0; i < POLY_DEGREE + 1; ++i) {
-        result += coefs[i] * std::pow(x, i + 1) / (i + 1);
+    for (int i = 0; i < n; ++i) {
+        result += coefs[i] * std::pow(x, n - i) / (n - i);
     }
     return result * scale_y;
 }
@@ -10894,12 +10918,14 @@ double PolyPredictor::evaluateIntegralAt(double x) {
  */
 double PolyPredictor::areaUnderCurve(double a) {
     // Main function to compute area under the curve up to point a
-
+    double area;
     if (a <= xmin) {
-        return 0.0;
+        area = 0.0;
     } else if (a > xmax) {
-        return evaluateIntegralAt(xmax) - evaluateIntegralAt(xmin);
+        area = evaluateIntegralAt(xmax) - evaluateIntegralAt(xmin);
     } else {
-        return evaluateIntegralAt(a) - evaluateIntegralAt(xmin);
+        area = evaluateIntegralAt(a) - evaluateIntegralAt(xmin);
     }
+    std::cout << "areaUnderCurve " << a << " = " << area << " [peak_y = " << peak_y << ", scale = " << scale_y << "]" << std::endl;
+    return area;
 }
