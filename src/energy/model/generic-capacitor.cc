@@ -501,7 +501,7 @@ GenericCapacitor::LogData(std::string logmsg){
   std::string logfile_path = m_logdir+CAPACITOR_LOG_NAME;
   std::ofstream logfile;
   logfile.open(logfile_path, std::ios_base::app);
-  logfile << GetNode ()->GetId () << "," <<
+  logfile << (GetNode () ? GetNode ()->GetId () : 0) << "," <<
     logmsg <<  "," <<
     Simulator::Now().GetMilliSeconds() << "\n";
   logfile.close();

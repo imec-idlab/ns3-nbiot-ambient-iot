@@ -206,7 +206,7 @@ EnergySource::CalculateTotalCurrent (void)
   }
 
   double currentHarvestersA = totalHarvestedPower / GetSupplyVoltage ();
-  NS_LOG_INFO ("EnergySource("<< GetNode ()->GetId () << "): Total harvested power = " << totalHarvestedPower << ", Total harvester current = " << currentHarvestersA << " Total current consumed = " << totalCurrentA);
+  NS_LOG_INFO ("EnergySource("<< (GetNode () ? GetNode ()->GetId () : 0) << "): Total harvested power = " << totalHarvestedPower << ", Total harvester current = " << currentHarvestersA << " Total current consumed = " << totalCurrentA);
 
   totalCurrentA -= currentHarvestersA;
 

@@ -28,6 +28,8 @@
 
 namespace ns3 {
 
+// TODO: gather the configuration of a typical capacitor. add those values as the initial parameters and don´t forget to add the link to the datasheet/references here
+
 /**
  * \ingroup energy
  * \brief Model a generic capacitor.
