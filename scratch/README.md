@@ -36,3 +36,14 @@ cd ns3-nbiot
 ```
 
 The command above selects the BasicEnergyHarvester (type 0) and assigns its update interval to 1 ms.
+
+
+# [nb-scenario3.cc](nb-scenario3.cc)
+
+This scenario creates a BS and N UE around in a circle of radius C (coverage).
+It is used to simulated the environment described in Moons et al. (2024)
+
+
+**Reference**:
+
+- Moons, L., Nasser, S., Sabovic, A., Singh, R.K. and Famaey, J., 2024, October. Evaluating Fast and Grant-Free Uplink Access in Next-Generation Cellular IoT Networks. In 2024 3rd International Conference on 6G Networking (6GNet) (pp. 19-24). IEEE.
