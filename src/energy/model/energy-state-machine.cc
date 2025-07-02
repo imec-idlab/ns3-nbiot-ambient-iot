@@ -21,6 +21,15 @@ State EnergyStateMachine::current_state() const {
     return state;
 }
 
+
+void EnergyStateMachine::set_delta0(double d0) {
+    delta0 = d0;
+}
+
+void EnergyStateMachine::set_delta1(double d1) {
+    delta1 = d1;
+}
+
 void EnergyStateMachine::set_state(State new_state) {
     state = new_state;
 }
@@ -30,11 +39,15 @@ State EnergyStateMachine::step() {
     State new_state = state;
 
     if (state == State::ACTIVE) {
-        if (random_value < delta0) {
+        // State is ACTIVE
+        // Transition to INACTIVE with probability delta1
+        if (random_value < delta1) {
             new_state = State::INACTIVE;
         }
     } else {
-        if (random_value < delta1) {
+        // State is INACTIVE
+        // Transition to ACTIVE with probability delta0
+        if (random_value < delta0) {
             new_state = State::ACTIVE;
         }
     }
