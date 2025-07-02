@@ -76,8 +76,8 @@ using namespace ns3;
 
   The log of this script can be processed by `check_scenario3.py` to visualize the transitions of states and energy consumption.
   To run the script, use the following command:
-  $ ./waf --run nb-scenario3.cc 2>&1 | tee nb-scenario3.log
-  $ python check_scenario3.py --log-fname nb-scenario3.log
+  $ ./waf --run "nb-scenario3.cc" 2>&1 | tee nb-scenario3.log
+  $ python py-code/check_scenario3.py --log-fname nb-scenario3.log
 
  */
 
@@ -93,18 +93,20 @@ enum class HarvestType {
 };
 
 
+// This is only an example of how to create a trace callback
+// to track the changes in a Trace variable
+void TraceStateCallback (uint32_t oldValue, uint32_t newValue) {
+  std::cout << "State changed from " << oldValue << " to " << newValue <<
+    " at " << Simulator::Now().GetSeconds() << " s" << std::endl;
+}
+
 
 int
 main (int argc, char *argv[])
 {
-  double delta0 = 0.7; // transition probability from INACTIVE to ACTIVE state
-  double delta1 = 0.1; // transition probability from ACTIVE to INACTIVE state
-
   ns3::LogComponentEnable("LenaNb5G-Cap", LOG_LEVEL_INFO);
   ns3::LogComponentDisable("LenaNb5G-Cap", LOG_LEVEL_DEBUG);
   // ns3::LogComponentEnable("LteUeRrc", LOG_LEVEL_INFO);
-  // ns3::LogComponentEnable("EnergySource", LOG_LEVEL_INFO);
-  // ns3::LogComponentDisable("EnergySource", LOG_LEVEL_DEBUG);
   ns3::LogComponentEnable("EnergyMarkov", LOG_LEVEL_INFO);
 
   ns3::Time simTime = Minutes(180);
@@ -133,11 +135,10 @@ main (int argc, char *argv[])
   cmd.AddValue ("simName", "Name of the simulation", simName);
   cmd.AddValue ("worker", "worker id when using multithreading to not confuse logging", worker);
   cmd.AddValue ("randomSeed", "randomSeed",seed);
-  cmd.AddValue ("numUeAppA", "Number of UEs",num_ues);
+  cmd.AddValue ("num_ues", "Number of UEs", num_ues);
   cmd.AddValue ("ciot", "Cellular IoT Optimization",ciot);
   cmd.AddValue ("edt", "Early Data Transmission",edt);
-  cmd.AddValue ("delta0", "transition probability from INACTIVE to ACTIVE state", delta0);
-  cmd.AddValue ("delta1", "transition probability from ACTIVE to INACTIVE state", delta1);
+  cmd.AddValue ("coverage", "Cell size in meters", cellsize);
   cmd.Parse (argc, argv);
   ConfigStore inputConfig;
   inputConfig.ConfigureDefaults ();
@@ -339,9 +340,10 @@ main (int argc, char *argv[])
       ueRrc->m_energyModel.SetEnergySource(source);
       source->SetNode(node);  // you MUST set the node to the capacitor
       source->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
-      source->SetAttribute("Delta0", DoubleValue(delta0)); // transition probability from INACTIVE to ACTIVE state
-      source->SetAttribute("Delta1", DoubleValue(delta1)); // transition probability
       node->AggregateObject(source);
+
+      // This is only an example of how to create a trace callback
+      source->TraceConnectWithoutContext("State", MakeCallback(&TraceStateCallback));
 
       ueRrc->EnableLogging();
       if(ciot == true){
