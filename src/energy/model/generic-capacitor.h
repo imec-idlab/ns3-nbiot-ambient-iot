@@ -188,8 +188,8 @@ private:
   Time m_energyUpdateInterval;            // energy update interval
   double m_supplyVoltageV;                // supply voltage, in Volts
   double m_loadResistance;                // load resistance, in Ohms
-
-  std::string m_logdir;
+  double m_sourceResistance=0.0;          // source resistance, in Ohms
+  std::string m_logdir = "";  // log directory for the capacitor traces
 
 };
 
