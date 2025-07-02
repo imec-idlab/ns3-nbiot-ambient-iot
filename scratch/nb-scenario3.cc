@@ -37,7 +37,7 @@
  It uses a generic-capacitor as power source.
 
  Usage:
- ./waf --run nb-scenario2.cc 2>&1 | tee nb-scenario2.log
+ ./waf --run nb-scenario3.cc 2>&1 | tee nb-scenario2.log
 
  You can use `process_log.py` to see some outputs in the log file.
 
@@ -61,9 +61,8 @@
 //#include "ns3/gtk-config-store.h"
 #include "ns3/log.h"
 #include "ns3/nb-iot-energy.h"
-#include "ns3/basic-energy-harvester.h"
-#include "ns3/basic-solar-energy-harvester.h"
-#include "ns3/generic-capacitor.h"
+#include "ns3/energy-markov.h"
+#include "ns3/energy-state-machine.h"
 
 using namespace ns3;
 
@@ -73,6 +72,13 @@ using namespace ns3;
  * Sample simulation script for LTE+EPC. It instantiates several eNodeBs,
  * attaches one UE per eNodeB starts a flow for each UE to and from a remote host.
  * It can also start another flow between each UE pair.
+
+
+  The log of this script can be processed by `check_scenario3.py` to visualize the transitions of states and energy consumption.
+  To run the script, use the following command:
+  $ ./waf --run nb-scenario3.cc 2>&1 | tee nb-scenario3.log
+  $ python check_scenario3.py --log-fname nb-scenario3.log
+
  */
 
 NS_LOG_COMPONENT_DEFINE ("LenaNb5G-Cap");
@@ -87,35 +93,26 @@ enum class HarvestType {
 };
 
 
-// TODO: add real values for the capacitor
-// TODO: need to check if the capacitor is charging correctly
-// TODO: check if the device is turned off (or go to sleep) if the threshold voltage is reached. the depleated alert is raised by the capacitor!
-// BUG: it looks like the nb-iot is not consuming energy !! It seems to call DecreaseEnergy directly!
-// TODO: check when the device transmits
-
 
 int
 main (int argc, char *argv[])
 {
-
+  double delta0 = 0.7; // transition probability from INACTIVE to ACTIVE state
+  double delta1 = 0.1; // transition probability from ACTIVE to INACTIVE state
 
   ns3::LogComponentEnable("LenaNb5G-Cap", LOG_LEVEL_INFO);
   ns3::LogComponentDisable("LenaNb5G-Cap", LOG_LEVEL_DEBUG);
   // ns3::LogComponentEnable("LteUeRrc", LOG_LEVEL_INFO);
-  ns3::LogComponentEnable("GenericCapacitor", LOG_LEVEL_INFO);
-  ns3::LogComponentEnable("EnergySource", LOG_LEVEL_INFO);
-  ns3::LogComponentDisable("EnergySource", LOG_LEVEL_DEBUG);
-  ns3::LogComponentEnable("BasicSolarEnergyHarvester", LOG_LEVEL_INFO);
+  // ns3::LogComponentEnable("EnergySource", LOG_LEVEL_INFO);
+  // ns3::LogComponentDisable("EnergySource", LOG_LEVEL_DEBUG);
+  ns3::LogComponentEnable("EnergyMarkov", LOG_LEVEL_INFO);
 
   ns3::Time simTime = Minutes(180);
-  std::string simName = "cap";
+  std::string simName = "markov";
 
   uint8_t worker = 0;
   int seed = 1;
   double cellsize = 2500; // in meters
-
-  HarvestType harvestType = HarvestType::SolarPanel;
-  // HarvestType harvestType = HarvestType::BasicHarvester;
 
   // Number of UEs per application
   int num_ues = 1;  // For now, 1 UE talks to a remote host via one eNB
@@ -130,7 +127,6 @@ main (int argc, char *argv[])
 
   bool ciot = false;
   bool edt = false;
-  int htype = (harvestType == HarvestType::BasicHarvester) ? 0 : 1;
   // Command line arguments
   CommandLine cmd (__FILE__);
   cmd.AddValue ("simTime", "Total duration of the simulation", simTime);
@@ -140,17 +136,22 @@ main (int argc, char *argv[])
   cmd.AddValue ("numUeAppA", "Number of UEs",num_ues);
   cmd.AddValue ("ciot", "Cellular IoT Optimization",ciot);
   cmd.AddValue ("edt", "Early Data Transmission",edt);
-  cmd.AddValue ("harvesterType", "Use 1 for SolarPanel. Default is BasicHarvester",htype);
+  cmd.AddValue ("delta0", "transition probability from INACTIVE to ACTIVE state", delta0);
+  cmd.AddValue ("delta1", "transition probability from ACTIVE to INACTIVE state", delta1);
   cmd.Parse (argc, argv);
   ConfigStore inputConfig;
   inputConfig.ConfigureDefaults ();
 
   // parse again so you can override default values from the command line
 
-  harvestType = (htype == 0) ? HarvestType::BasicHarvester : HarvestType::SolarPanel;
-  std::cout << "Harvester type: " <<
-    ((harvestType == HarvestType::BasicHarvester) ? "BasicHarvester" : "SolarPanel") <<
-    std::endl;
+  // random seed is set manually here for repetition
+  RngSeedManager::SetSeed (seed);
+  Ptr<UniformRandomVariable> RaUeUniformVariable = CreateObject<UniformRandomVariable> ();
+
+  // Print for reference
+  std::cout << "State ACTIVE  : " << static_cast<int>(State::ACTIVE) << std::endl;
+  std::cout << "State INACTIVE: " << static_cast<int>(State::INACTIVE) << std::endl;
+
 
   // configure LTE
   Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
@@ -217,38 +218,24 @@ main (int argc, char *argv[])
 
   /*
   --------------- create UEs
-
-
-  For all scenarios, 3*X minutes of simulation time are simulated,
-  but only the intermediate X minutes are evaluated.
-  The first X minutes produce no significant results since devices at the beginning
-  are scheduled in an empty cell and experience very good transmission conditions.
-  After X minutes, new devices will find ongoing transmissions of previous devices,
-  which enables a more realistic situation and produces significant results.
-  Since devices that have started transmissions within the intermediate X minutes
-  of the simulation may not complete their transmissions in this intermediate time slot,
-  additional X minutes are simulated with more new transmissions to keep the channels busy
-  and let the intermediate devices complete their transmissions.
   */
   NodeContainer ueNodes;
-  ueNodes.Create (num_ues*3); // Pre-Run, Run, Post-Run.
+  ueNodes.Create (num_ues); // Pre-Run, Run, Post-Run.
   Ptr<ListPositionAllocator> positionAllocUe = CreateObject<ListPositionAllocator> ();
-
-  for (uint32_t j = 0; j<3; j++){ // Pre-Run, Run, Post-Run.
-    // Install Mobility Model for Application A
-    ObjectFactory pos_a;
-    pos_a.SetTypeId ("ns3::UniformDiscPositionAllocator");
-    pos_a.Set ("X", StringValue (std::to_string(cellsize/2)));
-    pos_a.Set ("Y", StringValue (std::to_string(cellsize/2)));
-    pos_a.Set ("Z", DoubleValue (1.5));
-    pos_a.Set ("rho", DoubleValue (cellsize/2));
-    Ptr<PositionAllocator> m_position = pos_a.Create ()->GetObject<PositionAllocator> ();
-    for (int i = 0; i < num_ues; ++i){
-      Vector position = m_position->GetNext ();
-      positionAllocUe->Add (position);
-      NS_LOG_INFO("Node#" << i << " Position:" << position.x << "," << position.y << "," << position.z);
-    }
+  // Install Mobility Model for Application A
+  ObjectFactory pos_a;
+  pos_a.SetTypeId ("ns3::UniformDiscPositionAllocator");
+  pos_a.Set ("X", StringValue (std::to_string(cellsize/2)));
+  pos_a.Set ("Y", StringValue (std::to_string(cellsize/2)));
+  pos_a.Set ("Z", DoubleValue (1.5));  // height of the UEs, we should also vary this in the future
+  pos_a.Set ("rho", DoubleValue (cellsize/2));
+  Ptr<PositionAllocator> m_position = pos_a.Create ()->GetObject<PositionAllocator> ();
+  for (int i = 0; i < num_ues; ++i){
+    Vector position = m_position->GetNext ();
+    positionAllocUe->Add (position);
+    NS_LOG_INFO("Node#" << i << " Position:" << position.x << "," << position.y << "," << position.z);
   }
+
   // Install Mobility Model
   // Nodes are static. No movement is simulated.
   MobilityHelper mobilityUe;
@@ -273,11 +260,6 @@ main (int argc, char *argv[])
       Ptr<Ipv4StaticRouting> ueStaticRouting = ipv4RoutingHelper.GetStaticRouting (ueNode->GetObject<Ipv4> ());
       ueStaticRouting->SetDefaultRoute (epcHelper->GetUeDefaultGatewayAddress (), 1);
     }
-
-
-  // random seed is set manually here for repetition
-  RngSeedManager::SetSeed (seed);
-  Ptr<UniformRandomVariable> RaUeUniformVariable = CreateObject<UniformRandomVariable> ();
 
 
   // Install and start applications on UEs and remote host
@@ -335,49 +317,7 @@ main (int argc, char *argv[])
   // Set up the data transmission for the Pre-Run
   for (uint16_t i = 0; i < num_ues; i++)
     {
-      int access = RaUeUniformVariable->GetInteger (50, simTime.GetMilliSeconds());
-      lteHelper->AttachSuspendedNb(ueLteDevs.Get(i), enbLteDevs.Get(0));
-
-      Ptr<LteUeNetDevice> ueLteDevice = ueLteDevs.Get(i)->GetObject<LteUeNetDevice> ();
-      Ptr<LteUeRrc> ueRrc = ueLteDevice->GetRrc();
-      if(ciot == true){
-        //std::cout << "ciot" << std::endl;
-        ueRrc->SetAttribute("CIoT-Opt", BooleanValue(true));
-      }
-      else{
-        ueRrc->SetAttribute("CIoT-Opt", BooleanValue(false));
-      }
-      if(edt == true){
-        //std::cout << "EDT" << std::endl;
-        ueRrc->SetAttribute("EDT", BooleanValue(true));
-      }
-      else{
-        ueRrc->SetAttribute("EDT", BooleanValue(false));
-      }
-
-      ++ulPort;
-      UdpEchoServerHelper server (ulPort);
-      serverApps.Add(server.Install (remoteHost));
-      //
-      // Create a UdpEchoClient application to send UDP datagrams from node zero to
-      // node one.
-      //
-      uint packetsize = packetsize_app_a;
-      UdpEchoClientHelper ulClient (remoteHostAddr, ulPort);
-      ulClient.SetAttribute ("Interval", TimeValue (packetinterval_app_a));
-      ulClient.SetAttribute ("MaxPackets", UintegerValue (1000000));
-      ulClient.SetAttribute ("PacketSize", UintegerValue(packetsize));
-      clientApps.Add (ulClient.Install (ueNodes.Get(i)));
-
-      serverApps.Get(i)->SetStartTime (MilliSeconds (access));
-      clientApps.Get(i)->SetStartTime (MilliSeconds (access));
-    }
-
-
-  // Set up the data transmission for the UEs to be considered in the results
-  for (uint16_t i = num_ues; i < num_ues*2; i++)
-    {
-      int access = RaUeUniformVariable->GetInteger (simTime.GetMilliSeconds(), 2*simTime.GetMilliSeconds());
+      int access = RaUeUniformVariable->GetInteger (0, simTime.GetMilliSeconds());
       lteHelper->AttachSuspendedNb(ueLteDevs.Get(i), enbLteDevs.Get(0));
 
       Ptr<LteUeNetDevice> ueLteDevice = ueLteDevs.Get(i)->GetObject<LteUeNetDevice> ();
@@ -391,56 +331,17 @@ main (int argc, char *argv[])
       //
       Ptr<ns3::Node> node = ueNodes.Get(i);  // node to install
 
-      Ptr<GenericCapacitor> capacitor = CreateObject<GenericCapacitor> ();
-      capacitor->SetInitialVoltage(3.3);
-      capacitor->SetAttribute("Capacitance", DoubleValue(5));
-      capacitor->SetAttribute("ThresholdVoltage", DoubleValue(1.8));
-      capacitor->SetAttribute("MaxCapacitorVoltage", DoubleValue(5.5));
-      Time updateInterval = MilliSeconds(10);  // used to set the capacitor and harvester update intervals
-      capacitor->SetEnergyUpdateInterval(updateInterval);
-      ueRrc->m_energyModel.SetEnergySource(capacitor);
-      capacitor->SetNode(node);  // you MUST set the node to the capacitor
-      capacitor->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
-
-      // create harverster to charge the capacitor
-      Ptr<ns3::EnergyHarvester> harvester;
-      if (harvestType == HarvestType::BasicHarvester)
-      {
-        // BasicEnergyHarvester provides a random energy value in an interval (default is from 0 to 2 W)
-        harvester = CreateObject<ns3::BasicEnergyHarvester>();
-        // set the distribution of the harvested energy
-        // Ptr<ns3::BasicEnergyHarvester> harvester = CreateObjectWithAttributes<ns3::BasicEnergyHarvester> (
-        //   // "HarvestablePower", StringValue("ns3::ConstantRandomVariable[Constant=1.0]")
-        //   "HarvestablePower", StringValue("ns3::UniformRandomVariable[Min=1.0|Max=2.0]")
-        // );
-        // harvester->SetAttribute("HarvestablePower", StringValue("ns3::ConstantRandomVariable[Constant=0.0]"));
-
-        harvester->SetAttribute("HarvestablePower", StringValue("ns3::UniformRandomVariable[Min=0.0|Max=0.0001]"));
-        harvester->SetAttribute("PeriodicHarvestedPowerUpdateInterval", ns3::TimeValue(updateInterval));
-      }
-      else
-      {
-        std::cout << "Using BasicSolarEnergyHarvester" << std::endl;
-        harvester = CreateObject<ns3::BasicSolarEnergyHarvester>();
-        harvester->SetAttribute("PeriodicHarvestedPowerUpdateInterval", ns3::TimeValue(MilliSeconds(10.0)));  // 10 ms, the same interval as the capacitor
-        // harvester->SetAttribute("HarvestablePower", StringValue("ns3::UniformRandomVariable[Min=0.0|Max=0.01]"));
-        harvester->SetAttribute("HarvestablePower", StringValue("ns3::ConstantRandomVariable[Constant=0.5]"));
-
-        // trick to set the start of the day
-        Ptr<BasicSolarEnergyHarvester> solarHarvester = DynamicCast<BasicSolarEnergyHarvester>(harvester);
-        solarHarvester->SetAttribute("StartSecondOfDay", UintegerValue(8 * 3600 + 200));  // 8am
-
-        // confirm update ( debug purpose )
-        UintegerValue value;
-        solarHarvester->GetAttribute("StartSecondOfDay", value);
-        std::cout << "StartSecondOfDay: " << value.Get() << std::endl;
-      }
-      capacitor->ConnectEnergyHarvester(harvester);
-      harvester->SetNode(node);
-      harvester->SetEnergySource(capacitor);
-
-      node->AggregateObject(harvester);
-      node->AggregateObject(capacitor);
+      Ptr<EnergyMarkov> source = CreateObject<EnergyMarkov> ();
+      source->SetInitialVoltage(3.3);
+      // used to set the capacitor and harvester update intervals
+      Time updateInterval = MilliSeconds(10);
+      source->SetEnergyUpdateInterval(updateInterval);
+      ueRrc->m_energyModel.SetEnergySource(source);
+      source->SetNode(node);  // you MUST set the node to the capacitor
+      source->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
+      source->SetAttribute("Delta0", DoubleValue(delta0)); // transition probability from INACTIVE to ACTIVE state
+      source->SetAttribute("Delta1", DoubleValue(delta1)); // transition probability
+      node->AggregateObject(source);
 
       ueRrc->EnableLogging();
       if(ciot == true){
@@ -479,51 +380,6 @@ main (int argc, char *argv[])
       }
     }
 
-
-
-  // Set up the data transmission for the Post-Run
-  for (uint16_t i = num_ues*2; i < num_ues*3; i++)
-  {
-    int access = RaUeUniformVariable->GetInteger (simTime.GetMilliSeconds()*2, simTime.GetMilliSeconds()*3);
-    lteHelper->AttachSuspendedNb(ueLteDevs.Get(i), enbLteDevs.Get(0));
-
-    Ptr<LteUeNetDevice> ueLteDevice = ueLteDevs.Get(i)->GetObject<LteUeNetDevice> ();
-    Ptr<LteUeRrc> ueRrc = ueLteDevice->GetRrc();
-    if(ciot == true){
-      //std::cout << "ciot" << std::endl;
-      ueRrc->SetAttribute("CIoT-Opt", BooleanValue(true));
-    }
-    else{
-      ueRrc->SetAttribute("CIoT-Opt", BooleanValue(false));
-    }
-    if(edt == true){
-      //std::cout << "EDT" << std::endl;
-      ueRrc->SetAttribute("EDT", BooleanValue(true));
-    }
-    else{
-      ueRrc->SetAttribute("EDT", BooleanValue(false));
-    }
-
-    ++ulPort;
-    UdpEchoServerHelper server (ulPort);
-    serverApps.Add(server.Install (remoteHost));
-    //
-    // Create a UdpEchoClient application to send UDP datagrams from node zero to
-    // node one.
-    //
-    if (i < num_ues*2){
-      uint packetsize = packetsize_app_a;
-      UdpEchoClientHelper ulClient (remoteHostAddr, ulPort);
-      ulClient.SetAttribute ("Interval", TimeValue (packetinterval_app_a));
-      ulClient.SetAttribute ("MaxPackets", UintegerValue (1000000));
-      ulClient.SetAttribute ("PacketSize", UintegerValue(packetsize));
-      clientApps.Add (ulClient.Install (ueNodes.Get(i)));
-
-      serverApps.Get(i)->SetStartTime (MilliSeconds (access));
-      clientApps.Get(i)->SetStartTime (MilliSeconds (access));
-    }
-  }
-
   /* **********************************
    * Start the simulation
    */
@@ -544,16 +400,16 @@ main (int argc, char *argv[])
   enbRrc->SetLogDir(logdir);
   lteHelper->SetLogDir(logdir);
 
-  std::cout << "Number of UEs: " << ueNodes.GetN() / 3 << " at each stage" << std::endl;
+  std::cout << "Number of UEs: " << ueNodes.GetN() << std::endl;
 
   #if GENERATE_TRACES
   lteHelper->EnableMacTraces();  // Enable MAC traces (to identify transmission patterns)
   // lteHelper->EnableTraces();
   // enable PCAP tracing
-  p2ph.EnablePcapAll("logs/lena-simple-epc");
+  p2ph.EnablePcapAll(logdir + "lena-simple-epc");
   #endif
 
-  Simulator::Stop (3*simTime); // Pre-Run, Run, Post-Run
+  Simulator::Stop (simTime); // Pre-Run, Run, Post-Run
   std::cout << "Log dir: ";
   Simulator::Run ();
   auto end = std::chrono::system_clock::now();
