@@ -2,6 +2,8 @@
 
 This repository was forked from [Lena-NB](https://github.com/tudo-cni/ns3-lena-nb).
 The original README file can be found [here](README_ORIGINAL.md).
+It is based on NS3 version 3.32 (needed for Lena-NB).
+Some minor changes (error corrections) were made to the original code to make it run.
 
 The changes focus on experimenting with different configurations of the NB-IoT network, particularly in the context of Ambient 6G research.
 The main contributions include:
