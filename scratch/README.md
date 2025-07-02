@@ -41,7 +41,17 @@ The command above selects the BasicEnergyHarvester (type 0) and assigns its upda
 # [nb-scenario3.cc](nb-scenario3.cc)
 
 This scenario creates a BS and N UE around in a circle of radius C (coverage).
-It is used to simulated the environment described in Moons et al. (2024)
+It is used to simulated the environment described in Moons et al. (2024) where there is a Markov chain energy model for the devices.
+
+```bash
+cd ns3-nbiot
+./waf --run "nb-scenario3 \
+    --num_ues=10 \
+    --coverage=100 \
+    --ns3::EnergyMarkov::Delta0=0.9 \
+    --ns3::EnergyMarkov::Delta1=0.15 \
+    --ns3::EnergyMarkov::LogDir=./logs/markov" 2>&1 | tee nb-scenario3.log
+```
 
 
 **Reference**:
