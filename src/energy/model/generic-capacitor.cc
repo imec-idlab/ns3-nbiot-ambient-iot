@@ -394,7 +394,8 @@ GenericCapacitor::UpdateEnergySource (void)
   if (m_remainingEnergyJ <= m_lowBatteryTh)
     {
       HandleEnergyDrainedEvent ();
-      return; // stop periodic update
+      // stop periodic update
+      // return;  // commented out to allow periodic updates even when energy is low
     }
 
   // schedule next periodic update
