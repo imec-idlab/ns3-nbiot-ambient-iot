@@ -1,0 +1,24 @@
+## -*- Mode: python; py-indent-offset: 4; indent-tabs-mode: nil; coding: utf-8; -*-
+
+def build(bld):
+
+    markov_traffic_module_dependencies = ['core', 'network', 'applications','internet']
+    if (bld.env['ENABLE_EMU']):
+        markov_traffic_module_dependencies.append('fd-net-device')
+    module = bld.create_ns3_module('markov-traffic', markov_traffic_module_dependencies)
+    module.source = [
+        'model/markov-udp-client.cc',
+        ]
+
+    headers = bld(features='ns3header')
+    headers.module = 'markov-traffic'
+    headers.source = [
+        'model/markov-udp-client.h',
+        ]
+
+    if (bld.env['ENABLE_EXAMPLES']):
+      bld.recurse('examples')
+    bld.recurse('examples')
+
+
+    #bld.ns3_python_bindings()
