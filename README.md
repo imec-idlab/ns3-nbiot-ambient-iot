@@ -11,4 +11,5 @@ The main contributions include:
 - Implementation of some [energy harvesting models](src/energy/model) to simulate energy harvesting from solar panels or replay CSV traces.
 - Implementation of a [Markov UDP client](src/markov-traffic/model/README.md) that can switch between active and inactive states, allowing for the traffic patterns proposed in Moons et al. (2024).
 
-Look at [scratch/README.md](scratch/README.md) for more information on how to run the simulations. There are some examples of how to use the capacitor source model and the energy harvesting models in this folder.
+Look at [scratch/README.md](scratch/README.md) for more information on how to run the simulations.
+There are some examples of how to use the capacitor source model and the energy harvesting models in this folder.
