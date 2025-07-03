@@ -41,7 +41,7 @@ The command above selects the BasicEnergyHarvester (type 0) and assigns its upda
 # [nb-scenario3.cc](nb-scenario3.cc)
 
 This scenario creates a BS and N UE around in a circle of radius C (coverage).
-It is used to simulated the environment described in Moons et al. (2024) where there is a Markov chain energy model for the devices.
+It is used to simulated the environment where the energy supplied to the device is controlled by a two-state Markov chain.
 
 ```bash
 cd ns3-nbiot
@@ -53,6 +53,37 @@ cd ns3-nbiot
     --ns3::EnergyMarkov::LogDir=./logs/markov" 2>&1 | tee nb-scenario3.log
 ```
 
+# [nb-scenario4.cc](nb-scenario4.cc)
+
+This scenario creates a BS and N UE around in a circle of radius C (coverage).
+It is used to simulated the environment described in Moons et al. (2024).
+The devices are feed by an unlimited energy source.
+The traffic model of each device is defined by a two-state Markov chain as shown below:
+
+<img src="markov-chain.png" alt="Markov Chain" width="400">
+
+- The steady state probability of the active state $p$ is:
+
+$p = \frac{\delta_1}{\delta_0 + \delta_1}$
+
+
+- RU duration $T_{RU} = 8 ms$.
+- the time slot duration $T_s$ can be calculated as follows:
+
+$T_s = N_{rep} × N_{RU} × T_{RU}$
+
+where $N_{rep}$ is the number of repetitions, and $N_{RU}$ is the number of resource units.
+
+- consider an uplink bandwidth of 180 kHz containing 12 subcarriers with a subcarrier spacing of 15 kHz. 6 subcarriers for each channel: NPUSCH and NPRACH.
+- TBS of 72 bits
+- scheduler assigns 1 RU and 2 repetitions per transmission, which results in a time slot duration of $T_s = 16 ms$.
+- we consider QPSK modulation, two receive antennas for the base station and a Rayleigh fading channel.
+- The noise in this channel is characterized by Additive White Gaussian Noise (AWGN).
+
+- Number of UEs: variable (from 1 to 640)
+
+
+```bash
 
 **Reference**:
 
