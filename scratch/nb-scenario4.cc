@@ -23,7 +23,7 @@
  This code is a sample simulation script for LTE+EPC.
  It initializes the logging system for different components such as "LenaNb5G-Cap" and "GenericCapacitor".
  The main function sets up a simulation environment with specific parameters:
- - simTime: Duration of the simulation, set to 3 seconds.
+ - simTime: Duration of the simulation.
  - worker: A flag for selecting a specific worker, initialized to 0.
  - seed: The seed for random number generation, initialized to 1.
  - simName: The name of the simulation, set to "cap".
@@ -53,14 +53,15 @@
 #include "ns3/point-to-point-module.h"
 #include "ns3/internet-module.h"
 #include "ns3/applications-module.h"
+#include "ns3/markov-udp-client.h" // Include the custom MarkovUdpClient header
 #include "ns3/mobility-module.h"
 #include "ns3/config-store-module.h"
 #include "ns3/random-variable-stream.h"
 #include "ns3/lte-module.h"
 #include <ns3/winner-plus-propagation-loss-model.h>
-//#include "ns3/gtk-config-store.h"
 #include "ns3/log.h"
 #include "ns3/nb-iot-energy.h"
+#include "ns3/basic-energy-harvester.h"
 
 using namespace ns3;
 
@@ -85,15 +86,34 @@ NS_LOG_COMPONENT_DEFINE ("LenaNb5G-Cap");
 #define GENERATE_TRACES true
 
 
+static void
+StateChangeTracer(int oldVal, int newVal)
+{
+  std::cout << Simulator::Now().GetSeconds() << "s: State changed from "
+            << oldVal << " to " << newVal << std::endl;
+}
+
+static void
+StateChangeTracerToFile(std::string logdir, std::string context, int oldVal, int newVal)
+{
+  std::ofstream logFile(logdir + "state-changes.log", std::ios::app);  // Append mode
+
+  logFile << Simulator::Now().GetSeconds()
+          << "s [" << context << "] State changed from "
+          << oldVal << " to " << newVal << std::endl;
+}
+
+
 int
 main (int argc, char *argv[])
 {
   ns3::LogComponentEnable("LenaNb5G-Cap", LOG_LEVEL_INFO);
   ns3::LogComponentDisable("LenaNb5G-Cap", LOG_LEVEL_DEBUG);
   // ns3::LogComponentEnable("LteUeRrc", LOG_LEVEL_INFO);
-  ns3::LogComponentEnable("EnergyMarkov", LOG_LEVEL_INFO);
+  ns3::LogComponentEnable("MarkovUdpClient", LOG_LEVEL_INFO);
+  ns3::LogComponentEnable("MarkovUdpClient", LOG_LEVEL_DEBUG);
 
-  ns3::Time simTime = Minutes(180);
+  ns3::Time simTime = Minutes(15);
   std::string simName = "markov";
 
   uint8_t worker = 0;
@@ -109,7 +129,7 @@ main (int argc, char *argv[])
 
   // Packet interval
   // BUG: if the packet interval is too small (e.g. 1 second), the simulation will crash (on lte-enb-rrc.cc)
-  Time packetinterval_app = Minutes(1);
+  Time packetinterval_app = Seconds(10);
 
   bool ciot = false;
   bool edt = false;
@@ -299,7 +319,7 @@ main (int argc, char *argv[])
   // Set up the data transmission for the Pre-Run
   for (uint16_t i = 0; i < num_ues; i++)
     {
-      int access = MilliSeconds(10).GetInteger(); // Access delay for the application, in milliseconds
+      Time access = MilliSeconds(10); // Access delay for the application, in milliseconds
       lteHelper->AttachSuspendedNb(ueLteDevs.Get(i), enbLteDevs.Get(0));
 
       Ptr<LteUeNetDevice> ueLteDevice = ueLteDevs.Get(i)->GetObject<LteUeNetDevice> ();
@@ -331,16 +351,27 @@ main (int argc, char *argv[])
 
       if (i < num_ues){
         uint packetsize = packetsize_app;
-        UdpEchoClientHelper ulClient (remoteHostAddr, ulPort);
-        ulClient.SetAttribute ("Interval", TimeValue (packetinterval_app));
-        ulClient.SetAttribute ("MaxPackets", UintegerValue (1000000));
-        ulClient.SetAttribute ("PacketSize", UintegerValue(packetsize));
-        clientApps.Add (ulClient.Install (ueNodes.Get(i)));
+        Ptr<MarkovUdpClient> ulClient = CreateObject<MarkovUdpClient>();
+        ulClient->SetRemote(remoteHostAddr, ulPort);
+        ulClient->SetRates(packetinterval_app, packetinterval_app); // INACTIVE and ACTIVE intervals
+        ulClient->SetAttribute ("MaxPackets", UintegerValue (1000000));
+        ulClient->SetAttribute ("PacketSize", UintegerValue(packetsize));
+        ulClient->SetTransitionProbabilities(0.7, 0.2);  // P(INACTIVE→ACTIVE), P(ACTIVE→INACTIVE)
+        ulClient->TraceConnectWithoutContext("State", MakeCallback(&StateChangeTracer));
 
-        serverApps.Get(i)->SetStartTime (MilliSeconds (access));
-        clientApps.Get(i)->SetStartTime (MilliSeconds (access));
+        Ptr<Node> client = ueNodes.Get(i);
+        // ulClient->SetNode (client);
+        client->AddApplication (ulClient);
+        clientApps.Add (ulClient);
+
+        serverApps.Get(i)->SetStartTime (access);
+        clientApps.Get(i)->SetStartTime (access);
       }
     }
+
+  // Log the state changes to a file
+  Config::Connect("/NodeList/*/ApplicationList/*/State",
+                  MakeBoundCallback(&StateChangeTracerToFile, logdir));
 
   /* **********************************
    * Start the simulation
@@ -371,7 +402,7 @@ main (int argc, char *argv[])
   p2ph.EnablePcapAll(logdir + "lena-simple-epc");
   #endif
 
-  Simulator::Stop (simTime); // Pre-Run, Run, Post-Run
+  Simulator::Stop (simTime); // Run
   std::cout << "Log dir: ";
   Simulator::Run ();
   auto end = std::chrono::system_clock::now();
