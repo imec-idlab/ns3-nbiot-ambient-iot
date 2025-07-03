@@ -23,7 +23,7 @@
 #include "ns3/internet-module.h"
 #include "ns3/point-to-point-module.h"
 #include "ns3/applications-module.h"
-#include "ns3/markov-udp-client.h" // Include your custom header
+#include "ns3/markov-udp-client.h" // Include the custom MarkovUdpClient header
 
 using namespace ns3;
 
