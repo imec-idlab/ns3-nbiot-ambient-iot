@@ -197,38 +197,46 @@ MarkovUdpClient::Send (void)
 {
   NS_LOG_FUNCTION (this);
   NS_ASSERT (m_sendEvent.IsExpired ());
-  SeqTsHeader seqTs;
-  seqTs.SetSeq (m_sent);
-  Ptr<Packet> p = Create<Packet> (m_size-(8+4)); // 8+4 : the size of the seqTs header
-  p->AddHeader (seqTs);
 
-  std::stringstream peerAddressStringStream;
-  if (Ipv4Address::IsMatchingType (m_peerAddress))
+  NS_LOG_DEBUG ("TraceDelay TX: Send() called at " << Simulator::Now ().GetSeconds () << "s with state: "
+    << (m_state == ACTIVE ? "ACTIVE" : "INACTIVE"));
+
+  if (m_state == ACTIVE) {
+    // only send packets when the state is ACTIVE
+
+    SeqTsHeader seqTs;
+    seqTs.SetSeq (m_sent);
+    Ptr<Packet> p = Create<Packet> (m_size-(8+4)); // 8+4 : the size of the seqTs header
+    p->AddHeader (seqTs);
+
+    std::stringstream peerAddressStringStream;
+    if (Ipv4Address::IsMatchingType (m_peerAddress))
     {
       peerAddressStringStream << Ipv4Address::ConvertFrom (m_peerAddress);
     }
-  else if (Ipv6Address::IsMatchingType (m_peerAddress))
+    else if (Ipv6Address::IsMatchingType (m_peerAddress))
     {
       peerAddressStringStream << Ipv6Address::ConvertFrom (m_peerAddress);
     }
 
-  if ((m_socket->Send (p)) >= 0)
+    if ((m_socket->Send (p)) >= 0)
     {
       ++m_sent;
       NS_LOG_INFO ("TraceDelay TX " << m_size << " bytes to "
-                                    << peerAddressStringStream.str () << " Uid: "
-                                    << p->GetUid () << " Time: "
-                                    << (Simulator::Now ()).As (Time::S));
+        << peerAddressStringStream.str () << " Uid: "
+        << p->GetUid () << " Time: "
+        << (Simulator::Now ()).As (Time::S));
 
     }
-  else
+    else
     {
       NS_LOG_INFO ("Error while sending " << m_size << " bytes to "
-                                          << peerAddressStringStream.str ());
+        << peerAddressStringStream.str ());
     }
 
-  UpdateState();  // after sending a packet, update the state using the traffic model
+  }
 
+  UpdateState();  // after sending a packet, update the state using the traffic model
   if (m_sent < m_count)
     {
       Time next = GetNextInterval();

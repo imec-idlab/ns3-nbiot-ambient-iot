@@ -60,6 +60,7 @@ int main(int argc, char *argv[])
 {
   Time::SetResolution(Time::NS);
   LogComponentEnable("MarkovUdpClient", LOG_LEVEL_INFO);
+  LogComponentDisable("MarkovUdpClient", LOG_LEVEL_DEBUG);
 
   NodeContainer nodes;
   nodes.Create(2);
