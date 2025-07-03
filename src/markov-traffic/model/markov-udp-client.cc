@@ -51,9 +51,13 @@ MarkovUdpClient::GetTypeId (void)
                    UintegerValue (100),
                    MakeUintegerAccessor (&MarkovUdpClient::m_count),
                    MakeUintegerChecker<uint32_t> ())
-    .AddAttribute ("Interval",
-                   "The time to wait between packets", TimeValue (Seconds (1.0)),
-                   MakeTimeAccessor (&MarkovUdpClient::m_interval),
+    .AddAttribute ("InactiveInterval",
+                   "The time to wait between packets in the inactive state", TimeValue (Seconds (1.0)),
+                   MakeTimeAccessor (&MarkovUdpClient::m_intervalInactive),
+                   MakeTimeChecker ())
+    .AddAttribute ("ActiveInterval",
+                   "The time to wait between packets in the active state", TimeValue (Seconds (0.1)),
+                   MakeTimeAccessor (&MarkovUdpClient::m_intervalActive),
                    MakeTimeChecker ())
     .AddAttribute ("RemoteAddress",
                    "The destination Address of the outbound packets",
@@ -69,6 +73,16 @@ MarkovUdpClient::GetTypeId (void)
                    UintegerValue (1024),
                    MakeUintegerAccessor (&MarkovUdpClient::m_size),
                    MakeUintegerChecker<uint32_t> (12,65507))
+    .AddAttribute ("TransitionProbabilityInactiveToActive",
+                   "Probability of transitioning from the inactive state to the active state",
+                   DoubleValue (0.7),
+                   MakeDoubleAccessor (&MarkovUdpClient::m_pInactiveToActive),
+                   MakeDoubleChecker<double> (0.0, 1.0))
+    .AddAttribute ("TransitionProbabilityActiveToInactive",
+                   "Probability of transitioning from the active state to the inactive state",
+                   DoubleValue (0.1),
+                   MakeDoubleAccessor (&MarkovUdpClient::m_pActiveToInactive),
+                   MakeDoubleChecker<double> (0.0, 1.0))
     .AddTraceSource("State",
       "Markov State: 0 = INACTIVE, 1 = ACTIVE",
       MakeTraceSourceAccessor(&MarkovUdpClient::m_stateTrace),
@@ -82,8 +96,8 @@ MarkovUdpClient::MarkovUdpClient ()
     m_state(INACTIVE),
     m_intervalInactive(Seconds(0.1)),
     m_intervalActive(Seconds(0.01)),
-    m_pInactiveToActive(0.1),
-    m_pActiveToInactive(0.2)
+    m_pInactiveToActive(0.7),
+    m_pActiveToInactive(0.1)
 {
   NS_LOG_FUNCTION (this);
   m_socket = 0;
