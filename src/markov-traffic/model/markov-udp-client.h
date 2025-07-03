@@ -67,15 +67,26 @@ public:
    */
   void SetRemote (Address addr);
 
-  void SetRates(Time low, Time high);
+  /**
+   * \brief Set the rates for the Markov model.
+   * \param inactiveTime Time between packets in the inactive state
+   * \param activeTime Time between packets in the active state
+   */
+  void SetRates(Time inactiveTime, Time activeTime);
 
-  void SetTransitionProbabilities(double lowToHigh, double highToLow);
+  /**
+   * @brief Sets the probability of transitioning from the inactive state to the active state.
+   *
+   * @param inactiveToActive Probability of transitioning from the inactive state to the active state.
+    * @param activeToInactive Probability of transitioning from the active state to the inactive state.
+   */
+  void SetTransitionProbabilities(double inactiveToActive, double activeToInactive);
 
 protected:
   virtual void DoDispose (void);
 
-  void UpdateState();
-  Time GetNextInterval();
+  void UpdateState();   // Update the state of the Markov model based on the transition probabilities
+  Time GetNextInterval();  // Get the next interval based on the current state. Used for scheduling the next packet send.
 
 private:
 
@@ -100,10 +111,10 @@ private:
   // Markov model parameters
   enum State { INACTIVE, ACTIVE };
   State m_state;
-  Time m_intervalLow;
-  Time m_intervalHigh;
-  double m_pLowToHigh;
-  double m_pHighToLow;
+  Time m_intervalInactive;
+  Time m_intervalActive;
+  double m_pInactiveToActive;
+  double m_pActiveToInactive;
 
   Ptr<UniformRandomVariable> m_uniformRv;
 

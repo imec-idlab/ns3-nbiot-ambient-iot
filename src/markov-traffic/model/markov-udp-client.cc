@@ -80,10 +80,10 @@ MarkovUdpClient::GetTypeId (void)
 MarkovUdpClient::MarkovUdpClient ()
   : m_sent(0),
     m_state(INACTIVE),
-    m_intervalLow(Seconds(0.1)),
-    m_intervalHigh(Seconds(0.01)),
-    m_pLowToHigh(0.1),
-    m_pHighToLow(0.2)
+    m_intervalInactive(Seconds(0.1)),
+    m_intervalActive(Seconds(0.01)),
+    m_pInactiveToActive(0.1),
+    m_pActiveToInactive(0.2)
 {
   NS_LOG_FUNCTION (this);
   m_socket = 0;
@@ -119,17 +119,17 @@ MarkovUdpClient::DoDispose (void)
 }
 
 void
-MarkovUdpClient::SetRates(Time low, Time high)
+MarkovUdpClient::SetRates(Time inactiveTime, Time activeTime)
 {
-  m_intervalLow = low;
-  m_intervalHigh = high;
+  m_intervalInactive = inactiveTime;
+  m_intervalActive = activeTime;
 }
 
 void
-MarkovUdpClient::SetTransitionProbabilities(double lowToHigh, double highToLow)
+MarkovUdpClient::SetTransitionProbabilities(double inactiveToActive, double activeToInactive)
 {
-  m_pLowToHigh = lowToHigh;
-  m_pHighToLow = highToLow;
+  m_pInactiveToActive = inactiveToActive;
+  m_pActiveToInactive = activeToInactive;
 }
 
 
@@ -250,9 +250,9 @@ MarkovUdpClient::UpdateState()
 {
   double r = m_uniformRv->GetValue();
   if (m_state == INACTIVE)
-    m_state = (r < m_pLowToHigh) ? ACTIVE : INACTIVE;
+    m_state = (r < m_pInactiveToActive) ? ACTIVE : INACTIVE;
   else
-    m_state = (r < m_pHighToLow) ? INACTIVE : ACTIVE;
+    m_state = (r < m_pActiveToInactive) ? INACTIVE : ACTIVE;
 
   m_stateTrace = static_cast<int>(m_state);
 }
@@ -260,7 +260,7 @@ MarkovUdpClient::UpdateState()
 Time
 MarkovUdpClient::GetNextInterval()
 {
-  return (m_state == INACTIVE) ? m_intervalLow : m_intervalHigh;
+  return (m_state == INACTIVE) ? m_intervalInactive : m_intervalActive;
 }
 
 
