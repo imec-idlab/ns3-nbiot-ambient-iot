@@ -27,7 +27,7 @@
  - worker: A flag for selecting a specific worker, initialized to 0.
  - seed: The seed for random number generation, initialized to 1.
  - simName: The name of the simulation, set to "cap".
- - cellsize: The size of the cell in meters, set to 2500 meters.
+ - coverage: The size of the cell in meters, set to 2500 meters.
  - num_ues: Number of User Equipments (UEs) per application, set to 1.
  - packetsize_app: The packet size for Application A, set to 49 bytes (32 bytes payload + headers).
  - packetinterval_app: The interval between packets for Application A, set to 1 day.
@@ -113,18 +113,22 @@ main (int argc, char *argv[])
   ns3::LogComponentEnable("MarkovUdpClient", LOG_LEVEL_INFO);
   ns3::LogComponentEnable("MarkovUdpClient", LOG_LEVEL_DEBUG);
 
-  ns3::Time simTime = Minutes(15);
+  ns3::Time simTime = Minutes(30);
   std::string simName = "markov";
 
   uint8_t worker = 0;
   int seed = 1;
-  double cellsize = 2500; // in meters
+  double coverage = 2500; // in meters
+
+  uint32_t mtu = 1500;
+  Time channelDelay = MilliSeconds (10);
 
   // Number of UEs per application
   int num_ues = 1;  // For now, 1 UE talks to a remote host via one eNB
+  double heightOfUes = 1.5; // height of the UEs
 
   // 32 Bytes 5G mMTC payload + 4 Bytes CoAP Header + 13 Bytes DTLS Header
-  // UDP Header and IP Header  are added by NS-3
+  // UDP Header and IP Header are added by NS-3
   int packetsize_app = 49;
 
   // Packet interval
@@ -142,7 +146,7 @@ main (int argc, char *argv[])
   cmd.AddValue ("num_ues", "Number of UEs", num_ues);
   cmd.AddValue ("ciot", "Cellular IoT Optimization",ciot);
   cmd.AddValue ("edt", "Early Data Transmission",edt);
-  cmd.AddValue ("coverage", "Cell size in meters", cellsize);
+  cmd.AddValue ("coverage", "Cell size in meters", coverage);
   cmd.Parse (argc, argv);
   ConfigStore inputConfig;
   inputConfig.ConfigureDefaults ();
@@ -152,7 +156,6 @@ main (int argc, char *argv[])
   // random seed is set manually here for repetition
   RngSeedManager::SetSeed (seed);
   Ptr<UniformRandomVariable> RaUeUniformVariable = CreateObject<UniformRandomVariable> ();
-
 
 
   // configure LTE
@@ -183,8 +186,8 @@ main (int argc, char *argv[])
   // Create the Internet
   PointToPointHelper p2ph;
   p2ph.SetDeviceAttribute ("DataRate", DataRateValue (DataRate ("100Gb/s")));
-  p2ph.SetDeviceAttribute ("Mtu", UintegerValue (1500));
-  p2ph.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (10)));
+  p2ph.SetDeviceAttribute ("Mtu", UintegerValue (mtu));
+  p2ph.SetChannelAttribute ("Delay", TimeValue (channelDelay));
   // place the PGW and the remote host on the same network
   NetDeviceContainer internetDevices = p2ph.Install (pgw, remoteHost);
   Ipv4AddressHelper ipv4h;
@@ -210,13 +213,12 @@ main (int argc, char *argv[])
   // Install Mobility Model
   Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();
   // Place our single eNb right in the center of the cell
-  positionAlloc->Add (Vector (cellsize/2, cellsize/2, 25));
+  positionAlloc->Add (Vector (coverage/2, coverage/2, 25));
   // Install Mobility Model. Fix eNB at the center
   MobilityHelper mobilityEnb;
   mobilityEnb.SetMobilityModel("ns3::ConstantPositionMobilityModel");
   mobilityEnb.SetPositionAllocator(positionAlloc);
   mobilityEnb.Install(enbNodes);
-
 
   /*
   --------------- create UEs
@@ -227,10 +229,10 @@ main (int argc, char *argv[])
   // Install Mobility Model for Application A
   ObjectFactory pos_a;
   pos_a.SetTypeId ("ns3::UniformDiscPositionAllocator");
-  pos_a.Set ("X", StringValue (std::to_string(cellsize/2)));
-  pos_a.Set ("Y", StringValue (std::to_string(cellsize/2)));
-  pos_a.Set ("Z", DoubleValue (1.5));  // height of the UEs, we should also vary this in the future
-  pos_a.Set ("rho", DoubleValue (cellsize/2));
+  pos_a.Set ("X", StringValue (std::to_string(coverage/2)));
+  pos_a.Set ("Y", StringValue (std::to_string(coverage/2)));
+  pos_a.Set ("Z", DoubleValue (heightOfUes));  // height of the UEs, we should also vary this in the future
+  pos_a.Set ("rho", DoubleValue (coverage/2));
   Ptr<PositionAllocator> m_position = pos_a.Create ()->GetObject<PositionAllocator> ();
   for (int i = 0; i < num_ues; ++i){
     Vector position = m_position->GetNext ();
@@ -356,7 +358,7 @@ main (int argc, char *argv[])
         ulClient->SetRates(packetinterval_app, packetinterval_app); // INACTIVE and ACTIVE intervals
         ulClient->SetAttribute ("MaxPackets", UintegerValue (1000000));
         ulClient->SetAttribute ("PacketSize", UintegerValue(packetsize));
-        ulClient->SetTransitionProbabilities(0.7, 0.2);  // P(INACTIVE→ACTIVE), P(ACTIVE→INACTIVE)
+        // ulClient->SetTransitionProbabilities(0.7, 0.2);  // P(INACTIVE→ACTIVE), P(ACTIVE→INACTIVE)
         ulClient->TraceConnectWithoutContext("State", MakeCallback(&StateChangeTracer));
 
         Ptr<Node> client = ueNodes.Get(i);
@@ -374,8 +376,10 @@ main (int argc, char *argv[])
                   MakeBoundCallback(&StateChangeTracerToFile, logdir));
 
   /* **********************************
+   *
    * Start the simulation
-   */
+   *
+   * **********************************/
   std::cout << "Started computation at " << std::ctime(&start_time);
 
   for (uint16_t i = 0; i < ueNodes.GetN(); i++)
