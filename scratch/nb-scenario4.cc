@@ -85,16 +85,25 @@ NS_LOG_COMPONENT_DEFINE ("LenaNb5G-Cap");
 
 #define GENERATE_TRACES true
 
-
-static void
-StateChangeTracer(int oldVal, int newVal)
+/**
+ * Tracer function to log state changes to the console.
+ * @param oldVal Previous state value.
+ * @param newVal New state value.
+ */
+static void StateChangeTracer(int oldVal, int newVal)
 {
   std::cout << Simulator::Now().GetSeconds() << "s: State changed from "
             << oldVal << " to " << newVal << std::endl;
 }
 
-static void
-StateChangeTracerToFile(std::string logdir, std::string context, int oldVal, int newVal)
+/**
+ * Tracer function to log state changes to a file.
+ * @param logdir Directory where the log file will be saved.
+ * @param context Context of the state change (e.g., application name).
+ * @param oldVal Previous state value.
+ * @param newVal New state value.
+ */
+static void StateChangeTracerToFile(std::string logdir, std::string context, int oldVal, int newVal)
 {
   std::ofstream logFile(logdir + "state-changes.log", std::ios::app);  // Append mode
 
@@ -104,17 +113,37 @@ StateChangeTracerToFile(std::string logdir, std::string context, int oldVal, int
 }
 
 
-int
-main (int argc, char *argv[])
+/**
+ * Main function to set up and run the simulation.
+ * It initializes the LTE network, configures UEs and eNBs, and runs applications.
+ * @return Exit status of the program.
+ */
+int main (int argc, char *argv[])
 {
-  ns3::LogComponentEnable("LenaNb5G-Cap", LOG_LEVEL_INFO);
-  ns3::LogComponentDisable("LenaNb5G-Cap", LOG_LEVEL_DEBUG);
-  // ns3::LogComponentEnable("LteUeRrc", LOG_LEVEL_INFO);
-  ns3::LogComponentEnable("MarkovUdpClient", LOG_LEVEL_INFO);
-  ns3::LogComponentEnable("MarkovUdpClient", LOG_LEVEL_DEBUG);
+  LogLevel logLevel = LOG_LEVEL_INFO; // Set the log level to debug
 
-  ns3::Time simTime = Minutes(30);
-  std::string simName = "markov";
+  ns3::LogComponentEnable("LenaNb5G-Cap", logLevel);
+  ns3::LogComponentDisable("LenaNb5G-Cap", LOG_LEVEL_DEBUG);
+  // ns3::LogComponentEnable("LteUeRrc", logLevel);
+  ns3::LogComponentEnable("MarkovUdpClient", logLevel);
+  ns3::LogComponentEnable("MarkovUdpClient", logLevel);
+
+  ns3::LogComponentEnable ("LteUeRrc", logLevel);
+  ns3::LogComponentEnable ("LteUeMac", logLevel);
+  ns3::LogComponentEnable ("LteUePhy", logLevel);
+
+  ns3::LogComponentEnable ("LteEnbRrc", logLevel);
+  ns3::LogComponentEnable ("LteEnbMac", logLevel);
+  ns3::LogComponentEnable ("LteEnbPhy", logLevel);
+
+
+  // --------------------------------------------------------------------------
+  //
+  // Simulation parameters
+  //
+  // --------------------------------------------------------------------------
+  ns3::Time simTime = Minutes(30);  // Total duration of the simulation
+  std::string simName = "markov";  // Name of the simulation, used for logging
 
   uint8_t worker = 0;
   int seed = 1;
@@ -296,10 +325,10 @@ main (int argc, char *argv[])
 
   // logdir / simName / num_ues _ simTime _ ciot _ edt
   logdir += simName;
-  logdir += "/" + std::to_string(ueNodes.GetN());
-  logdir += "_" + std::to_string(simTime.GetInteger());
-  logdir += "_" + std::to_string(ciot);
-  logdir += "_" + std::to_string(edt);
+  logdir += "/u" + std::to_string(ueNodes.GetN());
+  logdir += "_t" + std::to_string(simTime.GetInteger());
+  logdir += "_c" + std::to_string(ciot);
+  logdir += "_e" + std::to_string(edt);
   // create the directory
   techdir = makedir + logdir;
   z = std::system(techdir.c_str());  // mkdir
@@ -315,8 +344,8 @@ main (int argc, char *argv[])
   NS_LOG_DEBUG("cmd: " << techdir <<" : " << z);
 
   // define path + initial part of the the log filenames used
-  logdir += "/" + std::to_string(worker);
-  logdir += "_" + std::to_string(seed) + "_";
+  logdir += "/w" + std::to_string(worker);
+  logdir += "_s" + std::to_string(seed) + "_";
 
   // Set up the data transmission for the Pre-Run
   for (uint16_t i = 0; i < num_ues; i++)
@@ -401,7 +430,10 @@ main (int argc, char *argv[])
 
   #if GENERATE_TRACES
   lteHelper->EnableMacTraces();  // Enable MAC traces (to identify transmission patterns)
-  // lteHelper->EnableTraces();
+  lteHelper->EnablePhyTraces();  // Enable Phy traces ()
+  // lteHelper->EnableRlcTraces();  // Enable RLC traces. RAISES error
+  // lteHelper->EnablePdcpTraces(); // Enable PDCP traces. RAISES error
+
   // enable PCAP tracing
   p2ph.EnablePcapAll(logdir + "lena-simple-epc");
   #endif
