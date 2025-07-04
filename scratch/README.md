@@ -84,6 +84,18 @@ where $N_{rep}$ is the number of repetitions, and $N_{RU}$ is the number of reso
 
 
 ```bash
+cd ns3-nbiot
+./waf --run "nb-scenario4 \
+    --simTime=180 \
+    --num_ues=10 \
+    --coverage=100 \
+    --ns3::MarkovUdpClient::PacketSize=512 \
+    --ns3::MarkovUdpClient::MaxPackets=10000 \
+    --ns3::MarkovUdpClient::ActiveInterval=10 \
+    --ns3::MarkovUdpClient::InactiveInterval=10
+    --ns3::MarkovUdpClient::TransitionProbabilityInactiveToActive=0.7 \
+    --ns3::MarkovUdpClient::TransitionProbabilityActiveToInactive=0.2" 2>&1 | tee nb-scenario3.log
+```
 
 **Reference**:
 
