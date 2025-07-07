@@ -50,6 +50,7 @@ cd ns3-nbiot
     --coverage=100 \
     --ns3::EnergyMarkov::Delta0=0.9 \
     --ns3::EnergyMarkov::Delta1=0.15 \
+    --ns3::LteEnbMac::NumberOfRaPreambles=10 \
     --ns3::EnergyMarkov::LogDir=./logs/markov" 2>&1 | tee nb-scenario3.log
 ```
 
@@ -91,6 +92,7 @@ cd ns3-nbiot
     --coverage=100 \
     --ns3::MarkovUdpClient::PacketSize=512 \
     --ns3::MarkovUdpClient::MaxPackets=10000 \
+    --ns3::LteEnbMac::NumberOfRaPreambles=10 \
     --ns3::MarkovUdpClient::ActiveInterval=10 \
     --ns3::MarkovUdpClient::InactiveInterval=10
     --ns3::MarkovUdpClient::TransitionProbabilityInactiveToActive=0.7 \
