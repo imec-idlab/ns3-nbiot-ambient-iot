@@ -27,7 +27,7 @@
  - worker: A flag for selecting a specific worker, initialized to 0.
  - seed: The seed for random number generation, initialized to 1.
  - simName: The name of the simulation, set to "cap".
- - coverage: The size of the cell in meters, set to 2500 meters.
+ - cell_size: The size of the cell in meters, set to 2500 meters.
  - num_ues: Number of User Equipments (UEs) per application, set to 1.
  - packetsize_app: The packet size for Application A, set to 49 bytes (32 bytes payload + headers).
  - packetinterval_app: The interval between packets for Application A, set to 1 day.
@@ -58,6 +58,7 @@
 #include "ns3/config-store-module.h"
 #include "ns3/random-variable-stream.h"
 #include "ns3/lte-module.h"
+#include <ns3/propagation-loss-model.h>
 #include <ns3/winner-plus-propagation-loss-model.h>
 #include "ns3/log.h"
 #include "ns3/nb-iot-energy.h"
@@ -147,7 +148,7 @@ int main (int argc, char *argv[])
 
   uint8_t worker = 0;
   int seed = 1;
-  double coverage = 2500; // in meters
+  double cell_size = 2500; // in meters
 
   uint32_t mtu = 1500;
   Time channelDelay = MilliSeconds (10);
@@ -164,6 +165,9 @@ int main (int argc, char *argv[])
   // BUG: if the packet interval is too small (e.g. 1 second), the simulation will crash (on lte-enb-rrc.cc)
   Time packetinterval_app = Seconds(10);
 
+  std::string propagationLossModel = "friis";  // default value is to use simple propagation loss model (Friis)
+  double rss = -100.0; // default value for fixed RSSI, used in FixedRssLossModel
+  double minLoss = 0.0; // default value for minimum loss, used in FriisPropagationLossModel
   bool ciot = false;
   bool edt = false;
   // Command line arguments
@@ -175,12 +179,23 @@ int main (int argc, char *argv[])
   cmd.AddValue ("num_ues", "Number of UEs", num_ues);
   cmd.AddValue ("ciot", "Cellular IoT Optimization",ciot);
   cmd.AddValue ("edt", "Early Data Transmission",edt);
-  cmd.AddValue ("coverage", "Cell size in meters", coverage);
+  cmd.AddValue ("cell_size", "Cell size in meters", cell_size);
+  cmd.AddValue("propagationLossModel", "Propagation loss model: friis, fixed, or winner", propagationLossModel);
+  cmd.AddValue("RSS", "Fixed RSSI in dBm for FixedRssLossModel", rss);
+  cmd.AddValue("minLoss", "Minimum loss in dB for FriisPropagationLoss", minLoss);
   cmd.Parse (argc, argv);
   ConfigStore inputConfig;
   inputConfig.ConfigureDefaults ();
 
   // parse again so you can override default values from the command line
+
+  // Validate input
+  if (propagationLossModel != "friis" &&
+      propagationLossModel != "fixed" &&
+      propagationLossModel != "winner")
+  {
+        NS_FATAL_ERROR("Invalid propagationLossModel: must be 'friis', 'fixed', or 'winer'");
+  }
 
   // random seed is set manually here for repetition
   RngSeedManager::SetSeed (seed);
@@ -194,10 +209,24 @@ int main (int argc, char *argv[])
   lteHelper->EnableRrcLogging ();
   lteHelper->SetEnbAntennaModelType ("ns3::IsotropicAntennaModel");
   lteHelper->SetUeAntennaModelType ("ns3::IsotropicAntennaModel");
-  lteHelper->SetAttribute ("PathlossModel", StringValue ("ns3::WinnerPlusPropagationLossModel")); // Note that the Winner+ pathloss model isn't available in the current release of ns3. It can be downloaded at https://github.com/tudo-cni/ns3-propagation-winner-plus
-  lteHelper->SetPathlossModelAttribute ("HeightBasestation", DoubleValue (50));
-  lteHelper->SetPathlossModelAttribute ("Environment", EnumValue (UMaEnvironment));
-  lteHelper->SetPathlossModelAttribute ("LineOfSight", BooleanValue (false));
+  if (propagationLossModel == "friis")
+  {
+    lteHelper->SetAttribute ("PathlossModel", StringValue ("ns3::FriisPropagationLossModel"));
+    lteHelper->SetPathlossModelAttribute("MinLoss", DoubleValue (minLoss)); // Set minimum loss to 0 dB
+  }
+  else if (propagationLossModel == "fixed")
+  {
+    lteHelper->SetAttribute ("PathlossModel", StringValue ("ns3::FixedRssLossModel"));
+    lteHelper->SetPathlossModelAttribute("Rss", DoubleValue (rss)); // Set fixed RSSI to -100 dBm
+  }
+  else if (propagationLossModel == "winner")
+  {
+    lteHelper->SetAttribute ("PathlossModel", StringValue ("ns3::WinnerPlusPropagationLossModel")); // Note that the Winner+ pathloss model isn't available in the current release of ns3. It can be downloaded at https://github.com/tudo-cni/ns3-propagation-winner-plus
+    lteHelper->SetPathlossModelAttribute ("HeightBasestation", DoubleValue (50));
+    lteHelper->SetPathlossModelAttribute ("Environment", EnumValue (UMaEnvironment));
+    lteHelper->SetPathlossModelAttribute ("LineOfSight", BooleanValue (false));
+  }
+
   Config::SetDefault ("ns3::LteHelper::UseIdealRrc", BooleanValue (false));
   Config::SetDefault ("ns3::LteSpectrumPhy::CtrlErrorModelEnabled", BooleanValue (false));
   Config::SetDefault ("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue (false));
@@ -242,7 +271,7 @@ int main (int argc, char *argv[])
   // Install Mobility Model
   Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();
   // Place our single eNb right in the center of the cell
-  positionAlloc->Add (Vector (coverage/2, coverage/2, 25));
+  positionAlloc->Add (Vector (cell_size/2, cell_size/2, 25));
   // Install Mobility Model. Fix eNB at the center
   MobilityHelper mobilityEnb;
   mobilityEnb.SetMobilityModel("ns3::ConstantPositionMobilityModel");
@@ -258,10 +287,10 @@ int main (int argc, char *argv[])
   // Install Mobility Model for Application A
   ObjectFactory pos_a;
   pos_a.SetTypeId ("ns3::UniformDiscPositionAllocator");
-  pos_a.Set ("X", StringValue (std::to_string(coverage/2)));
-  pos_a.Set ("Y", StringValue (std::to_string(coverage/2)));
+  pos_a.Set ("X", StringValue (std::to_string(cell_size/2)));
+  pos_a.Set ("Y", StringValue (std::to_string(cell_size/2)));
   pos_a.Set ("Z", DoubleValue (heightOfUes));  // height of the UEs, we should also vary this in the future
-  pos_a.Set ("rho", DoubleValue (coverage/2));
+  pos_a.Set ("rho", DoubleValue (cell_size/2));
   Ptr<PositionAllocator> m_position = pos_a.Create ()->GetObject<PositionAllocator> ();
   for (int i = 0; i < num_ues; ++i){
     Vector position = m_position->GetNext ();
