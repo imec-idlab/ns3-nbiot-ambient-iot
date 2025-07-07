@@ -355,7 +355,6 @@ int main (int argc, char *argv[])
 
       Ptr<LteUeNetDevice> ueLteDevice = ueLteDevs.Get(i)->GetObject<LteUeNetDevice> ();
       Ptr<LteUeRrc> ueRrc = ueLteDevice->GetRrc();
-
       ueRrc->EnableLogging();
       if(ciot == true){
         //std::cout << "ciot" << std::endl;
@@ -421,10 +420,14 @@ int main (int argc, char *argv[])
     ueMac->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
 
   }
+  lteHelper->SetLogDir(logdir);
+
   Ptr<LteEnbNetDevice> enbLteDevice = enbLteDevs.Get(0)->GetObject<LteEnbNetDevice>();
   Ptr<LteEnbRrc> enbRrc = enbLteDevice->GetRrc();
   enbRrc->SetLogDir(logdir);
-  lteHelper->SetLogDir(logdir);
+
+  // Ptr<LteEnbMac> enbMac = enbLteDevice->GetMac();
+  // enbMac->SetLogDir(logdir);  // private !!
 
   std::cout << "Number of UEs: " << ueNodes.GetN() << std::endl;
 
