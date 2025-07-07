@@ -57,6 +57,7 @@ if __name__ == "__main__":
     parser.add_argument("--dir", type=str, default=None, help="Directory to search for the files")
     parser.add_argument("--fname", type=str, default=None, help="Name of the file to process")
     parser.add_argument("--plot-fname", type=str, default="state_transitions.png", help="Output plot file name")
+    parser.add_argument("--show", action="store_true", help="Show the plot")
     args = parser.parse_args()
 
     if args.dir is not None:
@@ -92,7 +93,10 @@ if __name__ == "__main__":
         axes[-1].set_xlabel("Time (s)")
         fig.suptitle("Markov State Transitions per Node", fontsize=14)
         plt.tight_layout(rect=[0, 0, 1, 0.97])
-        plt.savefig(args.plot_fname)
+        if args.show:
+            plt.show()
+        else:
+            plt.savefig(args.plot_fname)
 
 
     else:
