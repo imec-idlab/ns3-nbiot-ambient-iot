@@ -165,7 +165,8 @@ int main (int argc, char *argv[])
   // BUG: if the packet interval is too small (e.g. 1 second), the simulation will crash (on lte-enb-rrc.cc)
   Time packetinterval_app = Seconds(10);
 
-  std::string propagationLossModel = "friis";  // default value is to use simple propagation loss model (Friis)
+  std::string positioning = "uniform"; // default value is to use random position inside the cell
+  std::string propagationLossModel = "fixed";  // default value is to use simple propagation loss model (fixed)
   double rss = -100.0; // default value for fixed RSSI, used in FixedRssLossModel
   double minLoss = 0.0; // default value for minimum loss, used in FriisPropagationLossModel
   bool ciot = false;
@@ -183,18 +184,28 @@ int main (int argc, char *argv[])
   cmd.AddValue("propagationLossModel", "Propagation loss model: friis, fixed, or winner", propagationLossModel);
   cmd.AddValue("RSS", "Fixed RSSI in dBm for FixedRssLossModel", rss);
   cmd.AddValue("minLoss", "Minimum loss in dB for FriisPropagationLoss", minLoss);
+  cmd.AddValue("positioning", "Positioning model: uniform, random, or same", positioning);
   cmd.Parse (argc, argv);
   ConfigStore inputConfig;
   inputConfig.ConfigureDefaults ();
 
   // parse again so you can override default values from the command line
 
-  // Validate input
+  // Validate input for the propagation loss model
   if (propagationLossModel != "friis" &&
       propagationLossModel != "fixed" &&
       propagationLossModel != "winner")
   {
         NS_FATAL_ERROR("Invalid propagationLossModel: must be 'friis', 'fixed', or 'winer'");
+        return 1;
+  }
+
+  if (positioning != "uniform" &&
+      positioning != "random" &&
+      positioning != "same")
+  {
+        NS_FATAL_ERROR("Invalid positioning: must be 'uniform', 'random', or 'same'");
+        return 1;
   }
 
   // random seed is set manually here for repetition
@@ -284,18 +295,40 @@ int main (int argc, char *argv[])
   NodeContainer ueNodes;
   ueNodes.Create (num_ues); // Pre-Run, Run, Post-Run.
   Ptr<ListPositionAllocator> positionAllocUe = CreateObject<ListPositionAllocator> ();
-  // Install Mobility Model for Application A
-  ObjectFactory pos_a;
-  pos_a.SetTypeId ("ns3::UniformDiscPositionAllocator");
-  pos_a.Set ("X", StringValue (std::to_string(cell_size/2)));
-  pos_a.Set ("Y", StringValue (std::to_string(cell_size/2)));
-  pos_a.Set ("Z", DoubleValue (heightOfUes));  // height of the UEs, we should also vary this in the future
-  pos_a.Set ("rho", DoubleValue (cell_size/2));
-  Ptr<PositionAllocator> m_position = pos_a.Create ()->GetObject<PositionAllocator> ();
-  for (int i = 0; i < num_ues; ++i){
-    Vector position = m_position->GetNext ();
-    positionAllocUe->Add (position);
-    NS_LOG_INFO("Node#" << i << " Position:" << position.x << "," << position.y << "," << position.z);
+  if (positioning == "same")
+  {
+    // Place all UEs at the same position, in the center of the cell
+    positionAllocUe->Add (Vector (cell_size/2, cell_size/2, heightOfUes));
+  }
+  else if (positioning == "uniform")
+  {
+    // Place UEs uniformly at the same distance from the BS in the cell
+    const double PI = 3.14159265358979323846;
+    double radius = cell_size / 2; // radius of the circle where UEs are placed
+    for (int i = 0; i < num_ues; ++i)
+    {
+      double angle = 2 * PI * i / num_ues; // distribute UEs uniformly around the eNB
+      double x = radius + radius * std::cos(angle);  // x-coordinate = centerX + radius * cos(angle)
+      double y = radius + radius * std::sin(angle);  // y-coordinate = centerY + radius * sin(angle)
+      positionAllocUe->Add (Vector (x, y, heightOfUes));
+    }
+  }
+  else if (positioning == "random")
+  {
+    // Install Mobility Model for the UEs
+    // The UEs are placed randomly inside a disc around the eNB, with radius cell_size
+    ObjectFactory pos_a;
+    pos_a.SetTypeId ("ns3::UniformDiscPositionAllocator");
+    pos_a.Set ("X", StringValue (std::to_string(cell_size/2)));
+    pos_a.Set ("Y", StringValue (std::to_string(cell_size/2)));
+    pos_a.Set ("Z", DoubleValue (heightOfUes));  // height of the UEs, we should also vary this in the future
+    pos_a.Set ("rho", DoubleValue (cell_size/2));
+    Ptr<PositionAllocator> m_position = pos_a.Create ()->GetObject<PositionAllocator> ();
+    for (int i = 0; i < num_ues; ++i){
+      Vector position = m_position->GetNext ();
+      positionAllocUe->Add (position);
+      NS_LOG_INFO("Node#" << i << " Position:" << position.x << "," << position.y << "," << position.z);
+    }
   }
 
   // Install Mobility Model
