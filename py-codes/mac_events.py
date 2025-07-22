@@ -1,15 +1,23 @@
 import argparse
 import itertools
-import matplotlib.pyplot as plt
 from collections import defaultdict
-
-
-# Example usage:
-# python py-codes/mac_operations.py --fname logs/markov/u3_t180000000000_c0_e0/22_07_2025_13_59_49/w0_s1_MAC.log
+import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 
 
 # Cycled list of marker styles for auto assignment
 available_markers = itertools.cycle(['^', 's', 'X', 'o', 'D', 'v', '*', 'P', 'h', '8'])
+
+
+# This compiles MAC events from a log file and plots them against time.
+# It can be used for eNB or UE MAC logs.
+
+# Example usage:
+# 1. for eNB MAC log:
+# python py-codes/mac_operations.py --fname logs/markov/u3_t180000000000_c0_e0/22_07_2025_13_59_49/w0_s1_MAC.log
+
+# 2. for UE MAC log:
+# python py-codes/mac_operations.py --fname logs/markov/u3_t180000000000_c0_e0/22_07_2025_13_59_49/w0_s1_ueMAC.log
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Energy Changes")
@@ -50,8 +58,13 @@ if __name__ == "__main__":
             for r in rnti_set:
                 plt.scatter(time, r, marker=marker, label=event, edgecolors='gray', alpha=0.5)
 
+    plt.gca().yaxis.set_major_locator(MaxNLocator(integer=True))
+
     plt.xlabel("Time (ms)")
-    plt.ylabel("RNTI")
+    if "ueMAC" in args.fname:
+        plt.ylabel("UE IMSI")
+    else:
+        plt.ylabel("RNTI")
     plt.title("NB-IoT MAC Events vs Time")
     plt.grid(True)
 
