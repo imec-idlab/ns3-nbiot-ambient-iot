@@ -41,12 +41,18 @@ def process_energy_file(file_path: str) -> pd.DataFrame:
     return df
 
 
+# Example usage:
+# 1. To find energy files in a directory and subdirectories:
+# python energy.py --dir /path/to/directory
+#
+# 2. To process a specific energy file and plot the results:
+# python energy.py --fname /path/to/energy.log --show
+#
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Energy Changes")
     parser.add_argument("--dir", type=str, default=None, help="Directory to search for the files")
     parser.add_argument("--fname", type=str, default=None, help="Name of the file to process")
-    parser.add_argument("--plot-fname", type=str, default="energy.png", help="Output plot file name")
-    parser.add_argument("--show", action="store_true", help="Show the plot")
+    parser.add_argument("--show", action="store_true", help="Show the plot (otherwise save as PNG)")
     args = parser.parse_args()
 
     if args.dir is not None:
@@ -73,7 +79,7 @@ if __name__ == "__main__":
         if args.show:
             plt.show()
         else:
-            plt.savefig(args.plot_fname)
+            plt.savefig(args.fname.replace('.log', '.png'))
 
 
     else:
