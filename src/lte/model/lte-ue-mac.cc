@@ -18,7 +18,7 @@
  *
  * Author: Nicola Baldo  <nbaldo@cttc.es>
  * Author: Marco Miozzo <mmiozzo@cttc.es>
- * Modified by: 
+ * Modified by:
  *          Tim Gebauer <tim.gebauer@tu-dortmund.de> (NB-IoT Extension)
  *          Pascal Jörke <pascal.joerke@tu-dortmund.de> (NB-IoT Extension)
  */
@@ -166,7 +166,7 @@ UeMemberLteUeCmacSapProvider::NotifyPsm()
   m_mac->DoNotifyPsm();
 }
 
-void 
+void
 UeMemberLteUeCmacSapProvider::SetMsg5Buffer(uint32_t buffersize){
   m_mac->DoSetMsg5Buffer(buffersize);
 }
@@ -220,7 +220,7 @@ UeMemberLteMacSapProvider::ReportBufferStatusNb (
   m_mac->DoReportBufferStatus (params);
 }
 
-void 
+void
 UeMemberLteMacSapProvider::ReportNoTransmissionNb(uint16_t rnti, uint8_t lcid){
 
 }
@@ -379,7 +379,7 @@ LteUeMac::SetComponentCarrierId (uint8_t index)
 {
   m_componentCarrierId = index;
 }
-uint64_t 
+uint64_t
 LteUeMac::GetBufferSize(){
   std::map<uint8_t, LteMacSapProvider::ReportBufferStatusParameters>::iterator it;
   uint64_t buffersize=0;
@@ -391,7 +391,7 @@ LteUeMac::GetBufferSize(){
   }
   return buffersize;
 }
-uint64_t 
+uint64_t
 LteUeMac::GetBufferSizeComplete(){
   uint64_t buffersize=0;
   std::map<uint8_t, LteMacSapProvider::ReportBufferStatusParameters>::iterator it;
@@ -430,7 +430,7 @@ LteUeMac::DoTransmitPdu (LteMacSapProvider::TransmitPduParameters params)
     }
     // Normal PDU just add BSR for next Packet
   }
-  
+
   params.pdu->AddPacketTag (radioTag);
   // store pdu in HARQ buffer
   //m_miUlHarqProcessesPacket.at (m_harqProcessId)->AddPacket (params.pdu);
@@ -602,7 +602,7 @@ LteUeMac::SendRaPreambleNb (bool contention)
   double preambleRepetition = 4.0 * preambleGroupTime;
   double time = NbIotRrcSap::ConvertNumRepetitionsPerPreambleAttempt2int (m_CeLevel) *
                                   preambleRepetition;
-  
+
   m_cmacSapUser->NotifyEnergyState(NbiotEnergyModel::PowerState::RRC_CONNECTED_SENDING_NPRACH);
   //Schedule EnergyStateChange on the next subframe after transmission
   Simulator::Schedule (MilliSeconds (time+1), &LteUeCmacSapUser::NotifyEnergyState, m_cmacSapUser, NbiotEnergyModel::PowerState::RRC_CONNECTED_IDLE);
@@ -709,7 +709,7 @@ LteUeMac::RecvRaResponseNb (NbIotRrcSap::RarPayload raResponse)
   m_noRaResponseReceivedEvent.Cancel ();
   NS_LOG_INFO ("got RAR for RAPID " << (uint32_t) m_raPreambleId
                                     << ", setting T-C-RNTI = " << raResponse.cellRnti);
-                                    
+
   if (m_mac_logging)
   {
     std::string msg = "RecvRaResponseNb,cellRNTI," + std::to_string(raResponse.cellRnti) + ",";
@@ -726,7 +726,7 @@ LteUeMac::RecvRaResponseNb (NbIotRrcSap::RarPayload raResponse)
   // To be comented in
   bool edt;
   if(raResponse.ulGrant.tbs_size > 88){
-    // We got a grant for EDT 
+    // We got a grant for EDT
     edt = true;
   }else{
     edt = false;
@@ -810,7 +810,7 @@ void
 LteUeMac::RaResponseTimeoutNb (bool contention)
 {
   // Based on ETSI TS 136 321 V13.9.0, 5.1.4: Random Access Response reception:
-  // When RAP fails, and the MaxNumPreambleAttemptCE counter is reached, the UE resets MaxNumPreambleAttemptCE 
+  // When RAP fails, and the MaxNumPreambleAttemptCE counter is reached, the UE resets MaxNumPreambleAttemptCE
   // and retries in the next CE level, until preambleTransMax is reached
   NS_LOG_FUNCTION (this << contention);
   m_waitingForRaResponse = false;
@@ -840,7 +840,7 @@ LteUeMac::RaResponseTimeoutNb (bool contention)
             {
               // Increase to CE1
               NS_LOG_INFO ("RAR timeout, MaxNumPreambleAttemptCE reached => increasing CE level to CE1");
-              LogMessage("LteUeMac::RaResponseTimeoutNb,RAR timeout, MaxNumPreambleAttemptCE reached => increasing CE level to CE1");              
+              LogMessage("LteUeMac::RaResponseTimeoutNb,RAR timeout, MaxNumPreambleAttemptCE reached => increasing CE level to CE1");
               m_CeLevel = m_radioResourceConfig.nprachConfig.nprachParametersList.nprachParametersNb1;
               m_rachConfigCe = m_radioResourceConfig.rachConfigCommon.rachInfoList.rachInfo2;
               if(m_edt){
@@ -851,7 +851,7 @@ LteUeMac::RaResponseTimeoutNb (bool contention)
             {
               // Increase to CE2
               NS_LOG_INFO ("RAR timeout, MaxNumPreambleAttemptCE reached => increasing CE level to CE2");
-              LogMessage("LteUeMac::RaResponseTimeoutNb,RAR timeout, MaxNumPreambleAttemptCE reached => increasing CE level to CE2");   
+              LogMessage("LteUeMac::RaResponseTimeoutNb,RAR timeout, MaxNumPreambleAttemptCE reached => increasing CE level to CE2");
               m_CeLevel = m_radioResourceConfig.nprachConfig.nprachParametersList.nprachParametersNb2;
               m_rachConfigCe = m_radioResourceConfig.rachConfigCommon.rachInfoList.rachInfo3;
               if(m_edt){
@@ -862,7 +862,7 @@ LteUeMac::RaResponseTimeoutNb (bool contention)
             {
               // Can't increase further
               NS_LOG_INFO ("RAR timeout, MaxNumPreambleAttemptCE in CE2 reached => giving up");
-              LogMessage("LteUeMac::RaResponseTimeoutNb,RAR timeout, MaxNumPreambleAttemptCE in CE2 reached => giving up");  
+              LogMessage("LteUeMac::RaResponseTimeoutNb,RAR timeout, MaxNumPreambleAttemptCE in CE2 reached => giving up");
               m_cmacSapUser->NotifyRandomAccessFailed ();
               return;
             }
@@ -871,7 +871,7 @@ LteUeMac::RaResponseTimeoutNb (bool contention)
             // Overwrite R13 config with values for R15 EDT provided
             // easiest way to access data not include in NprachParameterNBR14
             m_CeLevel.coverageEnhancementLevel= tmp.coverageEnhancementLevel;
-            m_CeLevel.nprachPeriodicity = tmp.nprachPeriodicity; 
+            m_CeLevel.nprachPeriodicity = tmp.nprachPeriodicity;
             m_CeLevel.nprachStartTime = tmp.nprachStartTime;
             m_CeLevel.nprachSubcarrierOffset = tmp.nprachSubcarrierOffset;
             m_CeLevel.nprachNumSubcarriers = tmp.nprachNumSubcarriers;
@@ -883,7 +883,7 @@ LteUeMac::RaResponseTimeoutNb (bool contention)
           }
         }
       NS_LOG_INFO ("RAR timeout, re-send preamble");
-      LogMessage("LteUeMac::RaResponseTimeoutNb,RAR timeout, re-send preamble");  
+      LogMessage("LteUeMac::RaResponseTimeoutNb,RAR timeout, re-send preamble");
       if (contention)
         {
           RandomlySelectAndSendRaPreambleNb ();
@@ -968,7 +968,7 @@ LteUeMac::DoStartRandomAccessProcedureNb (bool edt)
     // Overwrite R13 config with values for R15 EDT provided
     // easiest way to access data not include in NprachParameterNBR14
     m_CeLevel.coverageEnhancementLevel= tmp.coverageEnhancementLevel;
-    m_CeLevel.nprachPeriodicity = tmp.nprachPeriodicity; 
+    m_CeLevel.nprachPeriodicity = tmp.nprachPeriodicity;
     m_CeLevel.nprachStartTime = tmp.nprachStartTime;
     m_CeLevel.nprachSubcarrierOffset = tmp.nprachSubcarrierOffset;
     m_CeLevel.nprachNumSubcarriers = tmp.nprachNumSubcarriers;
@@ -1111,7 +1111,7 @@ LteUeMac::DoReceivePhyPdu (Ptr<Packet> p)
         }
     }
 }
-void 
+void
 LteUeMac::DoSetTransmissionScheduled(bool scheduled){
   m_transmissionScheduled = scheduled;
 }
@@ -1517,7 +1517,7 @@ LteUeMac::DoReceiveLteControlMessage (Ptr<LteControlMessage> msg)
                         // minimum RLC overhead due to header
                         rlcOverhead = 2;
                       }
-                    NS_LOG_DEBUG (this << " serve tx DATA, bytes " << bytesforallLc 
+                    NS_LOG_DEBUG (this << " serve tx DATA, bytes " << bytesforallLc
                                         << ", RLC overhead " << rlcOverhead);
                     if(bsr->second.txQueueSize > bytesforallLc){
                       txOpParams.bytes = bytesforallLc;
@@ -1543,7 +1543,7 @@ LteUeMac::DoReceiveLteControlMessage (Ptr<LteControlMessage> msg)
                     //Simulator::Schedule (MilliSeconds (subframes), &LteMacSapUser::NotifyTxOpportunity,
                     //  (*lcidIt).second.macSapUser, txOpParams);
                     (*lcidIt).second.macSapUser->NotifyTxOpportunityNb(txOpParams,subframes);
-                    
+
                   }
                   }
                 else
@@ -1818,12 +1818,12 @@ LteUeMac::DoSubframeIndication (uint32_t frameNo, uint32_t subframeNo)
     uint32_t searchSpaceConditionRightSide =
         NbIotRrcSap::ConvertNpdcchOffsetRa2double (m_CeLevel) * searchSpacePeriodicity;
 
-    if (searchSpaceConditionLeftSide == searchSpaceConditionRightSide) 
+    if (searchSpaceConditionLeftSide == searchSpaceConditionRightSide)
       {
         m_inSearchSpace=true;
         m_subframesInSearchSpace = 0;
       }
-    if (m_inSearchSpace){ 
+    if (m_inSearchSpace){
       if(!m_transmissionScheduled && m_cmacSapUser->GetEnergyState() == NbiotEnergyModel::PowerState::RRC_CONNECTED_IDLE){
         // We just moved from another state into IDLE
         // According to Liberg p.286 we still have to monitor the rest of the NPDCCH
@@ -1832,7 +1832,7 @@ LteUeMac::DoSubframeIndication (uint32_t frameNo, uint32_t subframeNo)
       }
       if (((m_subframeNo-1) != 0) && ((m_subframeNo-1) != 5) && !((m_subframeNo-1) == 9 && ((m_frameNo-1) % 2) == 1)) // Current Subframe is not NPBCH, NPSS and NSSS, and SI #TODO add SI
         {
-          m_subframesInSearchSpace++; 
+          m_subframesInSearchSpace++;
         }
       if(m_subframesInSearchSpace == NbIotRrcSap::ConvertNpdcchNumRepetitionsRa2int (m_CeLevel)){
         m_inSearchSpace = false;
@@ -1863,17 +1863,17 @@ LteUeMac::AssignStreams (int64_t stream)
   m_raPreambleUniformVariable->SetStream (stream);
   return 1;
 }
-void 
+void
 LteUeMac::DoNotifyEdrx(){
   m_edrx = true;
 }
 
-void 
+void
 LteUeMac::DoNotifyPsm(){
   m_psm = true;
 }
 
-NbIotRrcSap::NprachParametersNb::CoverageEnhancementLevel 
+NbIotRrcSap::NprachParametersNb::CoverageEnhancementLevel
 LteUeMac::DoGetCoverageEnhancementLevel(){
   return m_CeLevel.coverageEnhancementLevel;
 }
@@ -1888,7 +1888,7 @@ void LteUeMac::SetLogDir(std::string dirname){
 }
 
 void LteUeMac::LogMessage(std::string msg){
-  std::string logfile_path = m_logdir+"MAC.log";
+  std::string logfile_path = m_logdir+"ueMAC.log";
   std::ofstream logfile;
   logfile.open(logfile_path, std::ios_base::app);
   logfile <<  m_imsi << "," << msg << "," << Simulator::Now().GetMilliSeconds() << "\n";
