@@ -64,6 +64,9 @@
 #include "ns3/nb-iot-energy.h"
 #include "ns3/basic-energy-harvester.h"
 
+#include "ns3/netanim-module.h"
+
+
 using namespace ns3;
 
 
@@ -162,8 +165,10 @@ int main (int argc, char *argv[])
   int packetsize_app = 49;
 
   // Packet interval
-  // BUG: if the packet interval is too small (e.g. 1 second), the simulation will crash (on lte-enb-rrc.cc)
   Time packetinterval_app = Seconds(10);
+
+  // Access delay for the application, in milliseconds
+  Time access = MilliSeconds(10);
 
   std::string positioning = "uniform"; // default value is to use random position inside the cell
   std::string propagationLossModel = "fixed";  // default value is to use simple propagation loss model (fixed)
@@ -185,11 +190,17 @@ int main (int argc, char *argv[])
   cmd.AddValue("RSS", "Fixed RSSI in dBm for FixedRssLossModel", rss);
   cmd.AddValue("minLoss", "Minimum loss in dB for FriisPropagationLoss", minLoss);
   cmd.AddValue("positioning", "Positioning model: uniform, random, or same", positioning);
+  // parse again so you can override default values from the command line
   cmd.Parse (argc, argv);
   ConfigStore inputConfig;
   inputConfig.ConfigureDefaults ();
 
-  // parse again so you can override default values from the command line
+  // Component carrier
+  // UlBandwidth represents the uplink transmission bandwidth configuration in terms of number of Resource Blocks (RBs)
+  Config::SetDefault ("ns3::ComponentCarrier::UlBandwidth", UintegerValue (50));
+  // Config::SetDefault ("ns3::ComponentCarrier::DlBandwidth", UintegerValue (50));  // downlink bandwidth in RBs
+  Config::SetDefault ("ns3::ComponentCarrier::PrimaryCarrier", BooleanValue (true));  // whether the primary carrier is enabled
+
 
   // Validate input for the propagation loss model
   if (propagationLossModel != "friis" &&
@@ -412,7 +423,6 @@ int main (int argc, char *argv[])
   // Set up the data transmission for the Pre-Run
   for (uint16_t i = 0; i < num_ues; i++)
     {
-      Time access = MilliSeconds(10); // Access delay for the application, in milliseconds
       lteHelper->AttachSuspendedNb(ueLteDevs.Get(i), enbLteDevs.Get(0));
 
       Ptr<LteUeNetDevice> ueLteDevice = ueLteDevs.Get(i)->GetObject<LteUeNetDevice> ();
@@ -448,7 +458,7 @@ int main (int argc, char *argv[])
         ulClient->SetRates(packetinterval_app, packetinterval_app); // INACTIVE and ACTIVE intervals
         ulClient->SetAttribute ("MaxPackets", UintegerValue (1000000));
         ulClient->SetAttribute ("PacketSize", UintegerValue(packetsize));
-        // ulClient->SetTransitionProbabilities(0.7, 0.2);  // P(INACTIVE→ACTIVE), P(ACTIVE→INACTIVE)
+        ulClient->SetTransitionProbabilities(0.7, 0.2);  // P(INACTIVE→ACTIVE), P(ACTIVE→INACTIVE)
         ulClient->TraceConnectWithoutContext("State", MakeCallback(&StateChangeTracer));
 
         Ptr<Node> client = ueNodes.Get(i);
@@ -494,6 +504,8 @@ int main (int argc, char *argv[])
   std::cout << "Number of UEs: " << ueNodes.GetN() << std::endl;
 
   #if GENERATE_TRACES
+  std::cout << "Generating traces" << std::endl;
+
   lteHelper->EnableMacTraces();  // Enable MAC traces (to identify transmission patterns)
   lteHelper->EnablePhyTraces();  // Enable Phy traces ()
   // lteHelper->EnableRlcTraces();  // Enable RLC traces. RAISES error
@@ -503,6 +515,7 @@ int main (int argc, char *argv[])
   p2ph.EnablePcapAll(logdir + "lena-simple-epc");
   #endif
 
+  AnimationInterface anim (logdir + "lena-simple-epc.xml");
   Simulator::Stop (simTime); // Run
   std::cout << "Log dir: ";
   Simulator::Run ();
