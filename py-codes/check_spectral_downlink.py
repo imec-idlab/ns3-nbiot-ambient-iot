@@ -69,14 +69,19 @@ def plot_downlink_vector(filename):
     plt.close()
 
 
+# Each NbiotScheduler instance is attached to a specific eNB (base station).
+# In NS-3’s NB-IoT implementation, NbiotScheduler::LogDownlinkGrid logs a single value per subframe because
+# it’s primarily designed to reflect the base station's (eNB's) perspective of downlink resource allocation.
+# Thus, the BS's scheduler logs only its own downlink resource allocation.
+# When you enable tracing (like Spectral_Downlink.log), NS-3 writes to separate files per node or per scheduler instance.
+
 # To run this script with a log file as an argument.
 #
 # Usage:
 # python check_spectral_downlink.py <filename.log>
 
-
 # Example usage
-# python check_spectral_downlink.py "/home/h3dema/ns3-nbiot/logs/markov/u3_t20000000000_c0_e0/22_07_2025_11_57_42/w0_s1_Spw0_s1_Spectral_Downlinkctral_Uplink.log"
+# python check_spectral_downlink.py "/home/h3dema/ns3-nbiot/logs/markov/u3_t20000000000_c0_e0/22_07_2025_11_57_42/w0_s1_Spw0_s1_Spectral_Downlink.log"
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Plot spectral downlink usage from log file.")
     parser.add_argument("filename", type=str, help="Path to the log file containing spectral downlink data.")
