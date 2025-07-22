@@ -16,7 +16,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Tim Gebauer <tim.gebauer@tu-dortmund.de>
- * Modified by: 
+ * Modified by:
  *      Pascal Jörke <pascal.joerke@tu-dortmund.de>
  */
 
@@ -521,7 +521,7 @@ NbiotScheduler::ScheduleNpdcchMessage (NbIotRrcSap::NpdcchMessage &message, Sear
                               m_uplink[ulgrant.second.first][ulgrant.second.second[i]] =
                                   message.rnti;
                                   //m_currenthyperindex;
-                                  
+
                               //NS_BUILD_DEBUG (std::cout << ulgrant.second.second[i] << " ");
                             }
                           //NS_BUILD_DEBUG (std::cout << std::endl);
@@ -1218,6 +1218,31 @@ NbiotScheduler::RemoveUe (uint16_t rnti)
   m_rntiUeConfigMap.erase (rnti);
 }
 
+
+/*
+- m_uplink is a 2D vector, where the first index is the subcarrier index and
+the second index is the subframe index
+actually, based on how it is resized, we can say that for
+
+Level       Typical Value   Notes
+Subframe    1 ms	          LTE basic time unit*
+Frame       10 subframes    10 ms
+Hyperframe  1024 frames     Used in some NB-IoT modes
+
+then
+j = 0  ==> Hyperframe 0, Frame 0, Subframe 0
+j = 1  ==> Hyperframe 0, Frame 0, Subframe 1
+...
+j = 10 ==> Hyperframe 0, Frame 1, Subframe 0
+
+* the loop below is based on the assumption that the subframe is always 1 ms!
+
+m_uplink[i][j] == rnti → UE with RNTI rnti transmitting uplink at that time/carrier
+if -1, there is no transmission at that time/carrier
+
+- m_downlink is a 1D vector, where the index is the subframe index (i.e. Hyperframe-Frame-Subframe).
+The value is the RNTI of the UE that is receiving downlink at that time or -1 MIB-NB, -2 NPSS, -3 NSSS, -4 SIB1-NB, -5 repetitions
+*/
 void
 NbiotScheduler::LogUplinkGrid ()
 {
@@ -1239,7 +1264,7 @@ NbiotScheduler::LogUplinkGrid ()
       logfile << "\n";
     }
 
-    
+
   logfile.close ();
 }
 
