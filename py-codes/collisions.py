@@ -35,11 +35,15 @@ def process_mac_file_for_collisions(file_path: str) -> list:
     return collision_times_s
 
 
+# This script processes MAC log files to extract preamble collision events and plot them.
+
+# Example usage:
+# python py-codes/collisions.py --fname logs/markov/u3_t180000000000_c0_e0/22_07_2025_13_59_49/w0_s1_MAC.log
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="State Changes")
     parser.add_argument("--dir", type=str, default=None, help="Directory to search for the files")
     parser.add_argument("--fname", type=str, default=None, help="Name of the file to process")
-    parser.add_argument("--plot-fname", type=str, default="collisions.png", help="Output plot file name")
     parser.add_argument("--show", action="store_true", help="Show the plot")
     args = parser.parse_args()
 
@@ -75,8 +79,9 @@ if __name__ == "__main__":
         if args.show:
             plt.show()
         else:
-            print(f"Saving plot to {args.plot_fname}")
-            plt.savefig(args.plot_fname)
+            filename = args.fname.replace("MAC.log", "Collisions.png")
+            print(f"Saving plot to {filename}")
+            plt.savefig(filename)
         plt.close()
 
     else:

@@ -56,7 +56,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="State Changes")
     parser.add_argument("--dir", type=str, default=None, help="Directory to search for the files")
     parser.add_argument("--fname", type=str, default=None, help="Name of the file to process")
-    parser.add_argument("--plot-fname", type=str, default="state_transitions.png", help="Output plot file name")
     parser.add_argument("--show", action="store_true", help="Show the plot")
     args = parser.parse_args()
 
@@ -96,8 +95,7 @@ if __name__ == "__main__":
         if args.show:
             plt.show()
         else:
-            plt.savefig(args.plot_fname)
-
+            plt.savefig(args.fname.replace('.log', '.png'))
 
     else:
         print("Please provide either a directory or a file name to process.")
