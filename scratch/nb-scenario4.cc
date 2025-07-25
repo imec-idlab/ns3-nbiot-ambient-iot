@@ -89,6 +89,36 @@ NS_LOG_COMPONENT_DEFINE ("LenaNb5G-Cap");
 
 #define GENERATE_TRACES true
 
+
+/**
+ * Callback function that logs the establishment of a UE connection.
+ *
+ * This function is triggered when a UE establishes a connection. It logs the
+ * details of the connection, including IMSI, Cell ID, and RNTI, to a specified
+ * log directory and outputs the information to the NS-3 logging system.
+ * It maps RNTI to IMSI.
+ *
+ * @param logdir The directory where the connection log file will be saved.
+ * @param context The context in which the connection is established.
+ * @param imsi The International Mobile Subscriber Identity of the UE.
+ * @param cellId The ID of the cell to which the UE is connected.
+ * @param rnti The Radio Network Temporary Identifier for the connection.
+ */
+
+void ConnectionEstablishedUeCallback (
+  std::string logdir,
+  std::string context,
+  uint64_t imsi,
+  uint16_t cellId,
+  uint16_t rnti)
+{
+  std::ofstream out(logdir + "cell_connection.log", std::ios::app);
+  out << "IMSI: " << imsi << " CellId: " << cellId << " RNTI: " << rnti << std::endl;
+  out.close();
+  NS_LOG_INFO ("Connection established for IMSI: " << imsi << ", CellId: " << cellId << ", RNTI: " << rnti);
+}
+
+
 /**
  * Tracer function to log state changes to the console.
  * @param oldVal Previous state value.
@@ -99,6 +129,7 @@ static void StateChangeTracer(int oldVal, int newVal)
   std::cout << Simulator::Now().GetSeconds() << "s: State changed from "
             << oldVal << " to " << newVal << std::endl;
 }
+
 
 /**
  * Tracer function to log state changes to a file.
@@ -301,7 +332,7 @@ int main (int argc, char *argv[])
   mobilityEnb.Install(enbNodes);
 
   /*
-  --------------- create UEs
+    --------------- create UEs ---------------
   */
   NodeContainer ueNodes;
   ueNodes.Create (num_ues); // Pre-Run, Run, Post-Run.
@@ -450,7 +481,6 @@ int main (int argc, char *argv[])
       // Create a UdpEchoClient application to send UDP datagrams from node zero to
       // node one.
       //
-
       if (i < num_ues){
         uint packetsize = packetsize_app;
         Ptr<MarkovUdpClient> ulClient = CreateObject<MarkovUdpClient>();
@@ -514,6 +544,11 @@ int main (int argc, char *argv[])
   // enable PCAP tracing
   p2ph.EnablePcapAll(logdir + "lena-simple-epc");
   #endif
+
+  // Connect the callback to log IMSI and RNTI when the connection is established
+  // This allows us to map RNTI to IMSI
+  Config::Connect ("/NodeList/*/DeviceList/*/LteUeRrc/ConnectionEstablished",
+                   MakeBoundCallback(&ConnectionEstablishedUeCallback, logdir));
 
   AnimationInterface anim (logdir + "lena-simple-epc.xml");
   Simulator::Stop (simTime); // Run
