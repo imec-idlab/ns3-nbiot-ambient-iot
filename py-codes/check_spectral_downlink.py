@@ -4,8 +4,22 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
-def plot_downlink_vector(filename):
-    # Read file into a list
+
+def plot_downlink_usage(filename, show=False):
+    """
+    Plot the spectral downlink usage as an image (single row) from the given log file.
+
+    The log file is expected to contain a single integer value per line, which is the RNTI of the UE
+    that is using the subframe, or a special negative value for special signals:
+        -1: MIB-NB
+        -2: NPSS
+        -3: NSSS
+        -4: SIB1-NB
+        -5: Repetition
+
+    The plot is saved as a PNG image with the same name as the log file, but with a .png extension.
+    """
+    # Read file into a list from processing
     with open(filename, 'r') as f:
         data = [int(line.strip()) for line in f if line.strip() != '']
 
@@ -63,9 +77,13 @@ def plot_downlink_vector(filename):
     # plt.subplots_adjust(bottom=0.5)  # Make space for colorbar and labels
 
     plt.tight_layout()
-    img_filename = filename.replace('.log', '.png')
-    plt.savefig(img_filename)
-    print(f"Plot saved as '{os.path.basename(img_filename)}'")
+    if show:
+        plt.show()
+    else:
+        # Save the plot as a PNG file
+        img_filename = filename.replace('.log', '.png')
+        plt.savefig(img_filename)
+        print(f"Plot saved as '{os.path.basename(img_filename)}'")
     plt.close()
 
 
@@ -91,5 +109,4 @@ if __name__ == "__main__":
         print(f"File '{args.filename}' does not exist.")
         exit(1)
 
-    # For testing purposes, you can call the function directly with a specific file
-    plot_downlink_vector(args.filename)
+    plot_downlink_usage(args.filename)

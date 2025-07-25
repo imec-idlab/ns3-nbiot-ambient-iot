@@ -4,19 +4,24 @@ import re
 import pandas as pd
 import matplotlib.pyplot as plt
 
-
-def find_energy_files(directory: str, target_suffix = "Energy.log") -> list:
-
-    files_found = []
-    for root, dirs, files in os.walk(directory):
-        for file in files:
-            if file.endswith(target_suffix):
-                rel_path = os.path.relpath(os.path.join(root, file))
-                files_found.append(rel_path)
-    return files_found
+from utilities import find_files
 
 
 def process_energy_file(file_path: str) -> pd.DataFrame:
+    """
+    Reads an energy log file and converts it into a pandas DataFrame.
+
+    Args:
+        file_path (str): The path to the energy log file to read.
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the data from the file. It has the following columns:
+            - time_s (float): The time in seconds
+            - imsi (int): The IMSI of the device
+            - ce_level (int): The CE level of the device
+            - energy (float): The current energy level of the device in J
+            - fraction (float): The fraction of the battery that is left
+    """
     pattern = re.compile(
         r"(?P<time>\d+\.\d+)s\s+\[/NodeList/(?P<node>\d+)/ApplicationList/\d+/State\]\s+State changed from (?P<old>\d+) to (?P<new>\d+)"
     )
@@ -41,6 +46,38 @@ def process_energy_file(file_path: str) -> pd.DataFrame:
     return df
 
 
+def plot_energy(filename, show=False):
+    """
+    Reads an energy log file and plots the energy remaining over time for each device.
+
+    Args:
+        filename (str): The path to the energy log file to read.
+        show (bool): If True, the plot will be shown. Defaults to False.
+
+    Returns:
+        None
+    """
+    df = process_energy_file(filename)
+
+    # Plot energy vs. time for each device
+    plt.figure(figsize=(10, 6))
+    for imsi_id, group in df.groupby('imsi'):
+        plt.plot(group['time_s'], group['energy'], label=f'Device {imsi_id}')
+
+    plt.xlabel("Time (seconds)")
+    plt.ylabel("Energy Remaining")
+    plt.title("Energy vs Time per Device (IMSI)")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+
+    if show:
+        plt.show()
+    else:
+        plt.savefig(filename.replace('.log', '.png'))
+    plt.close()
+
+
 # Example usage:
 # 1. To find energy files in a directory and subdirectories:
 # python energy.py --dir /path/to/directory
@@ -56,31 +93,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.dir is not None:
-        state_change_files = find_energy_files(args.dir)
+        state_change_files = find_files(args.dir, target_suffix="Energy.log")
         print("Found state change files:")
         for file in state_change_files:
             print(file)
 
     elif args.fname is not None:
-        df = process_energy_file(args.fname)
-
-        # Plot energy vs. time for each device
-        plt.figure(figsize=(10, 6))
-        for imsi_id, group in df.groupby('imsi'):
-            plt.plot(group['time_s'], group['energy'], label=f'Device {imsi_id}')
-
-        plt.xlabel("Time (seconds)")
-        plt.ylabel("Energy Remaining")
-        plt.title("Energy vs Time per Device (IMSI)")
-        plt.legend()
-        plt.grid(True)
-        plt.tight_layout()
-
-        if args.show:
-            plt.show()
-        else:
-            plt.savefig(args.fname.replace('.log', '.png'))
-
+        plot_energy(args.fname, args.show)
 
     else:
         print("Please provide either a directory or a file name to process.")

@@ -4,19 +4,19 @@ import re
 import pandas as pd
 import matplotlib.pyplot as plt
 
-
-def find_mac_files(directory: str, target_suffix = "MAC.log") -> list:
-
-    files_found = []
-    for root, dirs, files in os.walk(directory):
-        for file in files:
-            if file.endswith(target_suffix):
-                rel_path = os.path.relpath(os.path.join(root, file))
-                files_found.append(rel_path)
-    return files_found
+from utilities import find_files
 
 
 def process_mac_file_for_collisions(file_path: str) -> list:
+    """
+    Processes a MAC log file and returns a list of times (in seconds) of collisions.
+
+    The times are extracted from the log file by searching for the string
+    ",PreambleCollision," followed by a number (in milliseconds).
+
+    :param file_path: The path to the MAC log file
+    :return: A list of times (in seconds) of collisions
+    """
     data = []
 
     # Read and parse the file
@@ -35,6 +35,44 @@ def process_mac_file_for_collisions(file_path: str) -> list:
     return collision_times_s
 
 
+def plot_collisions(filename, show: bool = False):
+    """
+    Process a MAC log file for preamble collision events and plot them as events.
+
+    :param filename: path to the MAC log file
+    :param show: whether to show the plot instead of saving it (default: False)
+    """
+    collision_times_s = process_mac_file_for_collisions(filename)
+
+    # Plot the collisions as events
+    plt.figure(figsize=(10, 4))
+    plt.eventplot(
+        collision_times_s,
+        orientation='horizontal',
+        lineoffsets=0.5,      # y=0
+        linelengths=1.0,
+        colors='red')
+    plt.axhline(
+        y=0,
+        color='black',
+        linewidth=1
+    )
+
+    plt.xlabel("Time (seconds)")
+    plt.title("Preamble Collision Events Over Time")
+    plt.grid(True)
+    plt.yticks([1], ["Collision"])
+    plt.ylim(0, 1.1)
+    plt.tight_layout()
+    if show:
+        plt.show()
+    else:
+        plt_filename = filename.replace("MAC.log", "Collisions.png")
+        print(f"Saving plot to {plt_filename}")
+        plt.savefig(plt_filename)
+    plt.close()
+
+
 # This script processes MAC log files to extract preamble collision events and plot them.
 
 # Example usage:
@@ -48,41 +86,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.dir is not None:
-        state_change_files = find_mac_files(args.dir)
+        state_change_files = find_files(args.dir, target_suffix="MAC.log")
         print("Found state change files:")
         for file in state_change_files:
             print(file)
 
     elif args.fname is not None:
-        collision_times_s = process_mac_file_for_collisions(args.fname)
-
-        # Plot the collisions as events
-        plt.figure(figsize=(10, 4))
-        plt.eventplot(
-            collision_times_s,
-            orientation='horizontal',
-            lineoffsets=0.5,      # y=0
-            linelengths=1.0,
-            colors='red')
-        plt.axhline(
-            y=0,
-            color='black',
-            linewidth=1
-        )
-
-        plt.xlabel("Time (seconds)")
-        plt.title("Preamble Collision Events Over Time")
-        plt.grid(True)
-        plt.yticks([1], ["Collision"])
-        plt.ylim(0, 1.1)
-        plt.tight_layout()
-        if args.show:
-            plt.show()
-        else:
-            filename = args.fname.replace("MAC.log", "Collisions.png")
-            print(f"Saving plot to {filename}")
-            plt.savefig(filename)
-        plt.close()
+        plot_collisions(args.fname, args.show)
 
     else:
         print("Please provide either a directory or a file name to process.")

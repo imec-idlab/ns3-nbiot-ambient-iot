@@ -9,29 +9,21 @@ from matplotlib.ticker import MaxNLocator
 available_markers = itertools.cycle(['^', 's', 'X', 'o', 'D', 'v', '*', 'P', 'h', '8'])
 
 
-# This compiles MAC events from a log file and plots them against time.
-# It can be used for eNB or UE MAC logs.
-
-# Example usage:
-# 1. for eNB MAC log:
-# python py-codes/mac_operations.py --fname logs/markov/u3_t180000000000_c0_e0/22_07_2025_13_59_49/w0_s1_MAC.log
-
-# 2. for UE MAC log:
-# python py-codes/mac_operations.py --fname logs/markov/u3_t180000000000_c0_e0/22_07_2025_13_59_49/w0_s1_ueMAC.log
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Energy Changes")
-    parser.add_argument("--fname", type=str, default=None, help="Name of the file to process")
-    parser.add_argument("--show", action="store_true", help="Show the plot (otherwise save as PNG)")
-    args = parser.parse_args()
+def plot_mac_events(filename, show: bool = False):
     # Will contain event-to-marker mapping
+    """
+    Process a MAC log file for events and plot them vs time.
+
+    :param filename: path to the MAC log file
+    :param show: whether to show the plot instead of saving it (default: False)
+    """
     event_markers = {}
 
     # Parse log file
     events = []
     rnti_set = set()
 
-    with open(args.fname, "r") as file:
+    with open(filename, "r") as file:
         for line in file:
             parts = line.strip().split(",")
             # Detect RNTI and event info
@@ -61,7 +53,7 @@ if __name__ == "__main__":
     plt.gca().yaxis.set_major_locator(MaxNLocator(integer=True))
 
     plt.xlabel("Time (ms)")
-    if "ueMAC" in args.fname:
+    if "ueMAC" in filename:
         plt.ylabel("UE IMSI")
     else:
         plt.ylabel("RNTI")
@@ -73,10 +65,29 @@ if __name__ == "__main__":
     unique = dict(zip(labels, handles))
     plt.legend(unique.values(), unique.keys(), loc='upper right')
     plt.tight_layout()
-    if args.show:
+    if show:
         plt.show()
     else:
-        filename = args.fname.replace("MAC.log", "MAC_Events.png")
-        plt.savefig(filename)
-        print(f"Plot saved as {filename}")
+        plt_filename = filename.replace("MAC.log", "MAC_Events.png")
+        plt.savefig(plt_filename)
+        print(f"Plot saved as {plt_filename}")
     plt.close()
+
+
+# This compiles MAC events from a log file and plots them against time.
+# It can be used for eNB or UE MAC logs.
+
+# Example usage:
+# 1. for eNB MAC log:
+# python py-codes/mac_operations.py --fname logs/markov/u3_t180000000000_c0_e0/22_07_2025_13_59_49/w0_s1_MAC.log
+
+# 2. for UE MAC log:
+# python py-codes/mac_operations.py --fname logs/markov/u3_t180000000000_c0_e0/22_07_2025_13_59_49/w0_s1_ueMAC.log
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Energy Changes")
+    parser.add_argument("--fname", type=str, default=None, help="Name of the file to process")
+    parser.add_argument("--show", action="store_true", help="Show the plot (otherwise save as PNG)")
+    args = parser.parse_args()
+
+    plot_mac_events(args.fname, show=args.show)

@@ -5,7 +5,23 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
 
-def plot_uplink_grid(filename):
+def plot_uplink_usage(filename, show=False):
+    """
+    Plot spectral uplink usage as an image (2D array) from the given log file.
+
+    The log file is expected to contain a 2D array of integers, where
+    - each row represents a subframe (time step),
+    - each column represents a carrier (resource unit),
+    - each cell contains the RNTI (UE ID) or status of the UE transmitting uplink in that time/carrier:
+        - -1: No transmission in that time/carrier (light gray)
+        - 0: Idle in that time/carrier (white)
+        - UE RNTI (positive integer): UE transmitting uplink in that time/carrier (color based on RNTI)
+
+    The plot is saved as a PNG image with the same name as the log file, but with a .png extension.
+
+    :param filename: path to the log file containing spectral uplink data
+    :param show: If True, the plot will be shown. Defaults to False.
+    """
     with open(filename, 'r') as f:
         data = []
         for line in f:
@@ -60,9 +76,14 @@ def plot_uplink_grid(filename):
     plt.ylabel("Carrier")
     plt.xlabel("Time Step (e.g., Subframe Index)")
     plt.tight_layout()
-    img_filename = filename.replace('.log', '.png')
-    plt.savefig(img_filename)
-    print(f"Plot saved as '{os.path.basename(img_filename)}'")
+
+    if show:
+        plt.show()
+    else:
+        # Save the plot as a PNG file
+        img_filename = filename.replace('.log', '.png')
+        plt.savefig(img_filename)
+        print(f"Plot saved as '{os.path.basename(img_filename)}'")
     plt.close()
 
 
@@ -83,5 +104,5 @@ if __name__ == "__main__":
         print(f"File '{args.filename}' does not exist.")
         exit(1)
 
-    # For testing purposes, you can call the function directly with a specific file
-    plot_uplink_grid(args.filename)
+    # plot the uplink information from the log file
+    plot_uplink_usage(args.filename)
