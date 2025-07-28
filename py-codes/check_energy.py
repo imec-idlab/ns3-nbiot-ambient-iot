@@ -46,14 +46,15 @@ def process_energy_file(file_path: str) -> pd.DataFrame:
     return df
 
 
-def plot_energy(filename, show=False):
+def plot_energy(filename, show=False, xmin=None, xmax=None):
     """
     Reads an energy log file and plots the energy remaining over time for each device.
 
     Args:
         filename (str): The path to the energy log file to read.
         show (bool): If True, the plot will be shown. Defaults to False.
-
+        xmin (float): Minimum time in seconds to consider for plotting. Defaults to None.
+        xmax (float): Maximum time in seconds to consider for plotting. Defaults to None.
     Returns:
         None
     """
@@ -64,17 +65,42 @@ def plot_energy(filename, show=False):
     for imsi_id, group in df.groupby('imsi'):
         plt.plot(group['time_s'], group['energy'], label=f'Device {imsi_id}')
 
+    # define the x-axis limits (window for plotting)
+    _min = 0 if xmin is None else max(0.0, xmin)
+    _max = df['time_s'].max() if xmax is None else min(df['time_s'].max(), xmax)
+    plt.xlim(_min, _max)
+
+    if _min is not None or _max is not None:
+        # Set y-axis limits based on the window
+        _ymin = df[(df['time_s'] >= _min) & (df['time_s'] <= _max)]['energy'].min()
+        _ymax = df[(df['time_s'] >= _min) & (df['time_s'] <= _max)]['energy'].max()
+
+        upper_margin = (_ymax - _ymin) * 0.1
+        _ymax += upper_margin
+
+        plt.ylim(_ymin, _ymax)
+
+    import matplotlib.ticker as ticker
+
+    formatter = ticker.ScalarFormatter(useOffset=False, useMathText=False)
+    formatter.set_scientific(False)
+
+    plt.gca().yaxis.set_major_formatter(formatter)
+
+    # plt.gca().ticklabel_format(style='plain', axis='y')
+    plt.gca().yaxis.offsetText.set_visible(False)
+
     plt.xlabel("Time (seconds)")
     plt.ylabel("Energy Remaining")
     plt.title("Energy vs Time per Device (IMSI)")
     plt.legend()
     plt.grid(True)
-    plt.tight_layout()
 
+    plt.tight_layout()
     if show:
         plt.show()
     else:
-        plt.savefig(filename.replace('.log', '.png'))
+        plt.savefig(filename.replace('.log', f'-{_min}-{_max}.png'))
     plt.close()
 
 
@@ -90,16 +116,20 @@ if __name__ == "__main__":
     parser.add_argument("--dir", type=str, default=None, help="Directory to search for the files")
     parser.add_argument("--fname", type=str, default=None, help="Name of the file to process")
     parser.add_argument("--show", action="store_true", help="Show the plot (otherwise save as PNG)")
+
+    parser.add_argument("--min", type=float, default=None, help="Minimum time in seconds to consider for plotting")
+    parser.add_argument("--max", type=float, default=None, help="Maximum time in seconds to consider for plotting")
+
     args = parser.parse_args()
 
     if args.dir is not None:
-        state_change_files = find_files(args.dir, target_suffix="Energy.log")
-        print("Found state change files:")
-        for file in state_change_files:
+        energy_log_files = find_files(args.dir, target_suffix="Energy.log")
+        print("Found energy log files:")
+        for file in energy_log_files:
             print(file)
 
     elif args.fname is not None:
-        plot_energy(args.fname, args.show)
+        plot_energy(args.fname, args.show, args.min, args.max)
 
     else:
         print("Please provide either a directory or a file name to process.")
