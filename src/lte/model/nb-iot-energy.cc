@@ -82,6 +82,8 @@ void NbiotEnergyModel::SetLogDir(std::string dirname){
   m_logdir = dirname;
 }
 
+void NbiotEnergyModel::SetModule(NbiotChip module) { m_module = module; }
+
 void NbiotEnergyModel::DoNotifyStateChange(PowerState newState){
     Time stateTime = (Simulator::Now()-m_lastStateChange); // subframes are [ms] and we need [s]
     double lostEnergy = 0; // Energy in [Ws] or [J]
