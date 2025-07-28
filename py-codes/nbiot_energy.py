@@ -44,46 +44,51 @@ def plot_energy_usage_consolidated(log_file, use_cumulative=True, show=False, xm
     df['StateGroup'] = df['State'].map(group_map)
     df['Time'] = df['Time'] / 1000  # Convert time from milliseconds to seconds
 
+    N = len(df['IMSI'].unique())
     # Plot setup
-    fig, ax = plt.subplots(figsize=(14, 7))
+    fig, axs = plt.subplots(N, 1, figsize=(14, 7 * N), sharex=True)
     color_list = ["blue", "green", "red", "orange", "purple"]  # For five groups
 
     if use_cumulative:
         max_time = df['Time'].max()
 
-        for idx, (state, group_data) in enumerate(df.groupby("StateGroup")):
-            group_sorted = group_data.sort_values("Time")
-            energy_cumsum = group_sorted['Energy'].cumsum()
+        for ax, [imsi, group_imsi] in zip(axs, df.groupby('IMSI')):
+            for idx, (state, group_data) in enumerate(group_imsi.groupby("StateGroup")):
+                group_sorted = group_data.sort_values("Time")
+                energy_cumsum = group_sorted['Energy'].cumsum()
 
-            # Extend the last time point to max_time if necessary
-            times = list(group_sorted['Time'])
-            energies = list(energy_cumsum)
+                # Extend the last time point to max_time if necessary
+                times = list(group_sorted['Time'])
+                energies = list(energy_cumsum)
 
-            if times[-1] < max_time:
-                times.append(max_time)
-                energies.append(energies[-1])
+                if times[-1] < max_time:
+                    times.append(max_time)
+                    energies.append(energies[-1])
 
-            ax.plot(times, energies, label=state, color=color_list[idx % len(color_list)])
+                ax.plot(times, energies, label=state, color=color_list[idx % len(color_list)])
+                ax.set_ylabel("Cumulative Energy (Joules)")
+                ax.set_title(f"IMSI: {imsi}")
 
-        ax.set_ylabel("Cumulative Energy (Joules)")
     else:
-        for idx, (state, group_data) in enumerate(df.groupby("StateGroup")):
-            group_sorted = group_data.sort_values("Time")
-            color = color_list[idx % len(color_list)]
-            ax.scatter(group_sorted['Time'], group_sorted['Energy'], label=state, color=color, alpha=0.5)
+        for ax, [imsi, group_imsi] in zip(axs, df.groupby('IMSI')):
+            for idx, (state, group_data) in enumerate(group_imsi.groupby("StateGroup")):
+                group_sorted = group_data.sort_values("Time")
+                color = color_list[idx % len(color_list)]
+                ax.scatter(group_sorted['Time'], group_sorted['Energy'], label=state, color=color, alpha=0.5)
+                ax.set_ylabel("Energy (Joules)")
+                ax.set_title(f"IMSI: {imsi}")
 
-        ax.set_ylabel("Energy (Joules)")
         ax.set_ylim(bottom=0)
 
     # Common aesthetics
     ax.set_xlabel("Time (seconds)")
-    ax.set_title("Energy Usage by Grouped Power States")
+    # ax.set_title("Energy Usage by Grouped Power States")
     ax.grid(True)
 
-    # Place legend outside and avoid duplicate labels
-    handles, labels = ax.get_legend_handles_labels()
-    unique = dict(zip(labels, handles))
-    ax.legend(unique.values(), unique.keys(), loc='center left', bbox_to_anchor=(1, 0.5))
+    # # Place legend outside and avoid duplicate labels
+    # handles, labels = ax.get_legend_handles_labels()
+    # unique = dict(zip(labels, handles))
+    # ax.legend(unique.values(), unique.keys(), loc='center left', bbox_to_anchor=(1, 0.5))
 
     plt.tight_layout()
     if show:
@@ -105,8 +110,9 @@ def plot_energy_usage(log_file, use_cumulative = True, show=False, xmin=None, xm
     # Should group energy per timestamp?
     # df = df.groupby(['Time', 'StateName'])['Energy'].sum().reset_index()
 
+    N = len(df['IMSI'].unique())
     # Plot energy vs time for each state
-    fig, ax = plt.subplots(figsize=(14, 7))
+    fig, axs = plt.subplots(N, 1, figsize=(14, 6 * N), sharex=True)
 
     # Colors for each state
     colors = [
@@ -124,35 +130,43 @@ def plot_energy_usage(log_file, use_cumulative = True, show=False, xmin=None, xm
     if use_cumulative:
         # Line plot with cumulative energy
         max_time = df['Time'].max()
-        for state, group in df.groupby('StateName'):
-            group_sorted = group.sort_values('Time')
-            energy_cumsum = group_sorted['Energy'].cumsum()
+        for ax, [imsi, group_imsi] in zip(axs, df.groupby('IMSI')):
+            for state, group in group_imsi.groupby('StateName'):
+                group_sorted = group.sort_values('Time')
+                energy_cumsum = group_sorted['Energy'].cumsum()
 
-            # Extend the last time point to max_time if necessary
-            times = list(group_sorted['Time'])
-            energies = list(energy_cumsum)
+                # Extend the last time point to max_time if necessary
+                times = list(group_sorted['Time'])
+                energies = list(energy_cumsum)
 
-            if times[-1] < max_time:
-                times.append(max_time)
-                energies.append(energies[-1])
-            ax.plot(times, energies, label=state, color=colors[group_sorted['State'].iloc[0] % len(colors)])
+                if times[-1] < max_time:
+                    times.append(max_time)
+                    energies.append(energies[-1])
+                ax.plot(times, energies, label=state, color=colors[group_sorted['State'].iloc[0] % len(colors)])
+                ax.set_title(f"IMSI: {imsi}")
     else:
         # Event plot for energy bursts
-        for state, group in df.groupby('StateName'):
-            group_sorted = group.sort_values('Time')
-            color = colors[group_sorted['State'].iloc[0]]
-            ax.scatter(group_sorted['Time'], group_sorted['Energy'], label=state, color=color, alpha=0.5)
-
+        for ax, [imsi, group_imsi] in zip(axs, df.groupby('IMSI')):
+            for state, group in df.groupby('StateName'):
+                group_sorted = group.sort_values('Time')
+                color = colors[group_sorted['State'].iloc[0]]
+                ax.scatter(group_sorted['Time'], group_sorted['Energy'], label=state, color=color, alpha=0.5)
+                ax.set_title(f"IMSI: {imsi}")
 
     plt.xlabel("Time (seconds)")
     plt.ylabel(f"{'Cumulative ' if use_cumulative else ''}Energy (Joules)")
-    plt.title("Energy Usage by Power State Over Time")
+    # plt.title("Energy Usage by Power State Over Time")
     plt.legend(loc="best")
     plt.grid(True)
 
     _min = 0 if xmin is None else max(0, df['Time'].min())
     _max = df['Time'].max() if xmax is None else min(df['Time'].max(), xmax)
     plt.xlim(_min, _max)
+
+    # Place legend outside and avoid duplicate labels
+    handles, labels = ax.get_legend_handles_labels()
+    unique = dict(zip(labels, handles))
+    ax.legend(unique.values(), unique.keys(), loc='center left', bbox_to_anchor=(1, 0.5))
 
     plt.tight_layout()
     if show:
@@ -174,7 +188,7 @@ def plot_energy_usage(log_file, use_cumulative = True, show=False, xmin=None, xm
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Energy Changes")
     parser.add_argument("--dir", type=str, default=None, help="Directory to search for the files")
-    parser.add_argument("--fname", type=str, default=None, help="Name of the file to process")
+    parser.add_argument('-f', "--fname", type=str, default=None, help="Name of the file to process")
     parser.add_argument("--show", action="store_true", help="Show the plot (otherwise save as PNG)")
 
     parser.add_argument("--min", type=float, default=None, help="Minimum time in seconds to consider for plotting")
