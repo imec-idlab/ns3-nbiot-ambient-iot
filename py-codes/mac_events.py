@@ -1,6 +1,7 @@
 import os
 import argparse
-import itertools
+from tqdm import tqdm
+
 from collections import defaultdict
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
@@ -41,8 +42,7 @@ def plot_events(events, identity_set, ylabel, filename: str = None):
     plt.figure(figsize=(12, 6))
 
     # Plot each event
-    for _idx, event, time in events:
-        # marker = event_markers.get(event, "*")
+    for _idx, event, time in tqdm(events, desc=f"Events with {ylabel}"):
         marker = null_marker if _idx is None else available_markers[identity_set.index(_idx) % len(available_markers)]
         if _idx is not None:
             plt.scatter(time, int(_idx), marker=marker, label=event if event != 'PreambleReceived' else f"{event}: {_idx}", edgecolors='black')
