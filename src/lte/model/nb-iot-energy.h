@@ -31,13 +31,13 @@ namespace ns3 {
 
 class NbiotChip {
 protected:
-    double m_psmPower; 
+    double m_psmPower;
     double m_drxPower;
     double m_edrxPower;
     double m_uplinkPower;
     double m_downlinkPower;
     double m_idlePower;
-    
+
 public:
     NbiotChip():
         m_psmPower(0),
@@ -85,7 +85,7 @@ public:
 
 class NbiotEnergyModel : public Object
 {
-public: 
+public:
     enum class PowerState{
         RRC_CONNECTED_IDLE,
         RRC_CONNECTED_RECEIVING_NPDSCH,
@@ -99,25 +99,27 @@ public:
         OFF
     }powerState;
 
-    NbiotEnergyModel(NbiotChip module, uint32_t imsi): 
+    NbiotEnergyModel(NbiotChip module, uint32_t imsi):
         m_module(module), m_imsi(imsi), m_lastState(PowerState::OFF), m_lastStateChange(Time(0))
         {
         m_battery = CreateObject<LiIonEnergySource>();
         m_battery->SetInitialEnergy(18000.0);
         }
     ~NbiotEnergyModel();
-    
+
 
     void DoNotifyStateChange(PowerState newState);
     PowerState DoGetState();
     double GetEnergyRemaining();
     double GetEnergyRemainingFraction();
     void SetImsi(uint32_t imsi);
-    
+
     void SetEnergySource(Ptr<EnergySource> new_battery);
 
     void DecreaseRemainingEnergy(double lostEnergy);
 
+    void EnableLogging();
+    void SetLogDir(std::string dirname);
 private:
     Ptr<EnergySource> m_battery; // Battery model
     NbiotChip m_module; // Current Nbiot Module
@@ -127,8 +129,8 @@ private:
     std::map<PowerState, double> m_timeSpendInState; // Statistics
     std::map<PowerState, double> m_energySpendInState; // Statistics
     std::vector<std::pair<PowerState,uint32_t>> m_states;
-
+    std::string m_logdir;
+    bool m_logging = false;
 };
 }
 #endif /* FF_MAC_SCHEDULER_H */
-

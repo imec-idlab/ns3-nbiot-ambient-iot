@@ -17,6 +17,7 @@
  *
  * Author: Tim Gebauer <tim.gebauer@tu-dortmund.de>
  */
+#include <fstream>
 
 
 #include "nb-iot-energy.h"
@@ -64,7 +65,7 @@ NbiotEnergyModel::~NbiotEnergyModel(){
     DoNotifyStateChange(PowerState::OFF);
 }
 
-NbiotEnergyModel::PowerState 
+NbiotEnergyModel::PowerState
 NbiotEnergyModel::DoGetState(){
     return m_lastState;
 }
@@ -72,6 +73,15 @@ NbiotEnergyModel::DoGetState(){
 void NbiotEnergyModel::SetImsi(uint32_t imsi){
     m_imsi = imsi;
 }
+
+void NbiotEnergyModel::EnableLogging(){
+  m_logging = true;
+}
+
+void NbiotEnergyModel::SetLogDir(std::string dirname){
+  m_logdir = dirname;
+}
+
 void NbiotEnergyModel::DoNotifyStateChange(PowerState newState){
     Time stateTime = (Simulator::Now()-m_lastStateChange); // subframes are [ms] and we need [s]
     double lostEnergy = 0; // Energy in [Ws] or [J]
@@ -101,12 +111,20 @@ void NbiotEnergyModel::DoNotifyStateChange(PowerState newState){
     default:
         break;
     }
+
+    // Log the energy comsumption per state
+    if (m_logging){
+        std::ofstream logfile;
+        logfile.open(m_logdir + "nbiot_energy.log", std::ios_base::app);
+        logfile << Simulator::Now().GetMilliSeconds() << ", " << m_imsi << ", " << static_cast<int>(m_lastState) << ", " << lostEnergy << std::endl;
+        logfile.close();
+    }
+
     m_lastStateChange = Simulator::Now();
     m_battery->DecreaseRemainingEnergy(lostEnergy);
     m_timeSpendInState[m_lastState] += stateTime.GetMilliSeconds();
     m_energySpendInState[m_lastState] += lostEnergy;
     m_lastState = newState;
-
 }
 
 double NbiotEnergyModel::GetEnergyRemaining(){
