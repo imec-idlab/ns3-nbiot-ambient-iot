@@ -89,6 +89,26 @@ NS_LOG_COMPONENT_DEFINE ("LenaNb5G-Cap");
 
 #define GENERATE_TRACES true
 
+// ---------------------------------------------------------------------
+//
+// custom NBIoT module class
+//
+// ---------------------------------------------------------------------
+class BG96c : public NbiotChip{
+public:
+    BG96c(){
+        // Compare Joerke nbiot-nidd-ciotopt
+        m_psmPower = 3.8* 3.9*std::pow(10,-6);
+        m_drxPower = 3.8* 1.56*std::pow(10,-3);
+        m_edrxPower = 3.8* 0.81*std::pow(10,-3);
+        m_uplinkPower = 3.8* 155*std::pow(10,-3);
+        m_downlinkPower = 80*std::pow(10,-3);
+        m_idlePower = 3.8 * 0.81*std::pow(10,-3);
+    };
+};
+
+
+
 
 /**
  * Callback function that logs the establishment of a UE connection.
@@ -458,6 +478,9 @@ int main (int argc, char *argv[])
 
       Ptr<LteUeNetDevice> ueLteDevice = ueLteDevs.Get(i)->GetObject<LteUeNetDevice> ();
       Ptr<LteUeRrc> ueRrc = ueLteDevice->GetRrc();
+
+      ueRrc->m_energyModel.SetModule(BG96c()); // Set the NBIoT module to BG96
+
       ueRrc->EnableLogging();
       ueRrc->m_energyModel.SetLogDir(logdir);  // set the log directory for the energy model
       if(ciot == true){
