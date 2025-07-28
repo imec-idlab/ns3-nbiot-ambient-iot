@@ -1,6 +1,7 @@
 import argparse
 import os
 import re
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
@@ -96,23 +97,93 @@ def plot_state_changes(filename, show: bool = False):
     plt.close()
 
 
+def compute_transition_probs(group):
+    """
+    Computes transition probabilities from a group of state transitions.
+
+    Parameters
+    ----------
+    group : pd.DataFrame
+        The group of state transitions. It should have columns 'Node', 'Time', 'State', and 'PrevState'.
+
+    Returns
+    -------
+    pd.Series
+        A Series containing the transition probabilities 'Δ₁ (active→inactive)' and 'Δ₀ (inactive→active)'.
+
+    Notes
+    -----
+    This function assumes that the sampling interval is constant and that there are enough data points to find at least one transition that represents the sampling interval.
+    """
+    trans_counts = group['Transition'].value_counts()
+    prev_counts = group['PrevState'].value_counts()
+
+    delta1 = trans_counts.get('1.0->0.0', 0) / prev_counts.get(1, 0) if prev_counts.get(1, 0) > 0 else 0
+    delta0 = trans_counts.get('0.0->1.0', 0) / prev_counts.get(0, 0) if prev_counts.get(0, 0) > 0 else 0
+
+    return pd.Series({'δ₀ (inactive→active)': delta0, 'δ₁ (active→inactive)': delta1, })
+
+
+def compute_transition_probabilities(filename, show: bool = False):
+    df = process_state_changes_file(filename)
+
+    # We are considering the there are enough data points to find at least one transition
+    # that represents the sampling interval (i.e, the minimum time difference between two consecutive state changes)
+    sampling_interval = np.round(df.groupby("Node")["Time"].diff().dropna().min())
+
+    # Generate full time index per node (10s intervals)
+    full_df = []
+    for node, group in df.groupby('Node'):
+        time_min, time_max = group['Time'].min(), group['Time'].max()
+        time_range = pd.DataFrame({'Time': np.arange(time_min, time_max + sampling_interval, sampling_interval)})
+        time_range['Node'] = node
+        merged = pd.merge(time_range, group, on=['Time', 'Node'], how='left')
+        merged['State'] = merged['State'].ffill()  # fill missing states forward
+        full_df.append(merged)
+
+    df_full = pd.concat(full_df).sort_values(by=['Node', 'Time'])
+
+    # Find the previous state for each transition
+    df_full['PrevState'] = df_full.groupby('Node')['State'].shift(1)
+    # Identify transition type 1.0 -> 0.0 or 0.0 -> 1.0
+    df_full['Transition'] = df_full['PrevState'].astype(str) + '->' + df_full['State'].astype(str)
+
+    transition_probs = df_full.groupby('Node').apply(compute_transition_probs, include_groups=False).reset_index()
+
+    # transition_probs = df_full.groupby('Node').apply(lambda g: compute_transition_probs(g.drop(columns=['Node']))).reset_index()
+
+    print(transition_probs)
+
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="State Changes")
-    parser.add_argument("--dir", type=str, default=None, help="Directory to search for the files")
+    parser.add_argument("options", type=str, default="d", choices=['d', 'f', 'c'], help="Select which operation to perform: d: search files, f: process a file")
+    parser.add_argument("--dir", type=str, default=None, help="Folder to search for state change files")
     parser.add_argument("--fname", type=str, default=None, help="Name of the file to process")
     parser.add_argument("--show", action="store_true", help="Show the plot")
     args = parser.parse_args()
 
-    if args.dir is not None:
+    # Validate combinedarguments
+    if args.options == "d" and args.dir is None:
+        print("Use --dir to search for files.")
+        parser.print_help()
+        exit(1)
+
+    elif args.options in ["f", "c"] and args.fname is None:
+        print("Use --fname to process a specific file.")
+        parser.print_help()
+        exit(1)
+
+    # Call the appropriate function based on the options
+    if args.options == "d":
         state_change_files = find_files(args.dir, target_suffix="state-changes.log")
         print("Found state change files:")
         for file in state_change_files:
             print(file)
 
-    elif args.fname is not None:
+    elif args.options == "f":
         plot_state_changes(args.fname, show=args.show)
 
-    else:
-        print("Please provide either a directory or a file name to process.")
-        parser.print_help()
-        exit(1)
+    elif args.options == "c":
+        compute_transition_probabilities(args.fname, show=args.show)
