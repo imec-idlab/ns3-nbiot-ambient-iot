@@ -1,9 +1,17 @@
 # Summary of the code in this scratch folder
 
 
-
 > For all scenarios, 3*X minutes of simulation time are simulated, but only the intermediate X minutes are evaluated. The first X minutes produce no significant results since devices at the beginning are scheduled in an empty cell and experience very good transmission conditions.
 > After X minutes, new devices will find ongoing transmissions of previous devices, which enables a more realistic situation and produces significant results. Since devices that have started transmissions within the intermediate X minutes of the simulation may not complete their transmissions in this intermediate time slot, additional X minutes are simulated with more new transmissions to keep the channels busy and let the intermediate devices complete their transmissions.
+
+
+## Board
+
+The default board is ['BG96'](https://www.quectel.com/content/uploads/2025/03/Quectel_Product_Brochure_V8.3.pdf).
+The energy chip (class `NbiotChip`) is defined in `src/lte/model/nb-iot-energy.h`.
+
+This board is evaluate by [Khan et al.](http://dx.doi.org/10.36227/techrxiv.12738725.v1).
+
 
 
 # [nb-scenario1.cc](nb-scenario1.cc)
@@ -102,3 +110,9 @@ cd ns3-nbiot
 **Reference**:
 
 - Moons, L., Nasser, S., Sabovic, A., Singh, R.K. and Famaey, J., 2024, October. Evaluating Fast and Grant-Free Uplink Access in Next-Generation Cellular IoT Networks. In 2024 3rd International Conference on 6G Networking (6GNet) (pp. 19-24). IEEE.
+
+
+### Comments
+
+- The `NbiotEnergyModel` object is instantiated in lte-ue-rrc.cc.
+You can use `Ptr<LteUeRrc> ueRrc = ueLteDevice->GetRrc();` to access the energy model or create a new one if needed in your scenario.
