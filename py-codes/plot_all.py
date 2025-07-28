@@ -41,41 +41,41 @@ if __name__ == "__main__":
         plot_energy_usage_consolidated(filename, show=args.show, use_cumulative=True)
         plot_energy_usage_consolidated(filename, show=args.show, use_cumulative=False)
 
-    # print("Processing spectral downlink files in directory:", args.dir)
-    # spectral_downlink_files = find_files(args.dir, target_suffix="Spectral_Downlink.log")
-    # for filename in spectral_downlink_files:
-    #     print("- Processing file:", filename)
-    #     plot_downlink_usage(filename, show=args.show)
-    #     plot_downlink_usage_imsi(filename)
+    print("Processing spectral downlink files in directory:", args.dir)
+    spectral_downlink_files = find_files(args.dir, target_suffix="Spectral_Downlink.log")
+    for filename in spectral_downlink_files:
+        print("- Processing file:", filename)
+        plot_downlink_usage(filename, show=args.show)
+        plot_downlink_usage_imsi(filename)
 
-    # print("Processing spectral uplink files in directory:", args.dir)
-    # spectral_uplink_files = find_files(args.dir, target_suffix="Spectral_Uplink.log")
-    # for filename in spectral_uplink_files:
-    #     print("- Processing file:", filename)
-    #     plot_uplink_usage(filename, show=args.show)
-    #     plot_uplink_usage_imsi(filename)
+    print("Processing spectral uplink files in directory:", args.dir)
+    spectral_uplink_files = find_files(args.dir, target_suffix="Spectral_Uplink.log")
+    for filename in spectral_uplink_files:
+        print("- Processing file:", filename)
+        plot_uplink_usage(filename, show=args.show)
+        plot_uplink_usage_imsi(filename)
 
-    # print("Processing collision in files in directory:", args.dir)
-    # collision_files = find_files(args.dir, target_suffix="_MAC.log")
-    # for filename in collision_files:
-    #     print("- Processing file:", filename)
-    #     plot_collisions(filename, show=args.show)
+    print("Processing collision in files in directory:", args.dir)
+    collision_files = find_files(args.dir, target_suffix="_MAC.log")
+    for filename in collision_files:
+        print("- Processing file:", filename)
+        plot_collisions(filename, show=args.show)
 
-    # print("Processing state changes in directory:", args.dir)
-    # state_change_files = find_files(args.dir, target_suffix="state-changes.log")
-    # for filename in state_change_files:
-    #     print("- Processing file:", filename)
-    #     plot_state_changes(filename, show=args.show)
+    print("Processing state changes in directory:", args.dir)
+    state_change_files = find_files(args.dir, target_suffix="state-changes.log")
+    for filename in state_change_files:
+        print("- Processing file:", filename)
+        plot_state_changes(filename, show=args.show)
 
-    # print("Processing UE mac events in directory:", args.dir)
-    # collision_files = find_files(args.dir, target_suffix="ueMAC.log")
-    # for filename in collision_files:
-    #     print("- Processing file:", filename)
-    #     plot_mac_events(filename, show=args.show)
+    print("Processing UE mac events in directory:", args.dir)
+    collision_files = find_files(args.dir, target_suffix="ueMAC.log")
+    for filename in collision_files:
+        print("- Processing file:", filename)
+        plot_mac_events(filename, show=args.show)
 
-    # print("Processing eNB mac events in directory:", args.dir)
-    # collision_files = find_files(args.dir, target_suffix="_MAC.log")
-    # for filename in collision_files:
-    #     print("- Processing file:", filename)
-    #     plot_mac_events(filename, show=args.show)
-    #     plot_mac_events_imsi(filename, show=args.show)
+    print("Processing eNB mac events in directory:", args.dir)
+    collision_files = find_files(args.dir, target_suffix="_MAC.log")
+    for filename in collision_files:
+        print("- Processing file:", filename)
+        plot_mac_events(filename, show=args.show)
+        plot_mac_events_imsi(filename, show=args.show)
