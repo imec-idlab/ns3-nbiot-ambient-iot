@@ -459,6 +459,7 @@ int main (int argc, char *argv[])
       Ptr<LteUeNetDevice> ueLteDevice = ueLteDevs.Get(i)->GetObject<LteUeNetDevice> ();
       Ptr<LteUeRrc> ueRrc = ueLteDevice->GetRrc();
       ueRrc->EnableLogging();
+      ueRrc->m_energyModel.SetLogDir(logdir);  // set the log directory for the energy model
       if(ciot == true){
         //std::cout << "ciot" << std::endl;
         ueRrc->SetAttribute("CIoT-Opt", BooleanValue(true));
