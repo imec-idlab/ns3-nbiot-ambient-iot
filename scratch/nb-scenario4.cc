@@ -108,7 +108,32 @@ public:
 };
 
 
+/**
+ * Logs information about a received packet.
+ *
+ * This function is a callback function, registered with a NetDevice to receive
+ * packets. It logs the details of the received packet, including IMSI of the
+ * UE, local address of the NetDevice, source address of the packet, protocol
+ * type of the packet, and the size of the packet in bytes.
+ *
+ * \param logdir  Log directory where the log should be written.
+ * \param imsi    IMSI of the UE.
+ * \param nd      NetDevice that received the packet.
+ * \param p       The packet that was received.
+ * \param protocol  Protocol of the packet.
+ * \param addr    Source address of the packet.
+ *
+ * \return True, indicating that the packet was successfully processed.
+ *
+ * **Note**: The last 4 arguments are mandatory for the callback function.
+ */
+bool Receive (std::string logdir, uint64_t imsi, Ptr<NetDevice> nd, Ptr<const Packet> p, uint16_t protocol, const Address& addr)
+{
+  // imsi, local address, source address, protocol, packet size (bytes), timestamp
+  std::cout << "RECEIVE, " << imsi << ", " << nd->GetAddress() << ", " << addr << ", " << protocol << ", " << p->GetSize () << ", " << Now ().GetSeconds () << std::endl;
 
+  return true;
+}
 
 /**
  * Callback function that logs the establishment of a UE connection.
@@ -166,7 +191,6 @@ static void StateChangeTracerToFile(std::string logdir, std::string context, int
           << "s [" << context << "] State changed from "
           << oldVal << " to " << newVal << std::endl;
 }
-
 
 /**
  * Main function to set up and run the simulation.
@@ -251,7 +275,6 @@ int main (int argc, char *argv[])
   Config::SetDefault ("ns3::ComponentCarrier::UlBandwidth", UintegerValue (50));
   // Config::SetDefault ("ns3::ComponentCarrier::DlBandwidth", UintegerValue (50));  // downlink bandwidth in RBs
   Config::SetDefault ("ns3::ComponentCarrier::PrimaryCarrier", BooleanValue (true));  // whether the primary carrier is enabled
-
 
   // Validate input for the propagation loss model
   if (propagationLossModel != "friis" &&
@@ -476,8 +499,13 @@ int main (int argc, char *argv[])
     {
       lteHelper->AttachSuspendedNb(ueLteDevs.Get(i), enbLteDevs.Get(0));
 
+      // LteUeNetDevice contains GetMac(), GetRrc(), and GetPhy()
+      // GetImsi()
       Ptr<LteUeNetDevice> ueLteDevice = ueLteDevs.Get(i)->GetObject<LteUeNetDevice> ();
       Ptr<LteUeRrc> ueRrc = ueLteDevice->GetRrc();
+
+      // Log the received packets
+      ueLteDevice->SetReceiveCallback (MakeBoundCallback (&Receive, logdir, ueLteDevice->GetImsi()));
 
       ueRrc->m_energyModel.SetModule(BG96c()); // Set the NBIoT module to BG96
 
