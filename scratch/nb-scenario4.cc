@@ -350,15 +350,25 @@ int main (int argc, char *argv[])
   Config::SetDefault ("ns3::LteSpectrumPhy::CtrlErrorModelEnabled", BooleanValue (false));
   Config::SetDefault ("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue (false));
 
-  // One PGW node
+  // One Packet Data Network Gateway (PGW) in the simulation
   Ptr<Node> pgw = epcHelper->GetPgwNode ();
+  std::cout << "PGW node id: " << pgw->GetId () << std::endl;  // shows the node id = 0
 
-   // Create a single RemoteHost
+  // Create a single RemoteHost
   NodeContainer remoteHostContainer;
   remoteHostContainer.Create (1);
   Ptr<Node> remoteHost = remoteHostContainer.Get (0);
+  std::cout << "Remote host node id: " << remoteHost->GetId () << std::endl;  // shows the node id = 3
   InternetStackHelper internet;
   internet.Install (remoteHostContainer);
+
+  // --------------------- What creates nodes 1 and 2?  ---------------------
+  //
+  // PointToPointEpcHelper internally creates two more nodes:
+  // - MME (Mobility Management Entity)
+  // - SGW (Serving Gateway)
+  // These two nodes are part of the EPC core and are not directly exposed, but they are still actual Node objects that get registered in the simulator, hence IDs 1 and 2.
+
 
   // Create the Internet
   PointToPointHelper p2ph;
@@ -387,6 +397,9 @@ int main (int argc, char *argv[])
   // Create a single eNB
   NodeContainer enbNodes;
   enbNodes.Create (1);
+
+  std::cout << "eNB node id: " << enbNodes.Get(0)->GetId () << std::endl;
+
   // Install Mobility Model
   Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();
   // Place our single eNb right in the center of the cell
@@ -462,6 +475,7 @@ int main (int argc, char *argv[])
       // Set the default gateway for the UE
       Ptr<Ipv4StaticRouting> ueStaticRouting = ipv4RoutingHelper.GetStaticRouting (ueNode->GetObject<Ipv4> ());
       ueStaticRouting->SetDefaultRoute (epcHelper->GetUeDefaultGatewayAddress (), 1);
+      std::cout << "UE node id: " << ueNode->GetId() << " IP: " << ueNode->GetObject<Ipv4>()->GetAddress(1, 0).GetLocal() << std::endl;
     }
 
 
