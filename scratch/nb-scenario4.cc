@@ -129,8 +129,31 @@ public:
  */
 bool Receive (std::string logdir, uint64_t imsi, Ptr<NetDevice> nd, Ptr<const Packet> p, uint16_t protocol, const Address& addr)
 {
+  // **Note**: Apparently this only logs the data packets
+
   // imsi, local address, source address, protocol, packet size (bytes), timestamp
-  std::cout << "RECEIVE, " << imsi << ", " << nd->GetAddress() << ", " << addr << ", " << protocol << ", " << p->GetSize () << ", " << Now ().GetSeconds () << std::endl;
+  std::ofstream out(logdir + "receive.log", std::ios::app);
+  std::stringstream ss;
+  ss << imsi << ", " << nd->GetAddress() << ", " << addr << ", " << protocol << ", " << p->GetSize () << ", " << Now ().GetSeconds () << std::endl;
+  out << "RECEIVE, " << ss.str();
+  out.close();
+  NS_LOG_INFO (ss.str());
+
+  return true;
+}
+
+bool ReceiveEnb (std::string logdir, Ptr<NetDevice> nd, Ptr<const Packet> p, uint16_t protocol, const Address& addr)
+{
+  // **Note**: Apparently this only logs the data packets
+
+  // imsi, local address, source address, protocol, packet size (bytes), timestamp
+  // imsi is 0 for eNB
+  std::ofstream out(logdir + "receive-ENB.log", std::ios::app);
+  std::stringstream ss;
+  ss << 0 << ", " << nd->GetAddress() << ", " << addr << ", " << protocol << ", " << p->GetSize () << ", " << Now ().GetSeconds () << std::endl;
+  out << "RECEIVE, " << ss.str();
+  out.close();
+  NS_LOG_INFO (ss.str());
 
   return true;
 }
@@ -493,6 +516,17 @@ int main (int argc, char *argv[])
   // define path + initial part of the the log filenames used
   logdir += "/w" + std::to_string(worker);
   logdir += "_s" + std::to_string(seed) + "_";
+
+  //
+  // Log the received packets by the eNB
+  //
+  // **PROBLEM**:
+  //   - if eNBLteDevice->SetReceiveCallback is set, then the callback registered in ueLteDevice->SetReceiveCallback
+  //     is not called.
+  //   - Only logs the data packets
+  //
+  // Ptr<LteEnbNetDevice> eNBLteDevice = enbLteDevs.Get(0)->GetObject<LteEnbNetDevice> ();
+  // eNBLteDevice->SetReceiveCallback (MakeBoundCallback (&ReceiveEnb, logdir));
 
   // Set up the data transmission for the Pre-Run
   for (uint16_t i = 0; i < num_ues; i++)
