@@ -43,12 +43,11 @@ def read_log_file(log_filename: str) -> pd.DataFrame:
     return df
 
 
-def plot_receive(df, show: bool = False):
+def plot_receive(log_filename, df, show: bool = False):
     plt.figure(figsize=(10, 6))
     for imsi, group in df.groupby('imsi'):
         # plt.plot(group['timestamp'], group['accumulated_size'], label=f'IMSI {imsi}')
         plt.step(group['timestamp'], group['accumulated_size'], where='post', label='eNB' if imsi == 0 else f'IMSI {imsi}')
-
 
     plt.title('Accumulated Packets vs Time')
     plt.xlabel('Time (seconds)')
@@ -59,7 +58,9 @@ def plot_receive(df, show: bool = False):
     if show:
         plt.show()
     else:
-        plt.savefig(log_filename.replace('.log', '.png'))
+        img_fname = log_filename.replace('.log', '.png')
+        plt.savefig(img_fname)
+        print("Saved plot to", img_fname)
     plt.close()
 
 
@@ -70,8 +71,6 @@ if __name__ == '__main__':
     parser.add_argument("--show", action="store_true", help="Show the plot")
     args = parser.parse_args()
 
-    log_filename = 'logs/markov/u4_t180000000000_c0_e0/31_07_2025_11_00_10/w0_s1_receive.log'
-
     if args.dir is not None:
         state_change_files = find_files(args.dir, target_suffix="_receive.log")
         print("Found state change files:")
@@ -80,7 +79,7 @@ if __name__ == '__main__':
 
     elif args.fname is not None:
         df = read_log_file(args.fname)  # read the log to a dataframe
-        plot_receive(df, show=args.show)
+        plot_receive(args.fname, df, show=args.show)
 
     else:
         print("Please provide either a directory or a file name to process.")
