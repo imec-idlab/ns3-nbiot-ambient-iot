@@ -103,7 +103,7 @@ public:
 
   /**
    * The states of the UE RRC entity
-   * 
+   *
    */
   enum State
   {
@@ -184,26 +184,26 @@ public:
 
   /**
    * set the CMAC SAP this RRC should interact with
-   * \brief This function is overloaded to maintain backward compatibility 
+   * \brief This function is overloaded to maintain backward compatibility
    * \param s the CMAC SAP Provider to be used by this RRC
    */
   void SetLteUeCmacSapProvider (LteUeCmacSapProvider * s);
   /**
    * set the CMAC SAP this RRC should interact with
-   * \brief This function is overloaded to maintain backward compatibility 
+   * \brief This function is overloaded to maintain backward compatibility
    * \param s the CMAC SAP Provider to be used by this RRC
    * \param index the index
    */
   void SetLteUeCmacSapProvider (LteUeCmacSapProvider * s, uint8_t index);
 
   /**
-   * \brief This function is overloaded to maintain backward compatibility 
+   * \brief This function is overloaded to maintain backward compatibility
    * \return s the CMAC SAP User interface offered to the MAC by this RRC
    */
   LteUeCmacSapUser* GetLteUeCmacSapUser ();
   /**
    * \brief This function is overloaded to maintain backward compatibility
-   * \param index the index  
+   * \param index the index
    * \return s the CMAC SAP User interface offered to the MAC by this RRC
    */
   LteUeCmacSapUser* GetLteUeCmacSapUser (uint8_t index);
@@ -232,16 +232,16 @@ public:
    */
   void SetLteMacSapProvider (LteMacSapProvider* s);
 
-  /** 
+  /**
    * Set the AS SAP user to interact with the NAS entity
-   * 
+   *
    * \param s the AS SAP user
    */
   void SetAsSapUser (LteAsSapUser* s);
 
-  /** 
-   * 
-   * 
+  /**
+   *
+   *
    * \return the AS SAP provider exported by this RRC
    */
   LteAsSapProvider* GetAsSapProvider ();
@@ -260,8 +260,8 @@ public:
    */
   LteUeCcmRrcSapUser* GetLteCcmRrcSapUser ();
 
-  /** 
-   * 
+  /**
+   *
    * \param imsi the unique UE identifier
    */
   void SetImsi (uint64_t imsi);
@@ -291,12 +291,12 @@ public:
    */
   uint16_t GetCellId () const;
 
-  /** 
+  /**
    * \return the uplink bandwidth in RBs
    */
   uint8_t GetUlBandwidth () const;
 
-  /** 
+  /**
    * \return the downlink bandwidth in RBs
    */
   uint8_t GetDlBandwidth () const;
@@ -306,7 +306,7 @@ public:
    */
   uint32_t GetDlEarfcn () const;
 
-  /** 
+  /**
    * \return the uplink carrier frequency (EARFCN)
    */
   uint32_t GetUlEarfcn () const;
@@ -324,9 +324,9 @@ public:
    */
   uint16_t GetPreviousCellId () const;
 
-  /** 
-   * 
-   * 
+  /**
+   *
+   *
    * \param val true if RLC SM is to be used, false if RLC UM/AM are to be used
    */
   void SetUseRlcSm (bool val);
@@ -432,7 +432,7 @@ private:
   void DoNotifyRandomAccessSuccessful (bool edt);
   /// Notify random access failed function
   void DoNotifyRandomAccessFailed ();
- 
+
   // LTE AS SAP methods
   /**
    * Set CSG white list function
@@ -579,7 +579,7 @@ private:
    */
   void DoSetNumberOfComponentCarriers (uint16_t noOfComponentCarriers);
 
- 
+
   // INTERNAL METHODS
 
   /**
@@ -703,7 +703,7 @@ private:
    *
    * As for SaveUeMeasurements, this function aims to store the latest measurements
    * related to the secondary component carriers.
-   * in the current implementation it saves only measurements related on the serving 
+   * in the current implementation it saves only measurements related on the serving
    * secondary carriers while, measurements related to the Neighbor Cell are filtered
    */
 
@@ -1150,7 +1150,7 @@ private:
 
   /**
    * \brief Internal storage of the latest measurement results from all detected
-   *        detected Secondary carrier component, indexed by the carrier component ID 
+   *        detected Secondary carrier component, indexed by the carrier component ID
    *        where the measurement was taken from.
    *
    * Each *measurement result* comprises of RSRP (in dBm) and RSRQ (in dB).
@@ -1399,7 +1399,7 @@ private:
   // NBIOT SPECIFIC
   // Temporary Logging method for successful random access
   void LogRA(bool success, Time timetillconnection);
-  void LogDataTransmission();
+  void LogDataTransmission(uint32_t size);
   void LogEnergyRemaining();
   std::string m_logdir;
 
@@ -1420,7 +1420,7 @@ private:
   std::vector<Ptr<Packet>> m_packetStored;
   NbIotRrcSap::RadioResourceConfigCommonNb m_rc;
 public:
-  /** 
+  /**
    * The number of component carriers.
    */
   void EnableLogging();

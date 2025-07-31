@@ -635,23 +635,24 @@ LteUeRrc::InitializeSap (void)
     }
 }
 void LteUeRrc::LogRA(bool success, Time timetillconnection){
-        std::string logfile_path = m_logdir+"RA.log";
-        std::ofstream logfile;
-        logfile.open(logfile_path, std::ios_base::app);
-        if(success){
-          logfile << m_imsi << "," << uint(m_cmacSapProvider.at(0)->GetCoverageEnhancementLevel())<< ","<< timetillconnection.GetMilliSeconds() << "\n";
-        }else{
-          logfile << m_imsi << "," << -1 << "\n";
-        }
-        logfile.close();
+    std::string logfile_path = m_logdir+"RA.log";
+    std::ofstream logfile;
+    logfile.open(logfile_path, std::ios_base::app);
+    if(success){
+      logfile << m_imsi << "," << uint(m_cmacSapProvider.at(0)->GetCoverageEnhancementLevel())<< ","<< timetillconnection.GetMilliSeconds() << "\n";
+    }else{
+      logfile << m_imsi << "," << -1 << "\n";
+    }
+    logfile.close();
 }
 
-void LteUeRrc::LogDataTransmission(){
-        std::string logfile_path = m_logdir+"DataTrans.log";
-        std::ofstream logfile;
-        logfile.open(logfile_path, std::ios_base::app);
-        logfile <<  m_imsi << "," << Simulator::Now().GetMilliSeconds() << "\n";
-        logfile.close();
+void LteUeRrc::LogDataTransmission(uint32_t size){
+    std::string logfile_path = m_logdir+"DataTrans.log";
+    std::ofstream logfile;
+    logfile.open(logfile_path, std::ios_base::app);
+    // imsi, size, time
+    logfile <<  m_imsi << "," << size << "," << Simulator::Now().GetMilliSeconds() << "\n";
+    logfile.close();
 }
 
 void LteUeRrc::LogEnergyRemaining(){
@@ -682,7 +683,7 @@ LteUeRrc::DoSendData (Ptr<Packet> packet, uint8_t bid)
   NS_LOG_FUNCTION (this << packet);
 
   if(m_logging){
-    LogDataTransmission();
+    LogDataTransmission(packet->GetSize());
   }
   uint32_t msg3offset = 5;
   if(m_edt){
