@@ -3,6 +3,8 @@
 *.jpg
 *.jpeg
 
+*.csv
+
 *.zip
 *.diff
 *.orig
