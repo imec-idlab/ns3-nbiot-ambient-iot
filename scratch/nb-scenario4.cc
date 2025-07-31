@@ -48,6 +48,7 @@
 #include <stdlib.h>
 #include <ctime>
 #include <fstream>
+#include <cstdlib>
 
 #include "ns3/core-module.h"
 #include "ns3/point-to-point-module.h"
@@ -88,6 +89,37 @@ NS_LOG_COMPONENT_DEFINE ("LenaNb5G-Cap");
 
 
 #define GENERATE_TRACES true
+
+
+
+void CreateLogDirectory(const std::string& simName,
+                        int num_ues,
+                        const Time& simTime,
+                        bool ciot,
+                        bool edt,
+                        std::string& outputPath)
+{
+    auto start = std::chrono::system_clock::now();
+    std::time_t start_time = std::chrono::system_clock::to_time_t(start);
+    auto tm = *std::localtime(&start_time);
+    std::stringstream ss;
+    ss << std::put_time(&tm, "%d_%m_%Y_%H_%M_%S");
+
+    std::string logdir = "logs/" + simName;
+    logdir += "/u" + std::to_string(num_ues);
+    logdir += "_t" + std::to_string(simTime.GetInteger());
+    logdir += "_c" + std::to_string(ciot);
+    logdir += "_e" + std::to_string(edt);
+    logdir += "/" + ss.str();
+
+    std::string makedir = "mkdir -p " + logdir;
+    int z = std::system(makedir.c_str());
+    NS_LOG_DEBUG("cmd: " << makedir << " : " << z);
+    NS_LOG_INFO("Log dir: " << logdir);
+
+    outputPath = logdir + "/";  // return the final path via reference
+}
+
 
 // ---------------------------------------------------------------------
 //
@@ -194,8 +226,7 @@ void ConnectionEstablishedUeCallback (
  */
 static void StateChangeTracer(int oldVal, int newVal)
 {
-  std::cout << Simulator::Now().GetSeconds() << "s: State changed from "
-            << oldVal << " to " << newVal << std::endl;
+  NS_LOG_INFO(Simulator::Now().GetSeconds() << "s: State changed from " << oldVal << " to " << newVal);
 }
 
 
@@ -238,6 +269,7 @@ int main (int argc, char *argv[])
   ns3::LogComponentEnable ("LteEnbMac", logLevel);
   ns3::LogComponentEnable ("LteEnbPhy", logLevel);
 
+  ns3::LogComponentEnable ("LteSpectrumPhy", logLevel);
 
   // --------------------------------------------------------------------------
   //
@@ -274,7 +306,12 @@ int main (int argc, char *argv[])
   double minLoss = 0.0; // default value for minimum loss, used in FriisPropagationLossModel
   bool ciot = false;
   bool edt = false;
+
+  // --------------------------------------------------------------------------
+  //
   // Command line arguments
+  //
+  // --------------------------------------------------------------------------
   CommandLine cmd (__FILE__);
   cmd.AddValue ("simTime", "Total duration of the simulation", simTime);
   cmd.AddValue ("simName", "Name of the simulation", simName);
@@ -292,6 +329,18 @@ int main (int argc, char *argv[])
   cmd.Parse (argc, argv);
   ConfigStore inputConfig;
   inputConfig.ConfigureDefaults ();
+
+  // create the log directory
+  std::string logdir;
+  CreateLogDirectory(simName, num_ues, simTime, ciot, edt, logdir);
+  NS_LOG_DEBUG("worker: " << worker);
+
+  // redirect log to file
+  std::ofstream logFile(logdir + "ns3_log_output.txt");
+  std::streambuf* defaultBuf = std::clog.rdbuf();  // Save original buffer
+  // Redirect clog to file
+  std::clog.rdbuf(logFile.rdbuf());
+
 
   // Component carrier
   // UlBandwidth represents the uplink transmission bandwidth configuration in terms of number of Resource Blocks (RBs)
@@ -319,6 +368,7 @@ int main (int argc, char *argv[])
   // random seed is set manually here for repetition
   RngSeedManager::SetSeed (seed);
   Ptr<UniformRandomVariable> RaUeUniformVariable = CreateObject<UniformRandomVariable> ();
+  NS_LOG_DEBUG("seed: " << seed);
 
 
   // configure LTE
@@ -352,13 +402,13 @@ int main (int argc, char *argv[])
 
   // One Packet Data Network Gateway (PGW) in the simulation
   Ptr<Node> pgw = epcHelper->GetPgwNode ();
-  std::cout << "PGW node id: " << pgw->GetId () << std::endl;  // shows the node id = 0
+  NS_LOG_INFO("PGW node id: " << pgw->GetId ());  // shows the node id = 0
 
   // Create a single RemoteHost
   NodeContainer remoteHostContainer;
   remoteHostContainer.Create (1);
   Ptr<Node> remoteHost = remoteHostContainer.Get (0);
-  std::cout << "Remote host node id: " << remoteHost->GetId () << std::endl;  // shows the node id = 3
+  NS_LOG_INFO("Remote host node id: " << remoteHost->GetId ());  // shows the node id = 3
   InternetStackHelper internet;
   internet.Install (remoteHostContainer);
 
@@ -383,11 +433,11 @@ int main (int argc, char *argv[])
 
   // interface 0 is localhost, 1 is the p2p device
   Ipv4Address remoteHostAddr = internetIpIfaces.GetAddress (1);
-  std::cout << "Remote host address: " << remoteHostAddr << std::endl;
-  std::cout << "PGW address: " << std::endl;
+  NS_LOG_INFO("Remote host address: " << remoteHostAddr);
+  NS_LOG_INFO("PGW address: ");
   for(uint32_t i = 0; i < pgw->GetObject<Ipv4>()->GetNInterfaces(); i++)
   {
-    std::cout << " * Interface #" << i << ": " << pgw->GetObject<Ipv4>()->GetAddress(i, 0).GetLocal() << std::endl;
+    NS_LOG_INFO(" * Interface #" << i << ": " << pgw->GetObject<Ipv4>()->GetAddress(i, 0).GetLocal());
   }
 
   Ipv4StaticRoutingHelper ipv4RoutingHelper;
@@ -398,7 +448,7 @@ int main (int argc, char *argv[])
   NodeContainer enbNodes;
   enbNodes.Create (1);
 
-  std::cout << "eNB node id: " << enbNodes.Get(0)->GetId () << std::endl;
+  NS_LOG_INFO("eNB node id: " << enbNodes.Get(0)->GetId ());
 
   // Install Mobility Model
   Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();
@@ -475,7 +525,7 @@ int main (int argc, char *argv[])
       // Set the default gateway for the UE
       Ptr<Ipv4StaticRouting> ueStaticRouting = ipv4RoutingHelper.GetStaticRouting (ueNode->GetObject<Ipv4> ());
       ueStaticRouting->SetDefaultRoute (epcHelper->GetUeDefaultGatewayAddress (), 1);
-      std::cout << "UE node id: " << ueNode->GetId() << " IP: " << ueNode->GetObject<Ipv4>()->GetAddress(1, 0).GetLocal() << std::endl;
+      NS_LOG_INFO("UE node id: " << ueNode->GetId() << " IP: " << ueNode->GetObject<Ipv4>()->GetAddress(1, 0).GetLocal());
     }
 
 
@@ -484,52 +534,6 @@ int main (int argc, char *argv[])
   ApplicationContainer clientApps;
   ApplicationContainer serverApps;
 
-  // --------------------------------------------------------------
-  //
-  // define log directory used by NS3 modules
-  //
-  // --------------------------------------------------------------
-  auto start = std::chrono::system_clock::now();
-  std::time_t start_time = std::chrono::system_clock::to_time_t(start);
-
-  // create the log directory structure
-  std::string logdir = "logs/";
-  std::string makedir = "mkdir -p ";
-  std::string techdir = makedir;
-
-  // create logdir
-  techdir += logdir;
-  int z = std::system(techdir.c_str());  // mkdir
-  NS_LOG(LOG_DEBUG, "cmd: " << techdir << " :" << z);
-
-  // create logdir / simName
-  techdir += "/" + simName + "/";
-  z = std::system(techdir.c_str());  // mkdir
-  NS_LOG_DEBUG("cmd: " << techdir <<" : " << z);
-
-  // logdir / simName / num_ues _ simTime _ ciot _ edt
-  logdir += simName;
-  logdir += "/u" + std::to_string(ueNodes.GetN());
-  logdir += "_t" + std::to_string(simTime.GetInteger());
-  logdir += "_c" + std::to_string(ciot);
-  logdir += "_e" + std::to_string(edt);
-  // create the directory
-  techdir = makedir + logdir;
-  z = std::system(techdir.c_str());  // mkdir
-  NS_LOG_DEBUG("cmd: " << techdir <<" : " << z);
-
-  // create folder with date
-  auto tm = *std::localtime(&start_time);
-  std::stringstream ss;
-  ss << std::put_time(&tm, "%d_%m_%Y_%H_%M_%S");
-  logdir += "/" + ss.str();
-  techdir = makedir + logdir;
-  z = std::system(techdir.c_str());  // mkdir
-  NS_LOG_DEBUG("cmd: " << techdir <<" : " << z);
-
-  // define path + initial part of the the log filenames used
-  logdir += "/w" + std::to_string(worker);
-  logdir += "_s" + std::to_string(seed) + "_";
 
   //
   // Log the received packets by the eNB
@@ -605,20 +609,13 @@ int main (int argc, char *argv[])
   Config::Connect("/NodeList/*/ApplicationList/*/State",
                   MakeBoundCallback(&StateChangeTracerToFile, logdir));
 
-  /* **********************************
-   *
-   * Start the simulation
-   *
-   * **********************************/
-  std::cout << "Started computation at " << std::ctime(&start_time);
+                  for (uint16_t i = 0; i < ueNodes.GetN(); i++)
+                  {
 
-  for (uint16_t i = 0; i < ueNodes.GetN(); i++)
-  {
-
-    Ptr<LteUeNetDevice> ueLteDevice = ueLteDevs.Get(i)->GetObject<LteUeNetDevice> ();
-    Ptr<LteUeRrc> ueRrc = ueLteDevice->GetRrc();
-    Ptr<LteUeMac> ueMac = ueLteDevice->GetMac();
-    ueRrc->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
+                    Ptr<LteUeNetDevice> ueLteDevice = ueLteDevs.Get(i)->GetObject<LteUeNetDevice> ();
+                    Ptr<LteUeRrc> ueRrc = ueLteDevice->GetRrc();
+                    Ptr<LteUeMac> ueMac = ueLteDevice->GetMac();
+                    ueRrc->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
     ueMac->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
 
   }
@@ -631,10 +628,10 @@ int main (int argc, char *argv[])
   // Ptr<LteEnbMac> enbMac = enbLteDevice->GetMac();
   // enbMac->SetLogDir(logdir);  // private !!
 
-  std::cout << "Number of UEs: " << ueNodes.GetN() << std::endl;
+  NS_LOG_INFO("Number of UEs: " << ueNodes.GetN());
 
   #if GENERATE_TRACES
-  std::cout << "Generating traces" << std::endl;
+  NS_LOG_INFO("Generating traces");
 
   lteHelper->EnableMacTraces();  // Enable MAC traces (to identify transmission patterns)
   lteHelper->EnablePhyTraces();  // Enable Phy traces ()
@@ -648,17 +645,33 @@ int main (int argc, char *argv[])
   // Connect the callback to log IMSI and RNTI when the connection is established
   // This allows us to map RNTI to IMSI
   Config::Connect ("/NodeList/*/DeviceList/*/LteUeRrc/ConnectionEstablished",
-                   MakeBoundCallback(&ConnectionEstablishedUeCallback, logdir));
+    MakeBoundCallback(&ConnectionEstablishedUeCallback, logdir));
 
+  /* **********************************
+    *
+    * Start the simulation
+    *
+    * **********************************/
   AnimationInterface anim (logdir + "lena-simple-epc.xml");
   Simulator::Stop (simTime); // Run
+  auto start = std::chrono::system_clock::now();
+  std::time_t start_time = std::chrono::system_clock::to_time_t(start);
+
+  std::stringstream ss;
+  ss << std::put_time(std::localtime(&start_time), "%Y-%m-%d_%H-%M-%S");
+  std::cout << "Started computation at " << ss.str() << std::endl;
   std::cout << "Log dir: ";
   Simulator::Run ();
   auto end = std::chrono::system_clock::now();
   std::chrono::duration<double> elapsed_seconds = end-start;
   std::time_t end_time = std::chrono::system_clock::to_time_t(end);
-  std::cout << "Finished computation at " << std::ctime(&end_time);
-  std::cout << "elapsed time: " << elapsed_seconds.count() << "s" << std::endl;
+  NS_LOG_INFO("Finished computation at " << std::ctime(&end_time) << "elapsed time: " << elapsed_seconds.count() << "s" );
   Simulator::Destroy ();
+  std::cout << "Done" << std::endl;
+
+  // Restore before logFile is destroyed
+  // This ensures std::clog isn’t left pointing to a buffer that’s about to vanish.
+  std::clog.rdbuf(defaultBuf);
+
   return 0;
 }
