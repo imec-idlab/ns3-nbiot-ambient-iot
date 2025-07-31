@@ -1177,7 +1177,7 @@ UeManager::RecvRrcEarlyDataRequestNb (NbIotRrcSap::RrcEarlyDataRequestNb msg)
                 tag.SetBid (Lcid2Bid (3));
                 msg.dedicatedInfoNas->AddPacketTag (tag);
 
-                m_rrc->LogDataReception(m_imsi);
+                m_rrc->LogDataReception(m_imsi, msg.dedicatedInfoNas->GetSize());
 
                 m_rrc->m_forwardUpCallback (msg.dedicatedInfoNas);
               }
@@ -1197,7 +1197,6 @@ UeManager::RecvRrcEarlyDataRequestNb (NbIotRrcSap::RrcEarlyDataRequestNb msg)
                   &LteEnbRrc::ConnectionSetupTimeout, m_rrc, m_rnti);
               SwitchToState (CONNECTION_SETUP);
 
-
             }
         else
         {
@@ -1212,6 +1211,7 @@ UeManager::RecvRrcEarlyDataRequestNb (NbIotRrcSap::RrcEarlyDataRequestNb msg)
                 m_rrc->m_connectionRejectedTimeoutDuration,
                 &LteEnbRrc::ConnectionRejectedTimeout, m_rrc, m_rnti);
             SwitchToState (CONNECTION_REJECTED);
+
           }
       }
       break;
@@ -1280,7 +1280,7 @@ UeManager::RecvRrcConnectionResumeCompletedNb (NbIotRrcSap::RrcConnectionResumeC
             tag.SetRnti (m_rnti);
             tag.SetBid (Lcid2Bid (3));
             msg.dedicatedInfoNas->AddPacketTag (tag);
-            m_rrc->LogDataReception(m_imsi);
+            m_rrc->LogDataReception(m_imsi, msg.dedicatedInfoNas->GetSize());
             m_rrc->m_forwardUpCallback (msg.dedicatedInfoNas);
           }
         }
@@ -1512,7 +1512,7 @@ UeManager::DoReceivePdcpSdu (LtePdcpSapUser::ReceivePdcpSduParameters params)
       tag.SetRnti (params.rnti);
       tag.SetBid (Lcid2Bid (params.lcid));
       params.pdcpSdu->AddPacketTag (tag);
-      m_rrc->LogDataReception(m_imsi);
+      m_rrc->LogDataReception(m_imsi, params.pdcpSdu->GetSize());
       m_rrc->m_forwardUpCallback (params.pdcpSdu);
     }
 }
@@ -3865,12 +3865,12 @@ void LteEnbRrc::SetLogDir(std::string logdir){
   m_rrcSapUser->SetLogDir(logdir);
 }
 
-void LteEnbRrc::LogDataReception(uint32_t imsi){
+void LteEnbRrc::LogDataReception(uint32_t imsi, uint32_t size){
   std::string logfile_path = m_logdir+"DataRecep.log";
   std::ofstream logfile;
   logfile.open(logfile_path, std::ios_base::app);
-  logfile <<  imsi <<  ","<< Simulator::Now().GetMilliSeconds() << "\n";
+  // imsi, size, time
+  logfile <<  imsi <<  "," << size << "," << Simulator::Now().GetMilliSeconds() << "\n";
   logfile.close();
 }
 } // namespace ns3
-
