@@ -3,6 +3,9 @@
 *.jpg
 *.jpeg
 
+# don't add logs
+logs/
+
 *.csv
 
 *.zip
