@@ -516,7 +516,7 @@ LteSpectrumPhy::StartTxDataFrame (Ptr<PacketBurst> pb, std::list<Ptr<LteControlM
       m_channel->StartTx (txParams);
       if (pb) {
         uint32_t nodeId = m_device->GetNode()->GetId();
-        NS_LOG_INFO("StartTxDataFrame: size " << pb->GetSize() << ", npackets " << pb->GetNPackets () << ", duration " << duration << ", node " << nodeId);
+        NS_LOG_INFO("StartTxDataFrame: time " << Simulator::Now().GetSeconds() << ", duration " << duration << ", size " << pb->GetSize() << ", npackets " << pb->GetNPackets () << ", cell " << m_cellId << ", node " << nodeId);
       }
       m_endTxEvent = Simulator::Schedule (duration, &LteSpectrumPhy::EndTxData, this);
     }
