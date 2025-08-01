@@ -115,7 +115,7 @@ void CreateLogDirectory(const std::string& simName,
     std::string makedir = "mkdir -p " + logdir;
     int z = std::system(makedir.c_str());
     NS_LOG_DEBUG("cmd: " << makedir << " : " << z);
-    NS_LOG_INFO("Log dir: " << logdir);
+    // NS_LOG_INFO("Log dir: " << logdir);
 
     outputPath = logdir + "/";  // return the final path via reference
 }
@@ -335,8 +335,12 @@ int main (int argc, char *argv[])
   CreateLogDirectory(simName, num_ues, simTime, ciot, edt, logdir);
   NS_LOG_DEBUG("worker: " << worker);
 
+  // --------------------------------------------------------------------------
+  //
   // redirect log to file
-  std::ofstream logFile(logdir + "ns3_log_output.txt");
+  //
+  // --------------------------------------------------------------------------
+  std::ofstream logFile(logdir + "ns3_log_output.log");
   std::streambuf* defaultBuf = std::clog.rdbuf();  // Save original buffer
   // Redirect clog to file
   std::clog.rdbuf(logFile.rdbuf());
