@@ -158,7 +158,8 @@ def compute_transition_probabilities(filename, show: bool = False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="State Changes")
-    parser.add_argument("options", type=str, default="d", choices=['d', 'f', 'c'], help="Select which operation to perform: d: search files, f: process a file")
+    parser.add_argument("options", type=str, default="d", choices=['d', 'f', 'c'],
+                        help="Select which operation to perform: d: search files, f: process a file, c: compute transition probabilities from a log file")
     parser.add_argument("--dir", type=str, default=None, help="Folder to search for state change files")
     parser.add_argument("--fname", type=str, default=None, help="Name of the file to process")
     parser.add_argument("--show", action="store_true", help="Show the plot")
