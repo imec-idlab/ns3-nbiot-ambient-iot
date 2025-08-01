@@ -6,6 +6,26 @@ from utilities import find_files
 
 
 def read_log_file(log_filename: str) -> pd.DataFrame:
+    """
+    Reads a log file and processes it into a pandas DataFrame with accumulated packet sizes per IMSI.
+
+    Args:
+        log_filename (str): The path to the log file to read.
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the processed data with the following columns:
+            - event: The event type.
+            - imsi: The IMSI identifier.
+            - local_address: The local address.
+            - source_address: The source address.
+            - protocol: The protocol used.
+            - packet_size: The size of the packet.
+            - timestamp: The timestamp of the event.
+            - accumulated_size: The accumulated packet size per IMSI.
+
+    The DataFrame is sorted by timestamp and padded to ensure each IMSI has a row at the maximum timestamp.
+    """
+
     # Load the log file
     df = pd.read_csv(log_filename, header=None)
 
@@ -43,7 +63,20 @@ def read_log_file(log_filename: str) -> pd.DataFrame:
     return df
 
 
-def plot_receive(log_filename, df, show: bool = False):
+def plot_receive_data_packets(log_filename, show: bool = False):
+    """
+    Plot accumulated packets vs time for each IMSI from the given log file.
+
+    Parameters:
+    log_filename (str): The log file to read.
+    show (bool, optional): If True, show the plot. If False, save the plot to a file named
+        `<log_filename>.png`. Defaults to False.
+
+    Returns:
+    None
+    """
+    df = read_log_file(log_filename)  # read the log to a dataframe
+
     plt.figure(figsize=(10, 6))
     for imsi, group in df.groupby('imsi'):
         # plt.plot(group['timestamp'], group['accumulated_size'], label=f'IMSI {imsi}')
@@ -72,14 +105,13 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.dir is not None:
-        state_change_files = find_files(args.dir, target_suffix="_receive.log")
-        print("Found state change files:")
-        for file in state_change_files:
+        receive_data_packets_files = find_files(args.dir, target_suffix="_receive.log")
+        print("Found receive log files:")
+        for file in receive_data_packets_files:
             print(file)
 
     elif args.fname is not None:
-        df = read_log_file(args.fname)  # read the log to a dataframe
-        plot_receive(args.fname, df, show=args.show)
+        plot_receive_data_packets(args.fname, show=args.show)
 
     else:
         print("Please provide either a directory or a file name to process.")
