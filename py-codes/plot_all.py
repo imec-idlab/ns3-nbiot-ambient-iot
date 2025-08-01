@@ -88,7 +88,7 @@ if __name__ == "__main__":
         plot_mac_events(filename, show=args.show)
 
     print("Processing eNB mac events in directory:", args.dir)
-    collision_files = find_files(args.dir, target_suffix="_MAC.log")
+    collision_files = [x for x in find_files(args.dir, target_suffix="MAC.log") if not x.endswith("ueMAC.log")]
     for filename in collision_files:
         print("- Processing file:", filename)
         plot_mac_events(filename, show=args.show)
