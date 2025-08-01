@@ -9,6 +9,8 @@ from check_spectral_uplink import plot_uplink_usage, plot_uplink_usage_imsi
 from collisions import plot_collisions
 from mac_events import plot_mac_events, plot_mac_events_imsi
 from state_changes import plot_state_changes
+from tx_data_frame import plot_tx_data_frame
+from receive_data_packets import plot_receive_data_packets
 
 
 if __name__ == "__main__":
@@ -66,6 +68,18 @@ if __name__ == "__main__":
     for filename in state_change_files:
         print("- Processing file:", filename)
         plot_state_changes(filename, show=args.show)
+
+    print("Processing receive log in directory:", args.dir)
+    receive_data_packets_files = find_files(args.dir, target_suffix="_receive.log")
+    for filename in receive_data_packets_files:
+        print("- Processing file:", filename)
+        plot_receive_data_packets(filename, show=args.show)
+
+    print("Processing `Tx Data Frame` in directory:", args.dir)
+    txDataFrame_files = find_files(args.dir, target_suffix="ns3_log_output.log")
+    for filename in txDataFrame_files:
+        print("- Processing file:", filename)
+        plot_tx_data_frame(filename, show=args.show)
 
     print("Processing UE mac events in directory:", args.dir)
     collision_files = find_files(args.dir, target_suffix="ueMAC.log")
