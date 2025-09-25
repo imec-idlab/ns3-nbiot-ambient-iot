@@ -54,13 +54,18 @@
 #include "ns3/point-to-point-module.h"
 #include "ns3/internet-module.h"
 #include "ns3/applications-module.h"
-#include "ns3/markov-udp-client.h" // Include the custom MarkovUdpClient header
+#include "ns3/markov-udp-client.h"  // Include the custom MarkovUdpClient header
 #include "ns3/mobility-module.h"
 #include "ns3/config-store-module.h"
 #include "ns3/random-variable-stream.h"
 #include "ns3/lte-module.h"
+
 #include <ns3/propagation-loss-model.h>
+#include <ns3/spectrum-error-model.h>
+#include <ns3/constant-spectrum-propagation-loss.h>
+#include <ns3/friis-spectrum-propagation-loss.h>
 #include <ns3/winner-plus-propagation-loss-model.h>
+
 #include "ns3/log.h"
 #include "ns3/nb-iot-energy.h"
 #include "ns3/basic-energy-harvester.h"
@@ -246,6 +251,7 @@ static void StateChangeTracerToFile(std::string logdir, std::string context, int
           << oldVal << " to " << newVal << std::endl;
 }
 
+
 /**
  * Main function to set up and run the simulation.
  * It initializes the LTE network, configures UEs and eNBs, and runs applications.
@@ -302,8 +308,8 @@ int main (int argc, char *argv[])
 
   std::string positioning = "uniform"; // default value is to use random position inside the cell
   std::string propagationLossModel = "fixed";  // default value is to use simple propagation loss model (fixed)
-  double rss = -100.0; // default value for fixed RSSI, used in FixedRssLossModel
-  double minLoss = 0.0; // default value for minimum loss, used in FriisPropagationLossModel
+  double minLoss = 0.0; // default value for minimum loss in dB
+
   bool ciot = false;
   bool edt = false;
 
@@ -311,6 +317,8 @@ int main (int argc, char *argv[])
   //
   // Command line arguments
   //
+  // -ns3::LteEnbPhy::NoiseFigure=x // eNodeB noise figure in dB
+  // -ns3::LteUePhy::NoiseFigure=x  // UE noise
   // --------------------------------------------------------------------------
   CommandLine cmd (__FILE__);
   cmd.AddValue ("simTime", "Total duration of the simulation", simTime);
@@ -322,8 +330,7 @@ int main (int argc, char *argv[])
   cmd.AddValue ("edt", "Early Data Transmission",edt);
   cmd.AddValue ("cell_size", "Cell size in meters", cell_size);
   cmd.AddValue("propagationLossModel", "Propagation loss model: friis, fixed, or winner", propagationLossModel);
-  cmd.AddValue("RSS", "Fixed RSSI in dBm for FixedRssLossModel", rss);
-  cmd.AddValue("minLoss", "Minimum loss in dB for FriisPropagationLoss", minLoss);
+  cmd.AddValue("Loss", "Minimum loss in dB for FriisPropagationLoss", minLoss);
   cmd.AddValue("positioning", "Positioning model: uniform, random, or same", positioning);
   // parse again so you can override default values from the command line
   cmd.Parse (argc, argv);
@@ -340,7 +347,8 @@ int main (int argc, char *argv[])
   // redirect log to file
   //
   // --------------------------------------------------------------------------
-  std::ofstream logFile(logdir + "ns3_log_output.log");
+  const std::string log_fname = "ns3_log_output.log";
+  std::ofstream logFile(logdir + log_fname);
   std::streambuf* defaultBuf = std::clog.rdbuf();  // Save original buffer
   // Redirect clog to file
   std::clog.rdbuf(logFile.rdbuf());
@@ -384,25 +392,30 @@ int main (int argc, char *argv[])
   lteHelper->SetUeAntennaModelType ("ns3::IsotropicAntennaModel");
   if (propagationLossModel == "friis")
   {
-    lteHelper->SetAttribute ("PathlossModel", StringValue ("ns3::FriisPropagationLossModel"));
-    lteHelper->SetPathlossModelAttribute("MinLoss", DoubleValue (minLoss)); // Set minimum loss to 0 dB
+    lteHelper->SetPathlossModelType(ns3::FriisSpectrumPropagationLossModel::GetTypeId());
   }
   else if (propagationLossModel == "fixed")
   {
-    lteHelper->SetAttribute ("PathlossModel", StringValue ("ns3::FixedRssLossModel"));
-    lteHelper->SetPathlossModelAttribute("Rss", DoubleValue (rss)); // Set fixed RSSI to -100 dBm
+    lteHelper->SetPathlossModelType(ns3::ConstantSpectrumPropagationLossModel::GetTypeId());
+    lteHelper->SetPathlossModelAttribute("Loss", DoubleValue (minLoss)); // Set fixed Loss to x dBm
   }
   else if (propagationLossModel == "winner")
   {
-    lteHelper->SetAttribute ("PathlossModel", StringValue ("ns3::WinnerPlusPropagationLossModel")); // Note that the Winner+ pathloss model isn't available in the current release of ns3. It can be downloaded at https://github.com/tudo-cni/ns3-propagation-winner-plus
+    lteHelper->SetPathlossModelType(ns3::WinnerPlusPropagationLossModel::GetTypeId()); // Note that the Winner+ pathloss model isn't available in the current release of ns3. It can be downloaded at https://github.com/tudo-cni/ns3-propagation-winner-plus
     lteHelper->SetPathlossModelAttribute ("HeightBasestation", DoubleValue (50));
     lteHelper->SetPathlossModelAttribute ("Environment", EnumValue (UMaEnvironment));
     lteHelper->SetPathlossModelAttribute ("LineOfSight", BooleanValue (false));
   }
 
   Config::SetDefault ("ns3::LteHelper::UseIdealRrc", BooleanValue (false));
-  Config::SetDefault ("ns3::LteSpectrumPhy::CtrlErrorModelEnabled", BooleanValue (false));
+  // TODO: why CtrlErrorModelEnabled and DataErrorModelEnabled cannot be true?
+  // when CtrlErrorModelEnabled is true, the phy error model is enabled for DL ctrl frame
+  // Config::SetDefault ("ns3::LteSpectrumPhy::CtrlErrorModelEnabled", BooleanValue (true));
   Config::SetDefault ("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue (false));
+
+  // Set the noise figure for UEs and eNodeBs
+  // - dont need this because can set in command line using -ns3::LteUePhy::NoiseFigure=x
+  // Config::SetDefault ("ns3::LteEnbPhy::NoiseFigure", DoubleValue (0));  // Noise figure in dB
 
   // One Packet Data Network Gateway (PGW) in the simulation
   Ptr<Node> pgw = epcHelper->GetPgwNode ();
@@ -464,6 +477,7 @@ int main (int argc, char *argv[])
   mobilityEnb.SetPositionAllocator(positionAlloc);
   mobilityEnb.Install(enbNodes);
 
+
   /*
     --------------- create UEs ---------------
   */
@@ -517,6 +531,12 @@ int main (int argc, char *argv[])
   // Install LTE Devices to the nodes
   NetDeviceContainer enbLteDevs = lteHelper->InstallEnbDevice (enbNodes);
   NetDeviceContainer ueLteDevs = lteHelper->InstallUeDevice (ueNodes);
+
+  // TODO: remove???
+  // Ptr<SpectrumChannel> uplinkChannel = CreateObject<SingleModelSpectrumChannel>();
+  // uplinkChannel->AddPropagationLossModel(lossModel);
+  // uplinkChannel->SetPropagationDelayModel(delayModel);
+  // enbNodes.Get (0)->GetObject<LteEnbNetDevice> ()->GetPhy ()->SetUplinkChannel (uplinkChannel);
 
   // Install the IP stack on the UEs
   internet.Install (ueNodes);
@@ -664,6 +684,7 @@ int main (int argc, char *argv[])
   std::stringstream ss;
   ss << std::put_time(std::localtime(&start_time), "%Y-%m-%d_%H-%M-%S");
   std::cout << "Started computation at " << ss.str() << std::endl;
+  std::cout << "Log file: " << logdir << "/" << log_fname << std::endl;
   std::cout << "Log dir: ";
   Simulator::Run ();
   auto end = std::chrono::system_clock::now();
