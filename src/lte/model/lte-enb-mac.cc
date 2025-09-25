@@ -1303,6 +1303,10 @@ LteEnbMac::DoReceivePhyPdu (Ptr<Packet> p)
   uint16_t rnti = tag.GetRnti ();
   uint8_t lcid = tag.GetLcid ();
 
+  uint32_t frameSize = p->GetSize ();
+  uint32_t serializedSize = p->GetSerializedSize();
+  NS_LOG_INFO("LteEnbMac::DoReceivePhyPdu RNTI: " << rnti << ", Id: " << p->GetUid () << ", Size: " << frameSize << " bytes, " << serializedSize << " bytes");
+
   DataVolumeAndPowerHeadroomTag dprTag;
   BufferStatusReportTag bsrTag;
   uint32_t buffersize;
@@ -1676,6 +1680,8 @@ LteEnbMac::DoTransmitPdu (LteMacSapProvider::TransmitPduParameters params)
   ////(*it).second.at (params.layer).at (params.harqProcessId) = params.pdu;//->Copy ();
   //(*it).second.at (params.layer).at (params.harqProcessId)->AddPacket (params.pdu);
   m_enbPhySapProvider->SendMacPdu (params.pdu);
+
+  NS_LOG_INFO("LteEnbMac::DoTransmitPdu RNTI: " << params.rnti << ", Id: " << params.pdu->GetUid () << ", Size: " << params.pdu->GetSize() << " bytes, " << params.pdu->GetSerializedSize() << " bytes");
 }
 
 void

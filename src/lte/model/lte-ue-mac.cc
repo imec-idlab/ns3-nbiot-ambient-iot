@@ -429,6 +429,9 @@ LteUeMac::DoTransmitPdu (LteMacSapProvider::TransmitPduParameters params)
       params.pdu->AddPacketTag(bsrTag);
     }
     // Normal PDU just add BSR for next Packet
+
+    NS_LOG_INFO("LteUeMac::DoTransmitPdu RNTI: " << m_rnti << ", Id: " << params.pdu->GetUid () << ", Size: " << params.pdu->GetSize() << " bytes, " << params.pdu->GetSerializedSize() << " bytes");
+
   }
 
   params.pdu->AddPacketTag (radioTag);
@@ -1076,9 +1079,13 @@ void
 LteUeMac::DoReceivePhyPdu (Ptr<Packet> p)
 {
   LteRadioBearerTag tag;
+
+  uint32_t frameSize = p->GetSize ();
+  uint32_t serializedSize = p->GetSerializedSize();
   p->RemovePacketTag (tag);
   if (tag.GetRnti () == m_rnti)
-    {
+  {
+      NS_LOG_INFO("LteUeMac::DoReceivePhyPdu RNTI: " << m_rnti << ", Id: " << p->GetUid () << ", Size: " << frameSize << " bytes, " << serializedSize << " bytes");
       // packet is for the current user
       std::map<uint8_t, LcInfo>::const_iterator it = m_lcInfoMap.find (tag.GetLcid ());
       if (it != m_lcInfoMap.end ())
