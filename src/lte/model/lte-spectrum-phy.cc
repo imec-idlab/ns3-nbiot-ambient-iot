@@ -1124,6 +1124,21 @@ void
 LteSpectrumPhy::UpdateSinrPerceived (const SpectrumValue& sinr)
 {
   NS_LOG_FUNCTION (this << sinr);
+  std::cout << "LteSpectrumPhy::UpdateSinrPerceived" << std::endl;  // TODO: remove me!
+
+  // // ------------------------------------------------------
+  ns3::Bands::const_iterator bandIt = sinr.ConstBandsBegin();
+  for (size_t i = 0; bandIt != sinr.ConstBandsEnd(); ++bandIt, ++i)
+  {
+      double fl = bandIt->fl; // lower frequency
+      double fh = bandIt->fh; // upper frequency
+      double fc = bandIt->fh; // central frequency
+      double power = sinr[i]; // power in Watts?
+
+      std::cout << "Band " << i << ": [" << fl << ", " << fc << ", " << fh << "] Hz, Power = " << power << " W" << std::endl;
+  }
+  // // ------------------------------------------------------
+  // NS_LOG_INFO("LteSpectrumPhy::UpdateSinrPerceived" << sinr);
   m_sinrPerceived = sinr;
 }
 
@@ -1392,11 +1407,14 @@ LteSpectrumPhy::EndRxDlCtrl ()
       // in case of MIMO, ctrl is always txed as TX diversity
       m_sinrPerceived *= m_txModeGain.at (1);
     }
-//   m_sinrPerceived *= m_txModeGain.at (m_transmissionMode);
+  // m_sinrPerceived *= m_txModeGain.at (m_transmissionMode);
   bool error = false;
   if (m_ctrlErrorModelEnabled)
     {
+      // TODO: raising error with nb-scenario4 because m_sinrPerceived is empty !
+      std::cout << "PCFICH-PDCCH SINR " << m_sinrPerceived.GetValuesN () << " dB" << std::endl;  // TODO: remove me
       double  errorRate = LteMiErrorModel::GetPcfichPdcchError (m_sinrPerceived);
+      std::cout << "PCFICH-PDCCH errorRate " << errorRate << std::endl;   // TODO: remove me !
       error = m_random->GetValue () > errorRate ? false : true;
       NS_LOG_DEBUG (this << " PCFICH-PDCCH Decodification, errorRate " << errorRate << " error " << error);
     }
