@@ -61,13 +61,13 @@ NS_LOG_COMPONENT_DEFINE ("LteUePhy");
  * events. The duration of one symbol is TTI/14 (rounded). In other words,
  * duration of data portion of UL subframe = 1 ms * (13/14) - 1 ns.
  */
-static const Time UL_DATA_DURATION = NanoSeconds (1e6 - 71429 - 1); 
+static const Time UL_DATA_DURATION = NanoSeconds (1e6 - 71429 - 1);
 
 /**
  * Delay from subframe start to transmission of SRS.
  * Equals to "TTI length - 1 symbol for SRS".
  */
-static const Time UL_SRS_DELAY_FROM_SUBFRAME_START = NanoSeconds (1e6 - 71429); 
+static const Time UL_SRS_DELAY_FROM_SUBFRAME_START = NanoSeconds (1e6 - 71429);
 
 
 
@@ -226,7 +226,7 @@ LteUePhy::GetTypeId (void)
     .AddAttribute ("TxPower",
                    "Transmission power in dBm",
                    DoubleValue (20.0),
-                   MakeDoubleAccessor (&LteUePhy::SetTxPower, 
+                   MakeDoubleAccessor (&LteUePhy::SetTxPower,
                                        &LteUePhy::GetTxPower),
                    MakeDoubleChecker<double> ())
     .AddAttribute ("NoiseFigure",
@@ -239,7 +239,7 @@ LteUePhy::GetTypeId (void)
                    "In this model, we consider T0 = 290K.",
                    //DoubleValue (9.0),
                    DoubleValue (0.0),
-                   MakeDoubleAccessor (&LteUePhy::SetNoiseFigure, 
+                   MakeDoubleAccessor (&LteUePhy::SetNoiseFigure,
                                        &LteUePhy::GetNoiseFigure),
                    MakeDoubleChecker<double> ())
     .AddAttribute ("TxMode1Gain",
@@ -430,6 +430,7 @@ LteUePhy::SetNoiseFigure (double nf)
 {
   NS_LOG_FUNCTION (this << nf);
   m_noiseFigure = nf;
+  NS_LOG_INFO ("Setting UE noise figure to " << m_noiseFigure);
 }
 
 double
@@ -647,8 +648,8 @@ LteUePhy::GenerateCqiRsrpRsrq (const SpectrumValue& sinr)
       for (it = m_rsReceivedPower.ConstValuesBegin (); it != m_rsReceivedPower.ConstValuesEnd (); it++)
         {
           // convert PSD [W/Hz] to linear power [W] for the single RE
-          // we consider only one RE for the RS since the channel is 
-          // flat within the same RB 
+          // we consider only one RE for the RS since the channel is
+          // flat within the same RB
           double powerTxW = ((*it) * 180000.0) / 12.0;
           sum += powerTxW;
           rbNum++;
@@ -804,13 +805,13 @@ LteUePhy::GenerateMixedCqiReport (const SpectrumValue& sinr)
   uint32_t modulo = m_dlBandwidth % rbgSize;
   double avgMixedSinr = 0;
   uint32_t usedRbgNum = 0;
-  for(uint32_t i = 0; i < (m_dlBandwidth-1-modulo); i++) 
+  for(uint32_t i = 0; i < (m_dlBandwidth-1-modulo); i++)
     {
       usedRbgNum++;
       avgMixedSinr+=mixedSinr[i];
     }
   avgMixedSinr = avgMixedSinr/usedRbgNum;
-  for(uint32_t i = 0; i < modulo; i++) 
+  for(uint32_t i = 0; i < modulo; i++)
     {
       mixedSinr[m_dlBandwidth-1-i] = avgMixedSinr;
     }
@@ -1025,7 +1026,7 @@ LteUePhy::DoSendLteControlMessage (Ptr<LteControlMessage> msg)
   SetControlMessages (msg);
 }
 
-void 
+void
 LteUePhy::DoSendRachPreamble (uint32_t raPreambleId, uint32_t raRnti)
 {
   NS_LOG_FUNCTION (this << raPreambleId);
@@ -1038,7 +1039,7 @@ LteUePhy::DoSendRachPreamble (uint32_t raPreambleId, uint32_t raRnti)
   m_controlMessagesQueue.at (0).push_back (msg);
 }
 
-void 
+void
 LteUePhy::DoSendNprachPreamble (uint32_t raPreambleId, uint32_t raRnti, uint8_t subcarrieroffset)
 {
   NS_LOG_FUNCTION (this << raPreambleId << "BLA");
@@ -1221,7 +1222,7 @@ LteUePhy::ReceiveLteControlMessageList (std::list<Ptr<LteControlMessage> > msgLi
           NS_LOG_INFO ("received MIB_NB");
           NS_ASSERT (m_cellId > 0);
           Ptr<MibNbiotControlMessage> msg2 = DynamicCast<MibNbiotControlMessage> (msg);
-          // implement time for aquirering MIB-NB 
+          // implement time for aquirering MIB-NB
           m_ueCphySapUser->RecvMasterInformationBlockNb (m_cellId, msg2->GetMib());
         }
       else if (msg->GetMessageType () == LteControlMessage::SIB1_NB)
@@ -1247,7 +1248,7 @@ LteUePhy::ReceiveLteControlMessageList (std::list<Ptr<LteControlMessage> > msgLi
           /*
           Calculate corret TBS
           */
-          
+
           int currentsubframe =  10*(m_frameNo-1)+(m_subframeNo-1);
           int subframes_to_wait = *(dci.npdschOpportunity.end()-1)-currentsubframe;
           m_uePhySapUser->NotifyAboutHarqOpportunity(dci.npuschOpportunity);
@@ -1255,7 +1256,7 @@ LteUePhy::ReceiveLteControlMessageList (std::list<Ptr<LteControlMessage> > msgLi
           //AddNbiotExpectedTb(msg2->GetRnti(),dci.NDI, 192, 0, std::vector<int>({0}), 0, 0, 0, true /* DL */);
 
           Simulator::Schedule (MilliSeconds(subframes_to_wait), &LteUePhy::AddNbiotExpectedTb, this);
-//                                      (short unsigned int, unsigned char, short unsigned int, unsigned char, std::vector<int>, unsigned char, unsigned char, unsigned char, bool), 
+//                                      (short unsigned int, unsigned char, short unsigned int, unsigned char, std::vector<int>, unsigned char, unsigned char, unsigned char, bool),
  //                      ns3::LteUePhy*, unsigned int, bool&, int, int, std::vector<int>, int, int, int, bool)’
 //                       short unsigned int, unsigned char, short unsigned int, unsigned char, std::vector<int>, unsigned char, unsigned char, unsigned char, bool
 //       ns3::LteUePhy*, short unsigned int, unsigned char, short unsigned int, unsigned char, std::vector<int>, unsigned char, unsigned char, unsigned char, bool
@@ -1333,8 +1334,8 @@ LteUePhy::ReceiveLteControlMessageList (std::list<Ptr<LteControlMessage> > msgLi
               Simulator::Schedule (MilliSeconds(subframes), &LteUePhy::QueueSubChannelsForTransmission, this, std::vector<int>{subcarrier});
               m_uePhySapUser->ReceiveLteControlMessage (msg);
               // reset RACH variables with out of range values
-                    
-                
+
+
             }
         }
       else
@@ -1553,7 +1554,7 @@ LteUePhy::SubframeIndication (uint32_t frameNo, uint32_t subframeNo){
           if ((((frameNo-1)*10 + (subframeNo-1)) % m_srsPeriodicity) == m_srsSubframeOffset)
             {
               NS_LOG_INFO ("frame " << frameNo << " subframe " << subframeNo << " sending SRS (offset=" << m_srsSubframeOffset << ", period=" << m_srsPeriodicity << ")");
-              m_sendSrsEvent = Simulator::Schedule (UL_SRS_DELAY_FROM_SUBFRAME_START, 
+              m_sendSrsEvent = Simulator::Schedule (UL_SRS_DELAY_FROM_SUBFRAME_START,
                                                     &LteUePhy::SendSrs,
                                                     this);
             }
@@ -1757,15 +1758,30 @@ LteUePhy::DoSetDlBandwidth (uint16_t dlBandwidth)
         110     // RGB size 4
       };  // see table 7.1.6.1-1 of 36.213
       for (int i = 0; i < 4; i++)
-        {
-          if (dlBandwidth < Type0AllocationRbg[i])
-            {
-              m_rbgSize = i + 1;
-              break;
-            }
-        }
+      {
+        if (dlBandwidth < Type0AllocationRbg[i])
+          {
+            m_rbgSize = i + 1;
+            break;
+          }
+      }
 
       m_noisePsd = LteSpectrumValueHelper::CreateNoisePowerSpectralDensity (m_dlEarfcn, 1, m_noiseFigure);
+
+      // // ------------------------------------------------------
+      // std::cout << "dlBandwidth: " << dlBandwidth << " m_dlEarfcn: " << m_dlEarfcn << " m_noiseFigure: " << m_noiseFigure << std::endl;
+      // ns3::Bands::const_iterator bandIt = m_noisePsd->ConstBandsBegin();
+      // for (size_t i = 0; bandIt != m_noisePsd->ConstBandsEnd(); ++bandIt, ++i)
+      // {
+      //     double fl = bandIt->fl; // lower frequency
+      //     double fh = bandIt->fh; // upper frequency
+      //     double fc = bandIt->fh; // central frequency
+      //     double power = (*m_noisePsd)[i]; // power in Watts?
+
+      //     std::cout << "Band " << i << ": [" << fl << ", " << fh << "] Hz, Power = " << power << " W" << std::endl;
+      // }
+      // // ------------------------------------------------------
+
       m_downlinkSpectrumPhy->SetNoisePowerSpectralDensity (m_noisePsd);
       m_downlinkSpectrumPhy->GetChannel ()->AddRx (m_downlinkSpectrumPhy);
     }
@@ -1773,7 +1789,7 @@ LteUePhy::DoSetDlBandwidth (uint16_t dlBandwidth)
 }
 
 
-void 
+void
 LteUePhy::DoConfigureUplink (uint32_t ulEarfcn, uint16_t ulBandwidth)
 {
   m_ulEarfcn = ulEarfcn;
@@ -1787,7 +1803,7 @@ LteUePhy::DoConfigureReferenceSignalPower (int8_t referenceSignalPower)
   NS_LOG_FUNCTION (this);
   m_powerControl->ConfigureReferenceSignalPower (referenceSignalPower);
 }
- 
+
 void
 LteUePhy::DoSetRnti (uint16_t rnti)
 {
@@ -1797,7 +1813,7 @@ LteUePhy::DoSetRnti (uint16_t rnti)
   m_powerControl->SetCellId (m_cellId);
   m_powerControl->SetRnti (m_rnti);
 }
- 
+
 void
 LteUePhy::DoSetTransmissionMode (uint8_t txMode)
 {
@@ -1827,7 +1843,7 @@ LteUePhy::DoSetPa (double pa)
   m_paLinear = pow (10,(pa/10));
 }
 
-void 
+void
 LteUePhy::DoSetRsrpFilterCoefficient (uint8_t rsrpFilterCoefficient)
 {
   NS_LOG_FUNCTION (this << (uint16_t) (rsrpFilterCoefficient));
@@ -1973,37 +1989,37 @@ LteUePhy::SetTxMode1Gain (double gain)
   SetTxModeGain (1, gain);
 }
 
-void 
+void
 LteUePhy::SetTxMode2Gain (double gain)
 {
   SetTxModeGain (2, gain);
 }
 
-void 
+void
 LteUePhy::SetTxMode3Gain (double gain)
 {
   SetTxModeGain (3, gain);
 }
 
-void 
+void
 LteUePhy::SetTxMode4Gain (double gain)
 {
   SetTxModeGain (4, gain);
 }
 
-void 
+void
 LteUePhy::SetTxMode5Gain (double gain)
 {
   SetTxModeGain (5, gain);
 }
 
-void 
+void
 LteUePhy::SetTxMode6Gain (double gain)
 {
   SetTxModeGain (6, gain);
 }
 
-void 
+void
 LteUePhy::SetTxMode7Gain (double gain)
 {
   SetTxModeGain (7, gain);
