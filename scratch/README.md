@@ -97,14 +97,17 @@ cd ns3-nbiot
 ./waf --run "nb-scenario4 \
     --simTime=180 \
     --num_ues=10 \
-    --coverage=100 \
+    --cell_size=2500 \
     --ns3::MarkovUdpClient::PacketSize=512 \
     --ns3::MarkovUdpClient::MaxPackets=10000 \
     --ns3::LteEnbMac::NumberOfRaPreambles=10 \
+    --ns3::ConstantSpectrumPropagationLossModel::Loss=1 \
+    --ns3::LteUePhy::NoiseFigure=1 \
+    --ns3::LteEnbPhy::NoiseFigure=1 \
     --ns3::MarkovUdpClient::ActiveInterval=10 \
     --ns3::MarkovUdpClient::InactiveInterval=10
     --ns3::MarkovUdpClient::TransitionProbabilityInactiveToActive=0.7 \
-    --ns3::MarkovUdpClient::TransitionProbabilityActiveToInactive=0.2" 2>&1 | tee nb-scenario3.log
+    --ns3::MarkovUdpClient::TransitionProbabilityActiveToInactive=0.2"
 ```
 
 **Reference**:
