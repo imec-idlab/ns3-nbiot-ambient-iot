@@ -61,17 +61,20 @@
 #include "ns3/lte-module.h"
 
 #include <ns3/propagation-loss-model.h>
-#include <ns3/spectrum-error-model.h>
+// #include <ns3/spectrum-error-model.h>
 #include <ns3/constant-spectrum-propagation-loss.h>
 #include <ns3/friis-spectrum-propagation-loss.h>
 #include <ns3/winner-plus-propagation-loss-model.h>
+
+// #include "ns3/single-model-spectrum-channel.h"
+// #include "ns3/spectrum-channel.h"
+// #include "ns3/spectrum-helper.h"
 
 #include "ns3/log.h"
 #include "ns3/nb-iot-energy.h"
 #include "ns3/basic-energy-harvester.h"
 
 #include "ns3/netanim-module.h"
-
 
 using namespace ns3;
 
@@ -251,6 +254,151 @@ static void StateChangeTracerToFile(std::string logdir, std::string context, int
           << oldVal << " to " << newVal << std::endl;
 }
 
+/**
+ * Create a specified number of UEs with a given positioning strategy.
+ * @param num_ues The number of UEs to create.
+ * @param positioning The positioning strategy to use. Can be one of "same", "uniform", or "random".
+ * @param cell_size The size of the cell in meters.
+ * @param heightOfUes The height of the UEs in meters.
+ * @return A NodeContainer containing all the created UEs.
+ */
+NodeContainer create_ues(int num_ues, std::string positioning, double cell_size, double heightOfUes)
+{
+  /*
+    --------------- create UEs ---------------
+  */
+  NodeContainer ueNodes;
+  ueNodes.Create (num_ues); // Pre-Run, Run, Post-Run.
+  Ptr<ListPositionAllocator> positionAllocUe = CreateObject<ListPositionAllocator> ();
+  if (positioning == "same")
+  {
+    // Place all UEs at the same position, in the center of the cell
+    positionAllocUe->Add (Vector (cell_size/2, cell_size/2, heightOfUes));
+  }
+  else if (positioning == "uniform")
+  {
+    // Place UEs uniformly at the same distance from the BS in the cell
+    const double PI = 3.14159265358979323846;
+    double radius = cell_size / 2; // radius of the circle where UEs are placed
+    for (int i = 0; i < num_ues; ++i)
+    {
+      double angle = 2 * PI * i / num_ues; // distribute UEs uniformly around the eNB
+      double x = radius + radius * std::cos(angle);  // x-coordinate = centerX + radius * cos(angle)
+      double y = radius + radius * std::sin(angle);  // y-coordinate = centerY + radius * sin(angle)
+      positionAllocUe->Add (Vector (x, y, heightOfUes));
+    }
+  }
+  else if (positioning == "random")
+  {
+    // Install Mobility Model for the UEs
+    // The UEs are placed randomly inside a disc around the eNB, with radius cell_size
+    ObjectFactory pos_a;
+    pos_a.SetTypeId ("ns3::UniformDiscPositionAllocator");
+    pos_a.Set ("X", StringValue (std::to_string(cell_size/2)));
+    pos_a.Set ("Y", StringValue (std::to_string(cell_size/2)));
+    pos_a.Set ("Z", DoubleValue (heightOfUes));  // height of the UEs, we should also vary this in the future
+    pos_a.Set ("rho", DoubleValue (cell_size/2));
+    Ptr<PositionAllocator> m_position = pos_a.Create ()->GetObject<PositionAllocator> ();
+    for (int i = 0; i < num_ues; ++i){
+      Vector position = m_position->GetNext ();
+      positionAllocUe->Add (position);
+      NS_LOG_INFO("Node#" << i << " Position:" << position.x << "," << position.y << "," << position.z);
+    }
+  }
+  // Install Mobility Model
+  // Nodes are static. No movement is simulated.
+  MobilityHelper mobilityUe;
+  mobilityUe.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
+  mobilityUe.SetPositionAllocator(positionAllocUe);
+  mobilityUe.Install (ueNodes);
+
+  return ueNodes;
+}
+
+
+/**
+ * Create a specified number of eNBs with a given positioning strategy.
+ * @param num_enbs The number of eNBs to create. Should be 1.
+ * @param cell_size The size of the cell in meters.
+ * @param heightOfEnb The height of the eNB in meters.
+ * @return A NodeContainer containing all the created eNBs.
+ */
+NodeContainer create_enb(uint32_t num_enbs, double cell_size, double heightOfEnb)
+{
+  NodeContainer enbNodes;
+
+  enbNodes.Create (num_enbs);  // should be 1
+
+  NS_LOG_INFO("eNB node id: " << enbNodes.Get(0)->GetId ());
+
+  // Install Mobility Model
+  Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();
+  // Place our single eNb right in the center of the cell
+  positionAlloc->Add (Vector (cell_size/2, cell_size/2, heightOfEnb));
+  // Install Mobility Model. Fix eNB at the center
+  MobilityHelper mobilityEnb;
+  mobilityEnb.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+  mobilityEnb.SetPositionAllocator(positionAlloc);
+  mobilityEnb.Install(enbNodes);
+
+  return enbNodes;
+}
+
+
+/**
+ * Set the propagation loss model for the LTE simulation.
+ *
+ * @param lteHelper The helper object for the LTE simulation.
+ * @param propagationLossModel The type of propagation loss model. Can be "friis", "fixed", or "winner".
+ *
+ * The "friis" model uses a simplified version of Friis' formula (L = 4 * pi * d * f / C^2) to calculate the propagation loss.
+ * The "fixed" model uses a constant value for the propagation loss.
+ * The "winner" model uses the Winner+ pathloss model (not available in the current release of ns3).
+ * For the "winner" model, the user can set the following parameters:
+ * - "HeightBasestation" (double): the height of the base station in meters.
+ * - "Environment" (enum): the type of environment (UMaEnvironment, UrbanMacrocellEnvironment, etc.).
+ * - "LineOfSight" (bool): whether the pathloss model considers line of sight or not.
+ */
+void define_propagation_loss_model (Ptr<LteHelper> lteHelper, std::string propagationLossModel)
+{
+  if (propagationLossModel == "friis")
+  {
+    std::cout << "friis spectrum propagation loss model" << std::endl;
+    lteHelper->SetPathlossModelType(ns3::FriisSpectrumPropagationLossModel::GetTypeId());
+    // there is no configurable parameter for this pathloss model
+  }
+  else if (propagationLossModel == "fixed")
+  {
+    // set the loss value using --ns3::ConstantSpectrumPropagationLossModel::Loss=x
+    lteHelper->SetPathlossModelType(ns3::ConstantSpectrumPropagationLossModel::GetTypeId());
+  }
+  else if (propagationLossModel == "winner")
+  {
+    lteHelper->SetPathlossModelType(ns3::WinnerPlusPropagationLossModel::GetTypeId()); // Note that the Winner+ pathloss model isn't available in the current release of ns3. It can be downloaded at https://github.com/tudo-cni/ns3-propagation-winner-plus
+    lteHelper->SetPathlossModelAttribute ("HeightBasestation", DoubleValue (50));
+    lteHelper->SetPathlossModelAttribute ("Environment", EnumValue (UMaEnvironment));
+    lteHelper->SetPathlossModelAttribute ("LineOfSight", BooleanValue (false));
+  }
+  else
+  {
+    // Cannot validate input for the propagation loss model
+    NS_FATAL_ERROR("Invalid propagationLossModel: must be 'friis', 'fixed', or 'winner'");
+    return;
+  }
+}
+
+
+// Callback wrapper
+void SinrTraceCallback(uint64_t imsi, Ptr<ns3::SpectrumValue> sinr)
+{
+  std::cout << "SinrTraceCallback IMSI: " << imsi << " SINR: " << std::endl;
+}
+
+void LteSinrTraceCallback(uint16_t imsi, Ptr<ns3::SpectrumValue> sinr)
+{
+  std::cout << "LteSinrTraceCallback IMSI: " << imsi << " SINR: " << std::endl;
+}
+
 
 /**
  * Main function to set up and run the simulation.
@@ -306,31 +454,37 @@ int main (int argc, char *argv[])
   // Access delay for the application, in milliseconds
   Time access = MilliSeconds(10);
 
-  std::string positioning = "uniform"; // default value is to use random position inside the cell
-  std::string propagationLossModel = "fixed";  // default value is to use simple propagation loss model (fixed)
-  double minLoss = 0.0; // default value for minimum loss in dB
+  std::string positioning = "uniform"; // default value is to use random position in the border of the cell
+  // std::string propagationLossModel = "friis";  // default value is to use simple propagation loss model (friis)
+
+  // default value is to use constant propagation loss model (fixed loss given by --ns3::ConstantSpectrumPropagationLossModel::Loss)
+  std::string propagationLossModel = "fixed";
 
   bool ciot = false;
   bool edt = false;
 
   // --------------------------------------------------------------------------
+  // Useful Command line arguments
+  // =============================
   //
-  // Command line arguments
+  // --ns3::LteEnbPhy::NoiseFigure=x // eNodeB noise figure in dB
   //
-  // -ns3::LteEnbPhy::NoiseFigure=x // eNodeB noise figure in dB
-  // -ns3::LteUePhy::NoiseFigure=x  // UE noise
+  // NoiseFigure models the receiver noise figure of the UE's physical layer, i.e., how much thermal noise and hardware imperfections degrade the received signal
+  // --ns3::LteUePhy::NoiseFigure=x
+  //
+  // Path loss (dB) between transmitter and receiver that provides a constant attenuation applied to all signals, regardless of distance, frequency, or environment.
+  // --ns3::ConstantSpectrumPropagationLossModel::Loss=x
   // --------------------------------------------------------------------------
   CommandLine cmd (__FILE__);
   cmd.AddValue ("simTime", "Total duration of the simulation", simTime);
   cmd.AddValue ("simName", "Name of the simulation", simName);
   cmd.AddValue ("worker", "worker id when using multithreading to not confuse logging", worker);
-  cmd.AddValue ("randomSeed", "randomSeed",seed);
+  cmd.AddValue ("randomSeed", "randomSeed", seed);
   cmd.AddValue ("num_ues", "Number of UEs", num_ues);
-  cmd.AddValue ("ciot", "Cellular IoT Optimization",ciot);
-  cmd.AddValue ("edt", "Early Data Transmission",edt);
+  cmd.AddValue ("ciot", "Cellular IoT Optimization", ciot);
+  cmd.AddValue ("edt", "Early Data Transmission", edt);
   cmd.AddValue ("cell_size", "Cell size in meters", cell_size);
   cmd.AddValue("propagationLossModel", "Propagation loss model: friis, fixed, or winner", propagationLossModel);
-  cmd.AddValue("Loss", "Minimum loss in dB for FriisPropagationLoss", minLoss);
   cmd.AddValue("positioning", "Positioning model: uniform, random, or same", positioning);
   // parse again so you can override default values from the command line
   cmd.Parse (argc, argv);
@@ -360,15 +514,6 @@ int main (int argc, char *argv[])
   // Config::SetDefault ("ns3::ComponentCarrier::DlBandwidth", UintegerValue (50));  // downlink bandwidth in RBs
   Config::SetDefault ("ns3::ComponentCarrier::PrimaryCarrier", BooleanValue (true));  // whether the primary carrier is enabled
 
-  // Validate input for the propagation loss model
-  if (propagationLossModel != "friis" &&
-      propagationLossModel != "fixed" &&
-      propagationLossModel != "winner")
-  {
-        NS_FATAL_ERROR("Invalid propagationLossModel: must be 'friis', 'fixed', or 'winer'");
-        return 1;
-  }
-
   if (positioning != "uniform" &&
       positioning != "random" &&
       positioning != "same")
@@ -385,37 +530,55 @@ int main (int argc, char *argv[])
 
   // configure LTE
   Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
+
   Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper> ();
   lteHelper->SetEpcHelper (epcHelper);
+
+  // Enable RRC logging
   lteHelper->EnableRrcLogging ();
   lteHelper->SetEnbAntennaModelType ("ns3::IsotropicAntennaModel");
   lteHelper->SetUeAntennaModelType ("ns3::IsotropicAntennaModel");
-  if (propagationLossModel == "friis")
-  {
-    lteHelper->SetPathlossModelType(ns3::FriisSpectrumPropagationLossModel::GetTypeId());
-  }
-  else if (propagationLossModel == "fixed")
-  {
-    lteHelper->SetPathlossModelType(ns3::ConstantSpectrumPropagationLossModel::GetTypeId());
-    lteHelper->SetPathlossModelAttribute("Loss", DoubleValue (minLoss)); // Set fixed Loss to x dBm
-  }
-  else if (propagationLossModel == "winner")
-  {
-    lteHelper->SetPathlossModelType(ns3::WinnerPlusPropagationLossModel::GetTypeId()); // Note that the Winner+ pathloss model isn't available in the current release of ns3. It can be downloaded at https://github.com/tudo-cni/ns3-propagation-winner-plus
-    lteHelper->SetPathlossModelAttribute ("HeightBasestation", DoubleValue (50));
-    lteHelper->SetPathlossModelAttribute ("Environment", EnumValue (UMaEnvironment));
-    lteHelper->SetPathlossModelAttribute ("LineOfSight", BooleanValue (false));
-  }
 
-  Config::SetDefault ("ns3::LteHelper::UseIdealRrc", BooleanValue (false));
-  // TODO: why CtrlErrorModelEnabled and DataErrorModelEnabled cannot be true?
-  // when CtrlErrorModelEnabled is true, the phy error model is enabled for DL ctrl frame
+  /*
+   *
+   * --------------- Propagation loss model -------------------
+   *
+   */
+  define_propagation_loss_model (lteHelper, propagationLossModel);
+
+  // Config::SetDefault ("ns3::LteHelper::UseIdealRrc", BooleanValue (false));
+  lteHelper->SetAttribute ("UseIdealRrc", BooleanValue (false));
+  lteHelper->SetAttribute ("UsePdschForCqiGeneration", BooleanValue (true));
+
+  //Disable Uplink Power Control
+  Config::SetDefault ("ns3::LteUePhy::EnableUplinkPowerControl", BooleanValue (false));
+
+  // This sets the MAC scheduler to Round-Robin (RR) using the RrFfMacScheduler class
+  // that allocates resources equally among UEs in a cyclic fashion, without considering channel quality.
+  // lteHelper->SetSchedulerType ("ns3::RrFfMacScheduler");
+  // lteHelper->SetSchedulerAttribute ("UlCqiFilter", EnumValue (FfMacScheduler::PUSCH_UL_CQI));
+
+  // ---------------------- BUGS ------------------------------
+  // BUG: I can tell that with the current configuration, LteSpectrumPhy::UpdateSinrPerceived is never called
+  //      the calls should be assigned by LteHelper::InstallSingleUeDevice, which is called by lteHelper::InstallUeDevice
+
+  // if CtrlErrorModelEnabled is true, the phy error model is enabled for DL ctrl frame
+  // BUG: why CtrlErrorModelEnabled and DataErrorModelEnabled cannot be set to true?
   // Config::SetDefault ("ns3::LteSpectrumPhy::CtrlErrorModelEnabled", BooleanValue (true));
-  Config::SetDefault ("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue (false));
+
+  // BUG: raises error an instance of 'std::out_of_range'
+  // Config::SetDefault ("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue (true));
 
   // Set the noise figure for UEs and eNodeBs
   // - dont need this because can set in command line using -ns3::LteUePhy::NoiseFigure=x
   // Config::SetDefault ("ns3::LteEnbPhy::NoiseFigure", DoubleValue (0));  // Noise figure in dB
+
+  // --------------------- What creates nodes 1 and 2?  ---------------------
+  //
+  // PointToPointEpcHelper internally creates two more nodes:
+  // - MME (Mobility Management Entity)
+  // - SGW (Serving Gateway)
+  // These two nodes are part of the EPC core and are not directly exposed, but they are still actual Node objects that get registered in the simulator, hence IDs 1 and 2.
 
   // One Packet Data Network Gateway (PGW) in the simulation
   Ptr<Node> pgw = epcHelper->GetPgwNode ();
@@ -426,16 +589,9 @@ int main (int argc, char *argv[])
   remoteHostContainer.Create (1);
   Ptr<Node> remoteHost = remoteHostContainer.Get (0);
   NS_LOG_INFO("Remote host node id: " << remoteHost->GetId ());  // shows the node id = 3
+
   InternetStackHelper internet;
   internet.Install (remoteHostContainer);
-
-  // --------------------- What creates nodes 1 and 2?  ---------------------
-  //
-  // PointToPointEpcHelper internally creates two more nodes:
-  // - MME (Mobility Management Entity)
-  // - SGW (Serving Gateway)
-  // These two nodes are part of the EPC core and are not directly exposed, but they are still actual Node objects that get registered in the simulator, hence IDs 1 and 2.
-
 
   // Create the Internet
   PointToPointHelper p2ph;
@@ -461,76 +617,21 @@ int main (int argc, char *argv[])
   Ptr<Ipv4StaticRouting> remoteHostStaticRouting = ipv4RoutingHelper.GetStaticRouting (remoteHost->GetObject<Ipv4> ());
   remoteHostStaticRouting->AddNetworkRouteTo (Ipv4Address ("7.0.0.0"), Ipv4Mask ("255.0.0.0"), 1);
 
-  // Create a single eNB
-  NodeContainer enbNodes;
-  enbNodes.Create (1);
-
-  NS_LOG_INFO("eNB node id: " << enbNodes.Get(0)->GetId ());
-
-  // Install Mobility Model
-  Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator> ();
-  // Place our single eNb right in the center of the cell
-  positionAlloc->Add (Vector (cell_size/2, cell_size/2, 25));
-  // Install Mobility Model. Fix eNB at the center
-  MobilityHelper mobilityEnb;
-  mobilityEnb.SetMobilityModel("ns3::ConstantPositionMobilityModel");
-  mobilityEnb.SetPositionAllocator(positionAlloc);
-  mobilityEnb.Install(enbNodes);
-
-
   /*
-    --------------- create UEs ---------------
+    ---------------- Create a single eNB  -------------
   */
-  NodeContainer ueNodes;
-  ueNodes.Create (num_ues); // Pre-Run, Run, Post-Run.
-  Ptr<ListPositionAllocator> positionAllocUe = CreateObject<ListPositionAllocator> ();
-  if (positioning == "same")
-  {
-    // Place all UEs at the same position, in the center of the cell
-    positionAllocUe->Add (Vector (cell_size/2, cell_size/2, heightOfUes));
-  }
-  else if (positioning == "uniform")
-  {
-    // Place UEs uniformly at the same distance from the BS in the cell
-    const double PI = 3.14159265358979323846;
-    double radius = cell_size / 2; // radius of the circle where UEs are placed
-    for (int i = 0; i < num_ues; ++i)
-    {
-      double angle = 2 * PI * i / num_ues; // distribute UEs uniformly around the eNB
-      double x = radius + radius * std::cos(angle);  // x-coordinate = centerX + radius * cos(angle)
-      double y = radius + radius * std::sin(angle);  // y-coordinate = centerY + radius * sin(angle)
-      positionAllocUe->Add (Vector (x, y, heightOfUes));
-    }
-  }
-  else if (positioning == "random")
-  {
-    // Install Mobility Model for the UEs
-    // The UEs are placed randomly inside a disc around the eNB, with radius cell_size
-    ObjectFactory pos_a;
-    pos_a.SetTypeId ("ns3::UniformDiscPositionAllocator");
-    pos_a.Set ("X", StringValue (std::to_string(cell_size/2)));
-    pos_a.Set ("Y", StringValue (std::to_string(cell_size/2)));
-    pos_a.Set ("Z", DoubleValue (heightOfUes));  // height of the UEs, we should also vary this in the future
-    pos_a.Set ("rho", DoubleValue (cell_size/2));
-    Ptr<PositionAllocator> m_position = pos_a.Create ()->GetObject<PositionAllocator> ();
-    for (int i = 0; i < num_ues; ++i){
-      Vector position = m_position->GetNext ();
-      positionAllocUe->Add (position);
-      NS_LOG_INFO("Node#" << i << " Position:" << position.x << "," << position.y << "," << position.z);
-    }
-  }
+  NodeContainer enbNodes = create_enb(1, cell_size, 25.0);  // height of eNB is 25m
 
-  // Install Mobility Model
-  // Nodes are static. No movement is simulated.
-  MobilityHelper mobilityUe;
-  mobilityUe.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
-  mobilityUe.SetPositionAllocator(positionAllocUe);
-  mobilityUe.Install (ueNodes);
 
+  // /*
+  //   --------------- create UEs ---------------
+  // */
+  NodeContainer ueNodes = create_ues(num_ues, positioning, cell_size, heightOfUes);
 
   // Install LTE Devices to the nodes
   NetDeviceContainer enbLteDevs = lteHelper->InstallEnbDevice (enbNodes);
   NetDeviceContainer ueLteDevs = lteHelper->InstallUeDevice (ueNodes);
+
 
   // TODO: remove???
   // Ptr<SpectrumChannel> uplinkChannel = CreateObject<SingleModelSpectrumChannel>();
@@ -558,7 +659,6 @@ int main (int argc, char *argv[])
   ApplicationContainer clientApps;
   ApplicationContainer serverApps;
 
-
   //
   // Log the received packets by the eNB
   //
@@ -572,74 +672,80 @@ int main (int argc, char *argv[])
 
   // Set up the data transmission for the Pre-Run
   for (uint16_t i = 0; i < num_ues; i++)
-    {
-      lteHelper->AttachSuspendedNb(ueLteDevs.Get(i), enbLteDevs.Get(0));
+  {
+    lteHelper->AttachSuspendedNb(ueLteDevs.Get(i), enbLteDevs.Get(0));
 
-      // LteUeNetDevice contains GetMac(), GetRrc(), and GetPhy()
-      // GetImsi()
-      Ptr<LteUeNetDevice> ueLteDevice = ueLteDevs.Get(i)->GetObject<LteUeNetDevice> ();
-      Ptr<LteUeRrc> ueRrc = ueLteDevice->GetRrc();
+    // LteUeNetDevice contains GetMac(), GetRrc(), and GetPhy()
+    // GetImsi()
+    Ptr<LteUeNetDevice> ueLteDevice = ueLteDevs.Get(i)->GetObject<LteUeNetDevice> ();
+    Ptr<LteUeRrc> ueRrc = ueLteDevice->GetRrc();
 
-      // Log the received packets
-      ueLteDevice->SetReceiveCallback (MakeBoundCallback (&Receive, logdir, ueLteDevice->GetImsi()));
+    // Log the received packets
+    ueLteDevice->SetReceiveCallback (MakeBoundCallback (&Receive, logdir, ueLteDevice->GetImsi()));
 
-      ueRrc->m_energyModel.SetModule(BG96c()); // Set the NBIoT module to BG96
+    ueRrc->m_energyModel.SetModule(BG96c()); // Set the NBIoT module to BG96
 
-      ueRrc->EnableLogging();
-      ueRrc->m_energyModel.SetLogDir(logdir);  // set the log directory for the energy model
-      if(ciot == true){
-        //std::cout << "ciot" << std::endl;
-        ueRrc->SetAttribute("CIoT-Opt", BooleanValue(true));
-      }
-      else{
-        ueRrc->SetAttribute("CIoT-Opt", BooleanValue(false));
-      }
-      if(edt == true){
-        //std::cout << "EDT" << std::endl;
-        ueRrc->SetAttribute("EDT", BooleanValue(true));
-      }
-      else{
-        ueRrc->SetAttribute("EDT", BooleanValue(false));
-      }
-
-      ++ulPort;
-      UdpEchoServerHelper server (ulPort);
-      serverApps.Add(server.Install (remoteHost));
-      //
-      // Create a UdpEchoClient application to send UDP datagrams from node zero to
-      // node one.
-      //
-      if (i < num_ues){
-        uint packetsize = packetsize_app;
-        Ptr<MarkovUdpClient> ulClient = CreateObject<MarkovUdpClient>();
-        ulClient->SetRemote(remoteHostAddr, ulPort);
-        ulClient->SetRates(packetinterval_app, packetinterval_app); // INACTIVE and ACTIVE intervals
-        ulClient->SetAttribute ("MaxPackets", UintegerValue (1000000));
-        ulClient->SetAttribute ("PacketSize", UintegerValue(packetsize));
-        ulClient->SetTransitionProbabilities(0.7, 0.2);  // P(INACTIVE→ACTIVE), P(ACTIVE→INACTIVE)
-        ulClient->TraceConnectWithoutContext("State", MakeCallback(&StateChangeTracer));
-
-        Ptr<Node> client = ueNodes.Get(i);
-        // ulClient->SetNode (client);
-        client->AddApplication (ulClient);
-        clientApps.Add (ulClient);
-
-        serverApps.Get(i)->SetStartTime (access);
-        clientApps.Get(i)->SetStartTime (access);
-      }
+    ueRrc->EnableLogging();
+    ueRrc->m_energyModel.SetLogDir(logdir);  // set the log directory for the energy model
+    if(ciot == true){
+      //std::cout << "ciot" << std::endl;
+      ueRrc->SetAttribute("CIoT-Opt", BooleanValue(true));
     }
+    else{
+      ueRrc->SetAttribute("CIoT-Opt", BooleanValue(false));
+    }
+    if(edt == true){
+      //std::cout << "EDT" << std::endl;
+      ueRrc->SetAttribute("EDT", BooleanValue(true));
+    }
+    else{
+      ueRrc->SetAttribute("EDT", BooleanValue(false));
+    }
+
+    ++ulPort;
+    UdpEchoServerHelper server (ulPort);
+    serverApps.Add(server.Install (remoteHost));
+    //
+    // Create a UdpEchoClient application to send UDP datagrams from node zero to
+    // node one.
+    //
+    if (i < num_ues){
+      uint packetsize = packetsize_app;
+      Ptr<MarkovUdpClient> ulClient = CreateObject<MarkovUdpClient>();
+      ulClient->SetRemote(remoteHostAddr, ulPort);
+      ulClient->SetRates(packetinterval_app, packetinterval_app); // INACTIVE and ACTIVE intervals
+      ulClient->SetAttribute ("MaxPackets", UintegerValue (1000000));
+      ulClient->SetAttribute ("PacketSize", UintegerValue(packetsize));
+      ulClient->SetTransitionProbabilities(0.7, 0.2);  // P(INACTIVE→ACTIVE), P(ACTIVE→INACTIVE)
+      ulClient->TraceConnectWithoutContext("State", MakeCallback(&StateChangeTracer));
+
+      Ptr<Node> client = ueNodes.Get(i);
+      // ulClient->SetNode (client);
+      client->AddApplication (ulClient);
+      clientApps.Add (ulClient);
+
+      serverApps.Get(i)->SetStartTime (access);
+      clientApps.Get(i)->SetStartTime (access);
+    }
+
+    // BUG: this callback is never called with the current implementation
+    Ptr< LteUePhy > uePhy = ueLteDevice->GetPhy ();
+    uePhy->TraceConnectWithoutContext("ReportUeSinr", MakeCallback(&SinrTraceCallback));
+    // uePhy->SetAttribute ("TxPower", DoubleValue (23.0));
+    // uePhy->SetAttribute ("NoiseFigure", DoubleValue (9.0));
+  }
 
   // Log the state changes to a file
   Config::Connect("/NodeList/*/ApplicationList/*/State",
                   MakeBoundCallback(&StateChangeTracerToFile, logdir));
 
-                  for (uint16_t i = 0; i < ueNodes.GetN(); i++)
-                  {
+  for (uint16_t i = 0; i < ueNodes.GetN(); i++)
+  {
 
-                    Ptr<LteUeNetDevice> ueLteDevice = ueLteDevs.Get(i)->GetObject<LteUeNetDevice> ();
-                    Ptr<LteUeRrc> ueRrc = ueLteDevice->GetRrc();
-                    Ptr<LteUeMac> ueMac = ueLteDevice->GetMac();
-                    ueRrc->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
+    Ptr<LteUeNetDevice> ueLteDevice = ueLteDevs.Get(i)->GetObject<LteUeNetDevice> ();
+    Ptr<LteUeRrc> ueRrc = ueLteDevice->GetRrc();
+    Ptr<LteUeMac> ueMac = ueLteDevice->GetMac();
+    ueRrc->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
     ueMac->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
 
   }
@@ -666,16 +772,35 @@ int main (int argc, char *argv[])
   p2ph.EnablePcapAll(logdir + "lena-simple-epc");
   #endif
 
+
+  // NOTE: Code in `lena-pathloss-traces.cc` keeps track of all path loss values in two centralized objects,
+  // but does not work here. Config::Connect ("/ChannelList/0/PathLoss",...) does not work.
+
   // Connect the callback to log IMSI and RNTI when the connection is established
   // This allows us to map RNTI to IMSI
   Config::Connect ("/NodeList/*/DeviceList/*/LteUeRrc/ConnectionEstablished",
     MakeBoundCallback(&ConnectionEstablishedUeCallback, logdir));
 
-  /* **********************************
+  //ensures the PHY uses the NB-IoT spectrum model (180 kHz)
+  Config::Set("/NodeList/*/DeviceList/*/LteUePhy/NbIoT", BooleanValue(true));
+  Config::Set("/NodeList/*/DeviceList/*/LteEnbPhy/NbIoT", BooleanValue(true));
+  // Use overlapping frequency configurations
+  lteHelper->SetEnbDeviceAttribute("DlEarfcn", UintegerValue(100));
+
+  // BUG: never called with the current implementation
+  Ptr<LteEnbPhy> enbPhy = enbLteDevs.Get(0)->GetObject<LteEnbNetDevice>()->GetPhy();
+  enbPhy->TraceConnectWithoutContext("ReportInterference", MakeCallback(&LteSinrTraceCallback));
+  // enbPhy->SetAttribute ("TxPower", DoubleValue (43.0));
+  // enbPhy->SetAttribute ("NoiseFigure", DoubleValue (5.0));
+
+
+  /*
+    ***********************************
     *
     * Start the simulation
     *
-    * **********************************/
+    * *********************************
+  */
   AnimationInterface anim (logdir + "lena-simple-epc.xml");
   Simulator::Stop (simTime); // Run
   auto start = std::chrono::system_clock::now();
@@ -691,6 +816,7 @@ int main (int argc, char *argv[])
   std::chrono::duration<double> elapsed_seconds = end-start;
   std::time_t end_time = std::chrono::system_clock::to_time_t(end);
   NS_LOG_INFO("Finished computation at " << std::ctime(&end_time) << "elapsed time: " << elapsed_seconds.count() << "s" );
+
   Simulator::Destroy ();
   std::cout << "Done" << std::endl;
 
