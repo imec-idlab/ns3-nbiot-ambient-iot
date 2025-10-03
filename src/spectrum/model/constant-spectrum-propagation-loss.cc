@@ -66,6 +66,7 @@ ConstantSpectrumPropagationLossModel::SetLossDb (double lossDb)
   NS_LOG_FUNCTION (this);
   m_lossDb = lossDb;
   m_lossLinear = std::pow (10, m_lossDb / 10);
+  NS_LOG_INFO ("ConstantSpectrumPropagationLossModel::SetLossDb: " << m_lossDb << "dB");
 }
 
 
