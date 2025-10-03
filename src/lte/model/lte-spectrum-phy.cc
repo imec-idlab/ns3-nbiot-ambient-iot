@@ -1412,9 +1412,9 @@ LteSpectrumPhy::EndRxDlCtrl ()
   if (m_ctrlErrorModelEnabled)
     {
       // TODO: raising error with nb-scenario4 because m_sinrPerceived is empty !
-      std::cout << "PCFICH-PDCCH SINR " << m_sinrPerceived.GetValuesN () << " dB" << std::endl;  // TODO: remove me
+      std::cout << "LteSpectrumPhy::EndRxDlCtrl PCFICH-PDCCH SINR " << m_sinrPerceived.GetValuesN () << " dB" << std::endl;  // TODO: remove me
       double  errorRate = LteMiErrorModel::GetPcfichPdcchError (m_sinrPerceived);
-      std::cout << "PCFICH-PDCCH errorRate " << errorRate << std::endl;   // TODO: remove me !
+      std::cout << "LteSpectrumPhy::EndRxDlCtrl PCFICH-PDCCH errorRate " << errorRate << std::endl;   // TODO: remove me !
       error = m_random->GetValue () > errorRate ? false : true;
       NS_LOG_DEBUG (this << " PCFICH-PDCCH Decodification, errorRate " << errorRate << " error " << error);
     }
