@@ -1,0 +1,16 @@
+{
+  "configurations": [
+    {
+      "name": "Linux",
+      "includePath": [
+        "${workspaceFolder}",                  // ns-3 root
+        "${workspaceFolder}/build",            // waf build artifacts
+        "${workspaceFolder}/build/ns3",        // waf build artifacts
+        "/usr/include",
+        "/usr/local/include"
+      ],
+      "defines": []
+    }
+  ],
+  "version": 4
+}
