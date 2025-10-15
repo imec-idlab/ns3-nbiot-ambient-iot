@@ -45,8 +45,9 @@
 using namespace ns3;
 
 constexpr double PI = 3.14159265358979323846;
+#define progname "NbPathlossScenario"
 
-NS_LOG_COMPONENT_DEFINE ("NbPathlossScenario");
+NS_LOG_COMPONENT_DEFINE (progname);
 
 
 
@@ -196,11 +197,8 @@ NodeContainer create_ues(int num_ues, std::string positioning, double cell_size,
 
 void setLogLevels (LogLevel logLevel = LOG_LEVEL_INFO)
 {
-  ns3::LogComponentEnable("NbPathlossScenario", logLevel);
-  ns3::LogComponentDisable("NbPathlossScenario", LOG_LEVEL_DEBUG);
-
-  // ns3::LogComponentEnable("MarkovUdpClient", logLevel);
-  // ns3::LogComponentEnable("MarkovUdpClient", logLevel);
+  ns3::LogComponentEnable(progname, logLevel);
+  ns3::LogComponentDisable(progname, LOG_LEVEL_DEBUG);
 
   // ns3::LogComponentEnable ("LteUeRrc", logLevel);
   // ns3::LogComponentEnable ("LteUeMac", logLevel);
@@ -425,7 +423,7 @@ int main (int argc, char *argv[])
 
   std::cout << "Starting simulation" << std::endl;
 
-  AnimationInterface anim (logdir + "lena-simple-epc.xml");
+  AnimationInterface anim (logdir + "neatanin-" + progname + ".xml");
   Simulator::Stop (Seconds (0.5));
 
   // Insert RLC Performance Calculator
