@@ -81,22 +81,22 @@ using namespace ns3;
 
 
 /**
- * Sample simulation script for LTE+EPC. It instantiates several eNodeBs,
+ * Sample simulation script for LTE+EPC+EPS. It instantiates several eNodeBs,
  * attaches one UE per eNodeB starts a flow for each UE to and from a remote host.
  * It can also start another flow between each UE pair.
 
 
-  The log of this script can be processed by `check_scenario3.py` to visualize the transitions of states and energy consumption.
   To run the script, use the following command:
-  $ ./waf --run "nb-scenario3.cc" 2>&1 | tee nb-scenario3.log
-  $ python py-code/check_scenario3.py --log-fname nb-scenario3.log
+  $ ./waf --run "nb-scenario4.cc --simTime=1800 --num_ues=4 \
+        --ns3::LteUePhy::RsrpSinrSamplePeriod=1 \
+        --ns3::ConstantSpectrumPropagationLossModel::Loss=5 \
+        --ns3::LteUePhy::NoiseFigure=5 --ns3::LteUePhy::TxPower=10 \
+        --ns3::LteEnbPhy::NoiseFigure=5 --ns3::LteEnbPhy::TxPower=30"
 
  */
 
 NS_LOG_COMPONENT_DEFINE ("LenaNb5G-Cap");
 
-
-#define GENERATE_TRACES true
 
 
 
@@ -457,8 +457,8 @@ int main (int argc, char *argv[])
   std::string positioning = "uniform"; // default value is to use random position in the border of the cell
   // std::string propagationLossModel = "friis";  // default value is to use simple propagation loss model (friis)
 
-  // default value is to use constant propagation loss model (fixed loss given by --ns3::ConstantSpectrumPropagationLossModel::Loss)
-  std::string propagationLossModel = "fixed";
+  // default value is to use constant propagation loss model
+  std::string propagationLossModel = "friis";
 
   bool ciot = false;
   bool edt = false;
@@ -531,6 +531,7 @@ int main (int argc, char *argv[])
   // configure LTE
   Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
 
+  // Create the EPC helper
   Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper> ();
   lteHelper->SetEpcHelper (epcHelper);
 
@@ -632,7 +633,7 @@ int main (int argc, char *argv[])
   NetDeviceContainer enbLteDevs = lteHelper->InstallEnbDevice (enbNodes);
   NetDeviceContainer ueLteDevs = lteHelper->InstallUeDevice (ueNodes);
 
-
+  // Attach a Ipv4 to UEs
   // TODO: remove???
   // Ptr<SpectrumChannel> uplinkChannel = CreateObject<SingleModelSpectrumChannel>();
   // uplinkChannel->AddPropagationLossModel(lossModel);
@@ -653,6 +654,23 @@ int main (int argc, char *argv[])
       NS_LOG_INFO("UE node id: " << ueNode->GetId() << " IP: " << ueNode->GetObject<Ipv4>()->GetAddress(1, 0).GetLocal());
     }
 
+
+  // Activate EPS bearer
+  enum EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
+  EpsBearer bearer(q);
+
+  // Create a Traffic Flow Template (TFT)
+  Ptr<EpcTft> tft = Create<EpcTft>();
+  EpcTft::PacketFilter pf;
+  pf.localPortStart = 1000;
+  pf.localPortEnd = 1000;
+  pf.remotePortStart = 1000;
+  pf.remotePortEnd = 1000;
+  pf.direction = EpcTft::UPLINK;
+  tft->Add(pf);
+
+  // Activate the dedicated bearer
+  lteHelper->ActivateDedicatedEpsBearer(ueLteDevs, bearer, tft);
 
   // Install and start applications on UEs and remote host
   uint16_t ulPort = 2000;
@@ -739,15 +757,22 @@ int main (int argc, char *argv[])
   Config::Connect("/NodeList/*/ApplicationList/*/State",
                   MakeBoundCallback(&StateChangeTracerToFile, logdir));
 
+  std::vector<LteSpectrumValueCatcher*> catchers;
   for (uint16_t i = 0; i < ueNodes.GetN(); i++)
   {
-
     Ptr<LteUeNetDevice> ueLteDevice = ueLteDevs.Get(i)->GetObject<LteUeNetDevice> ();
     Ptr<LteUeRrc> ueRrc = ueLteDevice->GetRrc();
     Ptr<LteUeMac> ueMac = ueLteDevice->GetMac();
     ueRrc->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
     ueMac->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
 
+    LteSpectrumValueCatcher* catcher = new LteSpectrumValueCatcher();
+    Ptr<LteChunkProcessor> testSinr = Create<LteChunkProcessor>();
+    testSinr->AddCallback(MakeCallback (&LteSpectrumValueCatcher::ReportValue, catcher));
+    Ptr<LteUePhy> uePhy = ueLteDevice->GetPhy ();
+    uePhy->GetDownlinkSpectrumPhy ()->AddCtrlSinrChunkProcessor (testSinr);
+    // uePhy->GetUplinkSpectrumPhy()->AddCtrlSinrChunkProcessor(testSinr);
+    catchers.push_back(catcher);
   }
   lteHelper->SetLogDir(logdir);
 
@@ -760,17 +785,23 @@ int main (int argc, char *argv[])
 
   NS_LOG_INFO("Number of UEs: " << ueNodes.GetN());
 
-  #if GENERATE_TRACES
+  /*
+    ***********************************
+    *
+    * Enable traces and pcap
+    *
+    * *********************************
+  */
   NS_LOG_INFO("Generating traces");
-
   lteHelper->EnableMacTraces();  // Enable MAC traces (to identify transmission patterns)
   lteHelper->EnablePhyTraces();  // Enable Phy traces ()
+  lteHelper->EnableDlPhyTraces();
+
   // lteHelper->EnableRlcTraces();  // Enable RLC traces. RAISES error
   // lteHelper->EnablePdcpTraces(); // Enable PDCP traces. RAISES error
 
   // enable PCAP tracing
   p2ph.EnablePcapAll(logdir + "lena-simple-epc");
-  #endif
 
 
   // NOTE: Code in `lena-pathloss-traces.cc` keeps track of all path loss values in two centralized objects,
@@ -817,6 +848,19 @@ int main (int argc, char *argv[])
   std::time_t end_time = std::chrono::system_clock::to_time_t(end);
   NS_LOG_INFO("Finished computation at " << std::ctime(&end_time) << "elapsed time: " << elapsed_seconds.count() << "s" );
 
+  // print SINR values
+  std::cout << "SINR values for each UE:" << std::endl;
+  for(auto &catcher : catchers) {
+    Ptr<SpectrumValue> value = catcher->GetValue();
+    if (value) {
+        double sinrDb = 10.0 * std::log10(value->operator[](0));
+        std::cout << "SINR (dB): " << sinrDb << std::endl;
+    } else {
+        std::cout << "No SINR value recorded for this UE." << std::endl;
+    }
+  }
+
+
   Simulator::Destroy ();
   std::cout << "Done" << std::endl;
 
@@ -824,5 +868,9 @@ int main (int argc, char *argv[])
   // This ensures std::clog isn’t left pointing to a buffer that’s about to vanish.
   std::clog.rdbuf(defaultBuf);
 
+  // delete pointers
+for(auto &catcher : catchers) {
+    delete catcher;
+  }
   return 0;
 }
