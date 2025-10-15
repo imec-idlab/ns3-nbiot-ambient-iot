@@ -42,7 +42,6 @@
  You can use `process_log.py` to see some outputs in the log file.
 
  */
-
 #include <chrono>
 #include <iomanip>
 #include <stdlib.h>
@@ -78,6 +77,7 @@
 
 using namespace ns3;
 
+constexpr double PI = 3.14159265358979323846;
 
 
 /**
@@ -278,7 +278,6 @@ NodeContainer create_ues(int num_ues, std::string positioning, double cell_size,
   else if (positioning == "uniform")
   {
     // Place UEs uniformly at the same distance from the BS in the cell
-    const double PI = 3.14159265358979323846;
     double radius = cell_size / 2; // radius of the circle where UEs are placed
     for (int i = 0; i < num_ues; ++i)
     {
@@ -598,10 +597,10 @@ int main (int argc, char *argv[])
   Ptr<Node> remoteHost = remoteHostContainer.Get (0);
   NS_LOG_INFO("Remote host node id: " << remoteHost->GetId ());  // shows the node id = 3
 
+  // Create the Internet
   InternetStackHelper internet;
   internet.Install (remoteHostContainer);
-
-  // Create the Internet
+  // point-to-point link between remote host and PGW
   PointToPointHelper p2ph;
   p2ph.SetDeviceAttribute ("DataRate", DataRateValue (DataRate ("100Gb/s")));
   p2ph.SetDeviceAttribute ("Mtu", UintegerValue (mtu));
@@ -708,8 +707,8 @@ int main (int argc, char *argv[])
     // Log the received packets
     ueLteDevice->SetReceiveCallback (MakeBoundCallback (&Receive, logdir, ueLteDevice->GetImsi()));
 
+    // set NB-IoT module to BG96
     ueRrc->m_energyModel.SetModule(BG96c()); // Set the NBIoT module to BG96
-
     ueRrc->EnableLogging();
     ueRrc->m_energyModel.SetLogDir(logdir);  // set the log directory for the energy model
     if(ciot == true){
