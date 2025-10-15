@@ -363,6 +363,13 @@ void define_propagation_loss_model (Ptr<LteHelper> lteHelper, std::string propag
 {
   if (propagationLossModel == "friis")
   {
+    // single-frequency path loss model
+    std::cout << "friis propagation loss model" << std::endl;
+    lteHelper->SetPathlossModelType(ns3::FriisPropagationLossModel::GetTypeId());
+
+  }
+  else if (propagationLossModel == "friis-spectrum")
+  {
     std::cout << "friis spectrum propagation loss model" << std::endl;
     lteHelper->SetPathlossModelType(ns3::FriisSpectrumPropagationLossModel::GetTypeId());
     // there is no configurable parameter for this pathloss model
@@ -382,7 +389,7 @@ void define_propagation_loss_model (Ptr<LteHelper> lteHelper, std::string propag
   else
   {
     // Cannot validate input for the propagation loss model
-    NS_FATAL_ERROR("Invalid propagationLossModel: must be 'friis', 'fixed', or 'winner'");
+    NS_FATAL_ERROR("Invalid propagationLossModel: must be 'friis', 'friis-spectrum', 'fixed', or 'winner'");
     return;
   }
 }
