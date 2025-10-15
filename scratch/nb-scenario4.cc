@@ -167,7 +167,7 @@ public:
  *
  * **Note**: The last 4 arguments are mandatory for the callback function.
  */
-bool Receive (std::string logdir, uint64_t imsi, Ptr<NetDevice> nd, Ptr<const Packet> p, uint16_t protocol, const Address& addr)
+bool ReceiveCallback (std::string logdir, uint64_t imsi, Ptr<NetDevice> nd, Ptr<const Packet> p, uint16_t protocol, const Address& addr)
 {
   // **Note**: Apparently this only logs the data packets
 
@@ -212,7 +212,6 @@ bool ReceiveEnb (std::string logdir, Ptr<NetDevice> nd, Ptr<const Packet> p, uin
  * @param cellId The ID of the cell to which the UE is connected.
  * @param rnti The Radio Network Temporary Identifier for the connection.
  */
-
 void ConnectionEstablishedUeCallback (
   std::string logdir,
   std::string context,
@@ -406,15 +405,8 @@ void LteSinrTraceCallback(uint16_t imsi, Ptr<ns3::SpectrumValue> sinr)
 }
 
 
-/**
- * Main function to set up and run the simulation.
- * It initializes the LTE network, configures UEs and eNBs, and runs applications.
- * @return Exit status of the program.
- */
-int main (int argc, char *argv[])
+void setLogLevels(LogLevel logLevel)
 {
-  LogLevel logLevel = LOG_LEVEL_INFO; // Set the log level to debug
-
   ns3::LogComponentEnable("LenaNb5G-Cap", logLevel);
   ns3::LogComponentDisable("LenaNb5G-Cap", LOG_LEVEL_DEBUG);
   // ns3::LogComponentEnable("LteUeRrc", logLevel);
@@ -430,6 +422,16 @@ int main (int argc, char *argv[])
   ns3::LogComponentEnable ("LteEnbPhy", logLevel);
 
   ns3::LogComponentEnable ("LteSpectrumPhy", logLevel);
+}
+
+/**
+ * Main function to set up and run the simulation.
+ * It initializes the LTE network, configures UEs and eNBs, and runs applications.
+ * @return Exit status of the program.
+ */
+int main (int argc, char *argv[])
+{
+  setLogLevels(LOG_LEVEL_INFO); // Set the log level to debug
 
   // --------------------------------------------------------------------------
   //
@@ -534,6 +536,16 @@ int main (int argc, char *argv[])
   NS_LOG_DEBUG("seed: " << seed);
 
 
+  /*
+    ---------------- Create a single eNB  -------------
+  */
+  NodeContainer enbNodes = create_enb(1, cell_size, 25.0);  // height of eNB is 25m
+
+  // /*
+  //   --------------- create UEs ---------------
+  // */
+  NodeContainer ueNodes = create_ues(num_ues, positioning, cell_size, heightOfUes);
+
   // configure LTE
   Ptr<LteHelper> lteHelper = CreateObject<LteHelper> ();
 
@@ -624,17 +636,6 @@ int main (int argc, char *argv[])
   Ptr<Ipv4StaticRouting> remoteHostStaticRouting = ipv4RoutingHelper.GetStaticRouting (remoteHost->GetObject<Ipv4> ());
   remoteHostStaticRouting->AddNetworkRouteTo (Ipv4Address ("7.0.0.0"), Ipv4Mask ("255.0.0.0"), 1);
 
-  /*
-    ---------------- Create a single eNB  -------------
-  */
-  NodeContainer enbNodes = create_enb(1, cell_size, 25.0);  // height of eNB is 25m
-
-
-  // /*
-  //   --------------- create UEs ---------------
-  // */
-  NodeContainer ueNodes = create_ues(num_ues, positioning, cell_size, heightOfUes);
-
   // Install LTE Devices to the nodes
   NetDeviceContainer enbLteDevs = lteHelper->InstallEnbDevice (enbNodes);
   NetDeviceContainer ueLteDevs = lteHelper->InstallUeDevice (ueNodes);
@@ -705,7 +706,7 @@ int main (int argc, char *argv[])
     Ptr<LteUeRrc> ueRrc = ueLteDevice->GetRrc();
 
     // Log the received packets
-    ueLteDevice->SetReceiveCallback (MakeBoundCallback (&Receive, logdir, ueLteDevice->GetImsi()));
+    ueLteDevice->SetReceiveCallback (MakeBoundCallback (&ReceiveCallback, logdir, ueLteDevice->GetImsi()));
 
     // set NB-IoT module to BG96
     ueRrc->m_energyModel.SetModule(BG96c()); // Set the NBIoT module to BG96
