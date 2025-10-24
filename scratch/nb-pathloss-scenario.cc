@@ -298,7 +298,7 @@ void ConnectionEstablishedUeCallback (
 /**
   ---------------------------------------------------------------------
 
-                                  MAIN
+                                 MAIN
 
   ---------------------------------------------------------------------
 */
@@ -306,6 +306,8 @@ int main (int argc, char *argv[])
 {
   // Set the log level to debug
   setLogLevels(LOG_LEVEL_INFO);
+
+  ns3::Time simTime = Seconds(30);  // Total duration of the simulation
 
   double enbDist = 20.0;
   double cell_size = 1000; // in meters
@@ -332,6 +334,7 @@ int main (int argc, char *argv[])
   cmd.AddValue ("enbDist", "distance between the two eNBs", enbDist);
   cmd.AddValue ("radius", "the radius of the disc where UEs are placed around an eNB", cell_size);
   cmd.AddValue ("numUes", "how many UEs are attached to each eNB", num_ues);
+  cmd.AddValue ("simTime", "Total duration of the simulation", simTime);
   cmd.Parse (argc, argv);
 
   ConfigStore inputConfig;
@@ -388,8 +391,12 @@ int main (int argc, char *argv[])
 
   std::cout << "EPS-only scenario" << std::endl;
   // Activate an EPS bearer on all UEs
-  enum EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;
+  // Qci defines standardized traffic types (or profiles) defined in 3GPP TS 23.203, TS 23.401, and TS 23.501 for mapping application types to suitable EPS bearers.
+  // https://www.nsnam.org/docs/release/3.16/doxygen/structns3_1_1_eps_bearer.html#aecf0c67109c5eb4ec0b07226fff5885e
+  // enum EpsBearer::Qci q = EpsBearer::GBR_CONV_VOICE;  // Conversational Voice
+  enum EpsBearer::Qci q = EpsBearer::NGBR_VIDEO_TCP_DEFAULT;  // Standard best-effort video streaming and web
   EpsBearer bearer (q);
+  bearer.arp.priorityLevel = 15;  // lowest ARP priority (optional)
   lteHelper->ActivateDataRadioBearer (ueDevs, bearer);
 
   // Set up the data transmission for the Pre-Run
@@ -420,11 +427,10 @@ int main (int argc, char *argv[])
     // uePhy->SetAttribute ("NoiseFigure", DoubleValue (9.0));
   }
 
-
   std::cout << "Starting simulation" << std::endl;
 
   AnimationInterface anim (logdir + "neatanin-" + progname + ".xml");
-  Simulator::Stop (Seconds (0.5));
+  Simulator::Stop (simTime);
 
   // Insert RLC Performance Calculator
   std::string dlOutFname = "DlRlcStats";
@@ -480,3 +486,9 @@ int main (int argc, char *argv[])
   NS_LOG_INFO("Done");
   return 0;
 }
+
+/**
+ * Example:
+ *
+ * ./waf --run "nb-pathloss-scenario.cc --simTime=10"
+ */
