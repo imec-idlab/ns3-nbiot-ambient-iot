@@ -81,7 +81,7 @@ constexpr double PI = 3.14159265358979323846;
 
 
 /**
- * Sample simulation script for LTE+EPC+EPS. It instantiates several eNodeBs,
+ * Sample simulation script for LTE+EPC. It instantiates several eNodeBs,
  * attaches one UE per eNodeB starts a flow for each UE to and from a remote host.
  * It can also start another flow between each UE pair.
 
@@ -881,3 +881,8 @@ for(auto &catcher : catchers) {
   }
   return 0;
 }
+
+/**
+ * Example:
+ * ./waf --run "nb-scenario4 --simTime=10 --num_ues=4 --ns3::LteUePhy::RsrpSinrSamplePeriod=1 --ns3::ConstantSpectrumPropagationLossModel::Loss=5 --ns3::LteUePhy::NoiseFigure=5 --ns3::LteUePhy::TxPower=10 --ns3::LteEnbPhy::NoiseFigure=5 --ns3::LteEnbPhy::TxPower=30"
+ */
