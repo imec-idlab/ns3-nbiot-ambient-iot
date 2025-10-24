@@ -247,9 +247,9 @@ bool ReceiveCallback (std::string logdir, uint64_t imsi, Ptr<NetDevice> nd, Ptr<
 }
 
 // Callback wrapper
-void SinrTraceCallback(uint64_t imsi, Ptr<ns3::SpectrumValue> sinr)
+void SinrTraceCallback(uint16_t m_cellId, uint16_t rnti, double srs, uint8_t m_componentCarrierId)
 {
-  std::cout << "SinrTraceCallback IMSI: " << imsi << " SINR: " << std::endl;
+  std::cout << "SinrTraceCallback RNTI: " << rnti << " SINR: " << srs << std::endl;
 }
 
 /**
@@ -310,7 +310,7 @@ int main (int argc, char *argv[])
   ns3::Time simTime = Seconds(30);  // Total duration of the simulation
 
   double enbDist = 20.0;
-  double cell_size = 1000; // in meters
+  double cell_size = 2000; // in meters
   double enb_height = 25.0; // in meters
 
   // Number of UEs per application
@@ -420,12 +420,13 @@ int main (int argc, char *argv[])
     ueRrc->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
     ueMac->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
 
-    // BUG: this callback is never called with the current implementation
-    Ptr< LteUePhy > uePhy = ueLteDevice->GetPhy ();
-    uePhy->TraceConnectWithoutContext("ReportUeSinr", MakeCallback(&SinrTraceCallback));
-    // uePhy->SetAttribute ("TxPower", DoubleValue (23.0));
-    // uePhy->SetAttribute ("NoiseFigure", DoubleValue (9.0));
   }
+  // uePhy->SetAttribute ("TxPower", DoubleValue (23.0));
+  // uePhy->SetAttribute ("NoiseFigure", DoubleValue (9.0));
+  // callback for ReportUeSinr in LteEnbPhy
+  Ptr<LteEnbNetDevice> enbLteDevice = enbDevs.Get(0)->GetObject<LteEnbNetDevice>();
+  Ptr<LteEnbPhy>enbPhy = enbLteDevice->GetPhy();
+  enbPhy->TraceConnectWithoutContext("ReportUeSinr", MakeCallback(&SinrTraceCallback));
 
   std::cout << "Starting simulation" << std::endl;
 
@@ -445,7 +446,6 @@ int main (int argc, char *argv[])
   lteHelper->EnableRrcLogging ();
   lteHelper->EnableDlPhyTraces();
 
-  Ptr<LteEnbNetDevice> enbLteDevice = enbDevs.Get(0)->GetObject<LteEnbNetDevice>();
   Ptr<LteEnbRrc> enbRrc = enbLteDevice->GetRrc();
   enbRrc->SetLogDir(logdir);
 
