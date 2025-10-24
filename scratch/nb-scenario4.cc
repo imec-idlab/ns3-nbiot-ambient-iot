@@ -79,6 +79,7 @@ using namespace ns3;
 
 constexpr double PI = 3.14159265358979323846;
 
+#undef ENABLE_SPECTRUM_VALUE_CATCHER
 
 /**
  * Sample simulation script for LTE+EPC. It instantiates several eNodeBs,
@@ -98,6 +99,34 @@ constexpr double PI = 3.14159265358979323846;
 NS_LOG_COMPONENT_DEFINE ("LenaNb5G-Cap");
 
 
+
+/**
+ * Set the logging levels for the NS-3 components used in the simulation.
+ *
+ * @param logLevel the desired logging level.
+ *
+ * This function sets the logging level for the components used in the simulation.
+ * It is useful for debugging purposes, as it allows to control the verbosity of
+ * the logging output.
+ */
+void setLogLevels(ns3::LogLevel logLevel)
+{
+  ns3::LogComponentEnable("LenaNb5G-Cap", logLevel);
+  ns3::LogComponentDisable("LenaNb5G-Cap", LOG_LEVEL_DEBUG);
+  // ns3::LogComponentEnable("LteUeRrc", logLevel);
+  ns3::LogComponentEnable("MarkovUdpClient", logLevel);
+  ns3::LogComponentEnable("MarkovUdpClient", logLevel);
+
+  ns3::LogComponentEnable ("LteUeRrc", logLevel);
+  ns3::LogComponentEnable ("LteUeMac", logLevel);
+  ns3::LogComponentEnable ("LteUePhy", logLevel);
+
+  ns3::LogComponentEnable ("LteEnbRrc", logLevel);
+  ns3::LogComponentEnable ("LteEnbMac", logLevel);
+  ns3::LogComponentEnable ("LteEnbPhy", logLevel);
+
+  ns3::LogComponentEnable ("LteSpectrumPhy", logLevel);
+}
 
 
 void CreateLogDirectory(const std::string& simName,
@@ -146,6 +175,37 @@ public:
         m_idlePower = 3.8 * 0.81*std::pow(10,-3);
     };
 };
+
+
+
+// *******************************************************************************
+//
+// Callback wrapper
+//
+// *******************************************************************************
+
+/**
+ * \brief Report UE measurements.
+ *
+ * This function is a callback that is invoked whenever a UE
+ * reports its measurements to the eNB. The measurements are
+ * reported in terms of Reference Signal Received Power (RSRP)
+ * and Reference Signal Received Quality (RSRQ).
+ *
+ * \param rnti the IMSI of the UE that reported the measurements.
+ * \param cell_id the CellId of the cell that the UE is currently
+ *         camping on.
+ * \param avg_rsrp the average RSRP measured by the UE.
+ * \param avg_rsrq the average RSRQ measured by the UE.
+ * \param same_cell a boolean indicating whether the UE is still
+ *         camping on the same cell or not.
+ * \param componentCarrierId the ID of the component carrier on
+ *         which the measurements were reported.
+ */
+void ReportUeMeasurements(uint16_t rnti, uint16_t cell_id, double avg_rsrp, double avg_rsrq, bool same_cell, uint8_t componentCarrierId)
+{
+  std::cout << "ReportUeMeasurements IMSI: " << rnti << " CellId: " << cell_id << " RSRP: " << avg_rsrp << " RSRQ: " << avg_rsrq << " ComponentCarrierID: " << componentCarrierId << std::endl;
+}
 
 
 /**
@@ -253,6 +313,14 @@ static void StateChangeTracerToFile(std::string logdir, std::string context, int
           << oldVal << " to " << newVal << std::endl;
 }
 
+
+// *******************************************************************************
+//
+// eNB and UEs creation functions
+//
+// *******************************************************************************
+
+
 /**
  * Create a specified number of UEs with a given positioning strategy.
  * @param num_ues The number of UEs to create.
@@ -342,6 +410,12 @@ NodeContainer create_enb(uint32_t num_enbs, double cell_size, double heightOfEnb
   return enbNodes;
 }
 
+// *******************************************************************************
+//
+// Propagation loss factory
+//
+// *******************************************************************************
+
 
 /**
  * Set the propagation loss model for the LTE simulation.
@@ -357,7 +431,7 @@ NodeContainer create_enb(uint32_t num_enbs, double cell_size, double heightOfEnb
  * - "Environment" (enum): the type of environment (UMaEnvironment, UrbanMacrocellEnvironment, etc.).
  * - "LineOfSight" (bool): whether the pathloss model considers line of sight or not.
  */
-void define_propagation_loss_model (Ptr<LteHelper> lteHelper, std::string propagationLossModel)
+bool define_propagation_loss_model (Ptr<LteHelper> lteHelper, std::string propagationLossModel)
 {
   if (propagationLossModel == "friis")
   {
@@ -388,41 +462,16 @@ void define_propagation_loss_model (Ptr<LteHelper> lteHelper, std::string propag
   {
     // Cannot validate input for the propagation loss model
     NS_FATAL_ERROR("Invalid propagationLossModel: must be 'friis', 'friis-spectrum', 'fixed', or 'winner'");
-    return;
+    return false;
   }
+  return true;
 }
 
-
-// Callback wrapper
-void SinrTraceCallback(uint64_t imsi, Ptr<ns3::SpectrumValue> sinr)
-{
-  std::cout << "SinrTraceCallback IMSI: " << imsi << " SINR: " << std::endl;
-}
-
-void LteSinrTraceCallback(uint16_t imsi, Ptr<ns3::SpectrumValue> sinr)
-{
-  std::cout << "LteSinrTraceCallback IMSI: " << imsi << " SINR: " << std::endl;
-}
-
-
-void setLogLevels(LogLevel logLevel)
-{
-  ns3::LogComponentEnable("LenaNb5G-Cap", logLevel);
-  ns3::LogComponentDisable("LenaNb5G-Cap", LOG_LEVEL_DEBUG);
-  // ns3::LogComponentEnable("LteUeRrc", logLevel);
-  ns3::LogComponentEnable("MarkovUdpClient", logLevel);
-  ns3::LogComponentEnable("MarkovUdpClient", logLevel);
-
-  ns3::LogComponentEnable ("LteUeRrc", logLevel);
-  ns3::LogComponentEnable ("LteUeMac", logLevel);
-  ns3::LogComponentEnable ("LteUePhy", logLevel);
-
-  ns3::LogComponentEnable ("LteEnbRrc", logLevel);
-  ns3::LogComponentEnable ("LteEnbMac", logLevel);
-  ns3::LogComponentEnable ("LteEnbPhy", logLevel);
-
-  ns3::LogComponentEnable ("LteSpectrumPhy", logLevel);
-}
+// *******************************************************************************
+//
+//                                     MAIN
+//
+// *******************************************************************************
 
 /**
  * Main function to set up and run the simulation.
@@ -522,14 +571,6 @@ int main (int argc, char *argv[])
   // Config::SetDefault ("ns3::ComponentCarrier::DlBandwidth", UintegerValue (50));  // downlink bandwidth in RBs
   Config::SetDefault ("ns3::ComponentCarrier::PrimaryCarrier", BooleanValue (true));  // whether the primary carrier is enabled
 
-  if (positioning != "uniform" &&
-      positioning != "random" &&
-      positioning != "same")
-  {
-        NS_FATAL_ERROR("Invalid positioning: must be 'uniform', 'random', or 'same'");
-        return 1;
-  }
-
   // random seed is set manually here for repetition
   RngSeedManager::SetSeed (seed);
   Ptr<UniformRandomVariable> RaUeUniformVariable = CreateObject<UniformRandomVariable> ();
@@ -563,7 +604,7 @@ int main (int argc, char *argv[])
    * --------------- Propagation loss model -------------------
    *
    */
-  define_propagation_loss_model (lteHelper, propagationLossModel);
+  if (!define_propagation_loss_model (lteHelper, propagationLossModel)) return 1;  // exit program if propagation loss model is not defined
 
   // Config::SetDefault ("ns3::LteHelper::UseIdealRrc", BooleanValue (false));
   lteHelper->SetAttribute ("UseIdealRrc", BooleanValue (false));
@@ -641,12 +682,6 @@ int main (int argc, char *argv[])
   NetDeviceContainer ueLteDevs = lteHelper->InstallUeDevice (ueNodes);
 
   // Attach a Ipv4 to UEs
-  // TODO: remove???
-  // Ptr<SpectrumChannel> uplinkChannel = CreateObject<SingleModelSpectrumChannel>();
-  // uplinkChannel->AddPropagationLossModel(lossModel);
-  // uplinkChannel->SetPropagationDelayModel(delayModel);
-  // enbNodes.Get (0)->GetObject<LteEnbNetDevice> ()->GetPhy ()->SetUplinkChannel (uplinkChannel);
-
   // Install the IP stack on the UEs
   internet.Install (ueNodes);
   Ipv4InterfaceContainer ueIpIface;
@@ -755,7 +790,7 @@ int main (int argc, char *argv[])
 
     // BUG: this callback is never called with the current implementation
     Ptr< LteUePhy > uePhy = ueLteDevice->GetPhy ();
-    uePhy->TraceConnectWithoutContext("ReportUeSinr", MakeCallback(&SinrTraceCallback));
+    uePhy->TraceConnectWithoutContext("ReportUeMeasurements", MakeCallback(&ReportUeMeasurements));
     // uePhy->SetAttribute ("TxPower", DoubleValue (23.0));
     // uePhy->SetAttribute ("NoiseFigure", DoubleValue (9.0));
   }
@@ -764,33 +799,46 @@ int main (int argc, char *argv[])
   Config::Connect("/NodeList/*/ApplicationList/*/State",
                   MakeBoundCallback(&StateChangeTracerToFile, logdir));
 
+  #ifdef ENABLE_SPECTRUM_VALUE_CATCHER
   std::vector<LteSpectrumValueCatcher*> catchers;
+  #endif
+
   for (uint16_t i = 0; i < ueNodes.GetN(); i++)
   {
     Ptr<LteUeNetDevice> ueLteDevice = ueLteDevs.Get(i)->GetObject<LteUeNetDevice> ();
     Ptr<LteUeRrc> ueRrc = ueLteDevice->GetRrc();
     Ptr<LteUeMac> ueMac = ueLteDevice->GetMac();
+    Ptr<LteUePhy> uePhy = ueLteDevice->GetPhy ();
+
     ueRrc->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
     ueMac->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
 
+    #ifdef ENABLE_SPECTRUM_VALUE_CATCHER
     LteSpectrumValueCatcher* catcher = new LteSpectrumValueCatcher();
     Ptr<LteChunkProcessor> testSinr = Create<LteChunkProcessor>();
     testSinr->AddCallback(MakeCallback (&LteSpectrumValueCatcher::ReportValue, catcher));
-    Ptr<LteUePhy> uePhy = ueLteDevice->GetPhy ();
     uePhy->GetDownlinkSpectrumPhy ()->AddCtrlSinrChunkProcessor (testSinr);
     // uePhy->GetUplinkSpectrumPhy()->AddCtrlSinrChunkProcessor(testSinr);
     catchers.push_back(catcher);
+    #endif
+
+    std::cout << "UE " << i << " NoiseFigure: " << uePhy->GetNoiseFigure() << " TxPower: " << uePhy->GetTxPower() << std::endl;
+
   }
   lteHelper->SetLogDir(logdir);
+  NS_LOG_INFO("Number of UEs: " << ueNodes.GetN());
 
+  // Get the eNodeB device
   Ptr<LteEnbNetDevice> enbLteDevice = enbLteDevs.Get(0)->GetObject<LteEnbNetDevice>();
   Ptr<LteEnbRrc> enbRrc = enbLteDevice->GetRrc();
+  Ptr<LteEnbPhy> enbPhy = enbLteDevs.Get(0)->GetObject<LteEnbNetDevice>()->GetPhy();
   enbRrc->SetLogDir(logdir);
 
-  // Ptr<LteEnbMac> enbMac = enbLteDevice->GetMac();
-  // enbMac->SetLogDir(logdir);  // private !!
+  // enbPhy->SetAttribute ("TxPower", DoubleValue (43.0));
+  // enbPhy->SetAttribute ("NoiseFigure", DoubleValue (5.0));
 
-  NS_LOG_INFO("Number of UEs: " << ueNodes.GetN());
+  std::cout << "eNB NoiseFigure: " << enbPhy->GetNoiseFigure() << " TxPower: " << enbPhy->GetTxPower() << std::endl;
+  std::cout << "eNB Bandwidth DL: " << enbLteDevice->GetDlBandwidth() << " UL: " << enbLteDevice->GetUlBandwidth() << std::endl;
 
   /*
     ***********************************
@@ -825,13 +873,6 @@ int main (int argc, char *argv[])
   // Use overlapping frequency configurations
   lteHelper->SetEnbDeviceAttribute("DlEarfcn", UintegerValue(100));
 
-  // BUG: never called with the current implementation
-  Ptr<LteEnbPhy> enbPhy = enbLteDevs.Get(0)->GetObject<LteEnbNetDevice>()->GetPhy();
-  enbPhy->TraceConnectWithoutContext("ReportInterference", MakeCallback(&LteSinrTraceCallback));
-  // enbPhy->SetAttribute ("TxPower", DoubleValue (43.0));
-  // enbPhy->SetAttribute ("NoiseFigure", DoubleValue (5.0));
-
-
   /*
     ***********************************
     *
@@ -855,6 +896,7 @@ int main (int argc, char *argv[])
   std::time_t end_time = std::chrono::system_clock::to_time_t(end);
   NS_LOG_INFO("Finished computation at " << std::ctime(&end_time) << "elapsed time: " << elapsed_seconds.count() << "s" );
 
+  #ifdef ENABLE_SPECTRUM_VALUE_CATCHER
   // print SINR values
   std::cout << "SINR values for each UE:" << std::endl;
   for(auto &catcher : catchers) {
@@ -866,8 +908,9 @@ int main (int argc, char *argv[])
         std::cout << "No SINR value recorded for this UE." << std::endl;
     }
   }
+  #endif
 
-
+  // finilise the simulation
   Simulator::Destroy ();
   std::cout << "Done" << std::endl;
 
@@ -875,10 +918,13 @@ int main (int argc, char *argv[])
   // This ensures std::clog isn’t left pointing to a buffer that’s about to vanish.
   std::clog.rdbuf(defaultBuf);
 
+  #ifdef ENABLE_SPECTRUM_VALUE_CATCHER
   // delete pointers
-for(auto &catcher : catchers) {
+  for(auto &catcher : catchers) {
     delete catcher;
   }
+  #endif
+
   return 0;
 }
 
