@@ -18,7 +18,7 @@
  *
  * Author: Giuseppe Piro  <g.piro@poliba.it>
  *         Marco Miozzo <mmiozzo@cttc.es>
- * Modified by:	
+ * Modified by:
  * 			Tim Gebauer <tim.gebauer@tu-dortmund.de> (NB-IoT Extension)
  */
 
@@ -183,7 +183,7 @@ LteEnbPhy::GetTypeId (void)
     .AddAttribute ("TxPower",
                    "Transmission power in dBm",
                    DoubleValue (43.0),
-                   MakeDoubleAccessor (&LteEnbPhy::SetTxPower, 
+                   MakeDoubleAccessor (&LteEnbPhy::SetTxPower,
                                        &LteEnbPhy::GetTxPower),
                    MakeDoubleChecker<double> ())
     .AddAttribute ("NoiseFigure",
@@ -198,7 +198,7 @@ LteEnbPhy::GetTypeId (void)
                    "temperature T0.\"  In this model, we consider T0 = 290K.",
                    //DoubleValue (5.0),
                    DoubleValue (0),
-                   MakeDoubleAccessor (&LteEnbPhy::SetNoiseFigure, 
+                   MakeDoubleAccessor (&LteEnbPhy::SetNoiseFigure,
                                        &LteEnbPhy::GetNoiseFigure),
                    MakeDoubleChecker<double> ())
     .AddAttribute ("MacToChannelDelay",
@@ -208,7 +208,7 @@ LteEnbPhy::GetTypeId (void)
                    "intended to be used to model the latency of real PHY "
                    "and MAC implementations.",
                    UintegerValue (2),
-                   MakeUintegerAccessor (&LteEnbPhy::SetMacChDelay, 
+                   MakeUintegerAccessor (&LteEnbPhy::SetMacChDelay,
                                          &LteEnbPhy::GetMacChDelay),
                    MakeUintegerChecker<uint8_t> ())
     .AddTraceSource ("ReportUeSinr",
@@ -544,7 +544,7 @@ LteEnbPhy::ReceiveLteControlMessageList (std::list<Ptr<LteControlMessage> > msgL
           {
             Ptr<NprachPreambleNbiotControlMessage> nprachPreamble = DynamicCast<NprachPreambleNbiotControlMessage> (*it);
             m_enbPhySapUser->ReceiveNprachPreamble (nprachPreamble->GetRapId(), nprachPreamble->GetSubcarrierOffset(), nprachPreamble->GetRanti());
-            
+
           }
           break;
         case LteControlMessage::RACH_PREAMBLE:
@@ -557,7 +557,7 @@ LteEnbPhy::ReceiveLteControlMessageList (std::list<Ptr<LteControlMessage> > msgL
           {
             Ptr<DlCqiLteControlMessage> dlcqiMsg = DynamicCast<DlCqiLteControlMessage> (*it);
             CqiListElement_s dlcqi = dlcqiMsg->GetDlCqi ();
-            
+
             // check whether the UE is connected
             if (m_ueAttached.find (dlcqi.m_rnti) != m_ueAttached.end ())
               {
@@ -636,7 +636,7 @@ LteEnbPhy::StartFrame (void)
     m_mibNb.inbandSamePci.eutraCrsSequenceInfo = 1;
     m_mibNb.schedulingInfoSib1 = 2;
     m_mibNb.hyperSfnLsb = std::bitset<2>(3);
-    
+
     Ptr<MibNbiotControlMessage> mibMsg = Create<MibNbiotControlMessage>();
     mibMsg->SetMib (m_mibNb);
     m_controlMessagesQueue.at(0).push_back(mibMsg);
@@ -663,7 +663,7 @@ LteEnbPhy::StartFrame (void)
     }
 
 
-    
+
   }
   StartSubFrame ();
 }
@@ -706,7 +706,7 @@ LteEnbPhy::StartSubFrame (void)
   }
 
   //if (m_srsPeriodicity>0)
-  //  { 
+  //  {
   //    // might be 0 in case the eNB has no UEs attached
   //    NS_ASSERT_MSG (m_nrFrames > 1, "the SRS index check code assumes that frameNo starts at 1");
   //    NS_ASSERT_MSG (m_nrSubFrames > 0 && m_nrSubFrames <= 10, "the SRS index check code assumes that subframeNo starts at 1");
@@ -730,7 +730,7 @@ LteEnbPhy::StartSubFrame (void)
         }
       else
         {
-          // send info of TB to LteSpectrumPhy 
+          // send info of TB to LteSpectrumPhy
           // translate to allocation map
           std::vector <int> rbMap;
           for (int i = (*dciIt).GetDci ().m_rbStart; i < (*dciIt).GetDci ().m_rbStart + (*dciIt).GetDci ().m_rbLen; i++)
@@ -835,7 +835,7 @@ LteEnbPhy::StartSubFrame (void)
               Ptr<RarNbiotControlMessage> rarMsg = DynamicCast<RarNbiotControlMessage> (msg);
               for (std::list<NbIotRrcSap::Rar>::const_iterator it = rarMsg->RarListBegin (); it != rarMsg->RarListEnd (); ++it)
                 {
-                  
+
                   NbIotRrcSap::UlGrant ulGrant = it->rarPayload.ulGrant;
                   // translate the UL grant in a standard UL-DCI and queue it
                   UlDciListElement_s dci;
@@ -985,7 +985,7 @@ LteEnbPhy::EndFrame (void)
 }
 
 
-void 
+void
 LteEnbPhy::GenerateCtrlCqiReport (const SpectrumValue& sinr)
 {
   NS_LOG_FUNCTION (this << sinr << Simulator::Now () << m_srsStartTime);
@@ -1050,7 +1050,7 @@ LteEnbPhy::CreatePuschCqiReport (const SpectrumValue& sinr)
       i++;
     }
   return (ulcqi);
-	
+
 }
 std::vector<double>
 LteEnbPhy::CreateNpuschCqiReport (const SpectrumValue& sinr)
@@ -1066,7 +1066,7 @@ LteEnbPhy::CreateNpuschCqiReport (const SpectrumValue& sinr)
       ulcqi.push_back (sinrdb);
     }
   return (ulcqi);
-	
+
 }
 
 void
@@ -1092,7 +1092,7 @@ LteEnbPhy::DoSetBandwidth (uint16_t ulBandwidth, uint16_t dlBandwidth)
     }
 }
 
-void 
+void
 LteEnbPhy::DoSetEarfcn (uint32_t ulEarfcn, uint32_t dlEarfcn)
 {
   NS_LOG_FUNCTION (this << ulEarfcn << dlEarfcn);
@@ -1101,11 +1101,11 @@ LteEnbPhy::DoSetEarfcn (uint32_t ulEarfcn, uint32_t dlEarfcn)
 }
 
 
-void 
+void
 LteEnbPhy::DoAddUe (uint16_t rnti)
 {
   NS_LOG_FUNCTION (this << rnti);
- 
+
   bool success = AddUePhy (rnti);
   NS_ASSERT_MSG (success, "AddUePhy() failed");
 
@@ -1113,11 +1113,11 @@ LteEnbPhy::DoAddUe (uint16_t rnti)
   DoSetPa (rnti, 0);
 }
 
-void 
+void
 LteEnbPhy::DoRemoveUe (uint16_t rnti)
 {
   NS_LOG_FUNCTION (this << rnti);
- 
+
   bool success = DeleteUePhy (rnti);
   NS_ASSERT_MSG (success, "DeleteUePhy() failed");
 
@@ -1239,6 +1239,7 @@ void
 LteEnbPhy::CreateSrsReport (uint16_t rnti, double srs)
 {
   NS_LOG_FUNCTION (this << rnti << srs);
+  std::cout << "SRS Report" << std::endl;
   std::map <uint16_t,uint16_t>::iterator it = m_srsSampleCounterMap.find (rnti);
   if (it==m_srsSampleCounterMap.end ())
     {
@@ -1323,7 +1324,7 @@ LteEnbPhy::DoSetSrsConfigurationIndex (uint16_t  rnti, uint16_t srcCi)
 }
 
 
-void 
+void
 LteEnbPhy::DoSetMasterInformationBlock (LteRrcSap::MasterInformationBlock mib)
 {
   NS_LOG_FUNCTION (this);
