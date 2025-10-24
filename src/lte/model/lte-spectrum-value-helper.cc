@@ -376,7 +376,6 @@ LteSpectrumValueHelper::CreateNoisePowerSpectralDensity (double noiseFigureDb, P
   double kT_W_Hz = std::pow (10.0, (kT_dBm_Hz - 30) / 10.0);
   double noiseFigureLinear = std::pow (10.0, noiseFigureDb / 10.0);
   double noisePowerSpectralDensity =  kT_W_Hz * noiseFigureLinear;
-  std::cout << "noisePowerSpectralDensity=" << noisePowerSpectralDensity << std::endl;
 
   Ptr<SpectrumValue> noisePsd = Create <SpectrumValue> (spectrumModel);
   (*noisePsd) = noisePowerSpectralDensity;
