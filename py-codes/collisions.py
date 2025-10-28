@@ -80,8 +80,8 @@ def plot_collisions(filename, show: bool = False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="State Changes")
-    parser.add_argument("--dir", type=str, default=None, help="Directory to search for the files")
-    parser.add_argument("--fname", type=str, default=None, help="Name of the file to process")
+    parser.add_argument('-d', "--dir", type=str, default=None, help="Directory to search for the files")
+    parser.add_argument('-f', "--fname", type=str, default=None, help="Name of the file to process")
     parser.add_argument("--show", action="store_true", help="Show the plot")
     args = parser.parse_args()
 
