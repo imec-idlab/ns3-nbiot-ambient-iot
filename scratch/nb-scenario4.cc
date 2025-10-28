@@ -24,7 +24,6 @@
  It initializes the logging system for different components such as "LenaNb5G-Cap" and "GenericCapacitor".
  The main function sets up a simulation environment with specific parameters:
  - simTime: Duration of the simulation.
- - worker: A flag for selecting a specific worker, initialized to 0.
  - seed: The seed for random number generation, initialized to 1.
  - simName: The name of the simulation, set to "cap".
  - cell_size: The size of the cell in meters, set to 2500 meters.
@@ -78,8 +77,6 @@
 using namespace ns3;
 
 constexpr double PI = 3.14159265358979323846;
-
-#undef ENABLE_SPECTRUM_VALUE_CATCHER
 
 /**
  * Sample simulation script for LTE+EPC. It instantiates several eNodeBs,
@@ -177,7 +174,6 @@ public:
 };
 
 
-
 // *******************************************************************************
 //
 // Callback wrapper
@@ -202,9 +198,13 @@ public:
  * \param componentCarrierId the ID of the component carrier on
  *         which the measurements were reported.
  */
-void ReportUeMeasurements(uint16_t rnti, uint16_t cell_id, double avg_rsrp, double avg_rsrq, bool same_cell, uint8_t componentCarrierId)
+void ReportUeMeasurements(std::string logdir, uint16_t rnti, uint16_t cell_id, double avg_rsrp, double avg_rsrq, bool same_cell, uint8_t componentCarrierId)
 {
-  std::cout << "ReportUeMeasurements IMSI: " << rnti << " CellId: " << cell_id << " RSRP: " << avg_rsrp << " RSRQ: " << avg_rsrq << " ComponentCarrierID: " << componentCarrierId << std::endl;
+  std::ofstream out(logdir + "ReportUeMeasurements.log", std::ios::app);
+  double timeMs  = ns3::Simulator::Now().GetMilliSeconds();
+
+  out << "ReportUeMeasurements RNTI: " << rnti << " CellId: " << cell_id << " RSRP: " << avg_rsrp << " RSRQ: " << avg_rsrq << " ComponentCarrierID: " << (componentCarrierId ? componentCarrierId : -1) << " Time: " << timeMs << std::endl;
+  out.close();
 }
 
 
@@ -237,7 +237,7 @@ bool ReceiveCallback (std::string logdir, uint64_t imsi, Ptr<NetDevice> nd, Ptr<
   ss << imsi << ", " << nd->GetAddress() << ", " << addr << ", " << protocol << ", " << p->GetSize () << ", " << Now ().GetSeconds () << std::endl;
   out << "RECEIVE, " << ss.str();
   out.close();
-  NS_LOG_INFO (ss.str());
+  // NS_LOG_INFO (ss.str());
 
   return true;
 }
@@ -490,7 +490,6 @@ int main (int argc, char *argv[])
   ns3::Time simTime = Minutes(30);  // Total duration of the simulation
   std::string simName = "markov";  // Name of the simulation, used for logging
 
-  uint8_t worker = 0;
   int seed = 1;
   double cell_size = 2500; // in meters
 
@@ -535,7 +534,6 @@ int main (int argc, char *argv[])
   CommandLine cmd (__FILE__);
   cmd.AddValue ("simTime", "Total duration of the simulation", simTime);
   cmd.AddValue ("simName", "Name of the simulation", simName);
-  cmd.AddValue ("worker", "worker id when using multithreading to not confuse logging", worker);
   cmd.AddValue ("randomSeed", "randomSeed", seed);
   cmd.AddValue ("num_ues", "Number of UEs", num_ues);
   cmd.AddValue ("ciot", "Cellular IoT Optimization", ciot);
@@ -551,7 +549,39 @@ int main (int argc, char *argv[])
   // create the log directory
   std::string logdir;
   CreateLogDirectory(simName, num_ues, simTime, ciot, edt, logdir);
-  NS_LOG_DEBUG("worker: " << worker);
+
+  // --------------------------------------------------------------------------
+  //
+  // log all config arguments
+  //
+  // --------------------------------------------------------------------------
+  // Save all parameters to a log file
+  std::ofstream logCmdArgs(logdir + "simulation_config.log");
+  if (!logCmdArgs.is_open()) {
+    NS_LOG_ERROR("Failed to open log file.");
+    return 1;
+  }
+
+  logCmdArgs << "Simulation Parameters:\n";
+  logCmdArgs << "simTime = " << simTime << "\n";
+  logCmdArgs << "simName = " << simName << "\n";
+  logCmdArgs << "randomSeed = " << seed << "\n";
+  logCmdArgs << "num_ues = " << num_ues << "\n";
+  logCmdArgs << "ciot = " << (ciot ? "true" : "false") << "\n";
+  logCmdArgs << "edt = " << (edt ? "true" : "false") << "\n";
+  logCmdArgs << "cell_size = " << cell_size << "\n";
+  logCmdArgs << "propagationLossModel = " << propagationLossModel << "\n";
+  logCmdArgs << "positioning = " << positioning << "\n";
+
+  // Save all other NS-3 command-line arguments
+  logCmdArgs << "\nRaw Command-Line Arguments:\n";
+  for (int i = 0; i < argc; ++i) {
+    logCmdArgs << argv[i] << " ";
+  }
+  logCmdArgs << "\n";
+
+  logCmdArgs.close();
+
 
   // --------------------------------------------------------------------------
   //
@@ -788,20 +818,20 @@ int main (int argc, char *argv[])
       clientApps.Get(i)->SetStartTime (access);
     }
 
-    // BUG: this callback is never called with the current implementation
+    // this callback is used to log the UE measurements
     Ptr< LteUePhy > uePhy = ueLteDevice->GetPhy ();
-    uePhy->TraceConnectWithoutContext("ReportUeMeasurements", MakeCallback(&ReportUeMeasurements));
+    // uePhy->TraceConnectWithoutContext("ReportUeMeasurements", MakeCallback(&ReportUeMeasurements));
+    uePhy->TraceConnectWithoutContext("ReportUeMeasurements", MakeBoundCallback(&ReportUeMeasurements, logdir));
+
     // uePhy->SetAttribute ("TxPower", DoubleValue (23.0));
     // uePhy->SetAttribute ("NoiseFigure", DoubleValue (9.0));
   }
 
+  lteHelper->SetLogDir(logdir);
+
   // Log the state changes to a file
   Config::Connect("/NodeList/*/ApplicationList/*/State",
                   MakeBoundCallback(&StateChangeTracerToFile, logdir));
-
-  #ifdef ENABLE_SPECTRUM_VALUE_CATCHER
-  std::vector<LteSpectrumValueCatcher*> catchers;
-  #endif
 
   for (uint16_t i = 0; i < ueNodes.GetN(); i++)
   {
@@ -813,19 +843,7 @@ int main (int argc, char *argv[])
     ueRrc->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
     ueMac->SetLogDir(logdir); // Will be changed to real ns3 traces later on. For now this logging is easier
 
-    #ifdef ENABLE_SPECTRUM_VALUE_CATCHER
-    LteSpectrumValueCatcher* catcher = new LteSpectrumValueCatcher();
-    Ptr<LteChunkProcessor> testSinr = Create<LteChunkProcessor>();
-    testSinr->AddCallback(MakeCallback (&LteSpectrumValueCatcher::ReportValue, catcher));
-    uePhy->GetDownlinkSpectrumPhy ()->AddCtrlSinrChunkProcessor (testSinr);
-    // uePhy->GetUplinkSpectrumPhy()->AddCtrlSinrChunkProcessor(testSinr);
-    catchers.push_back(catcher);
-    #endif
-
-    std::cout << "UE " << i << " NoiseFigure: " << uePhy->GetNoiseFigure() << " TxPower: " << uePhy->GetTxPower() << std::endl;
-
   }
-  lteHelper->SetLogDir(logdir);
   NS_LOG_INFO("Number of UEs: " << ueNodes.GetN());
 
   // Get the eNodeB device
@@ -834,11 +852,16 @@ int main (int argc, char *argv[])
   Ptr<LteEnbPhy> enbPhy = enbLteDevs.Get(0)->GetObject<LteEnbNetDevice>()->GetPhy();
   enbRrc->SetLogDir(logdir);
 
-  // enbPhy->SetAttribute ("TxPower", DoubleValue (43.0));
-  // enbPhy->SetAttribute ("NoiseFigure", DoubleValue (5.0));
-
-  std::cout << "eNB NoiseFigure: " << enbPhy->GetNoiseFigure() << " TxPower: " << enbPhy->GetTxPower() << std::endl;
-  std::cout << "eNB Bandwidth DL: " << enbLteDevice->GetDlBandwidth() << " UL: " << enbLteDevice->GetUlBandwidth() << std::endl;
+  // Log the noise figure and tx power to a file
+  std::ofstream out(logdir + "NoiseFigure.log", std::ios::app);
+  for (uint16_t i = 0; i < ueNodes.GetN(); i++)
+  {
+    Ptr<LteUePhy> uePhy = ueLteDevs.Get(i)->GetObject<LteUeNetDevice> ()->GetPhy ();
+    out << "UE " << i << " NoiseFigure: " << uePhy->GetNoiseFigure() << " TxPower: " << uePhy->GetTxPower() << std::endl;
+  }
+  out << "eNB NoiseFigure: " << enbPhy->GetNoiseFigure() << " TxPower: " << enbPhy->GetTxPower() << std::endl;
+  out << "eNB Bandwidth DL: " << enbLteDevice->GetDlBandwidth() << " UL: " << enbLteDevice->GetUlBandwidth() << std::endl;
+  out.close();
 
   /*
     ***********************************
@@ -896,20 +919,6 @@ int main (int argc, char *argv[])
   std::time_t end_time = std::chrono::system_clock::to_time_t(end);
   NS_LOG_INFO("Finished computation at " << std::ctime(&end_time) << "elapsed time: " << elapsed_seconds.count() << "s" );
 
-  #ifdef ENABLE_SPECTRUM_VALUE_CATCHER
-  // print SINR values
-  std::cout << "SINR values for each UE:" << std::endl;
-  for(auto &catcher : catchers) {
-    Ptr<SpectrumValue> value = catcher->GetValue();
-    if (value) {
-        double sinrDb = 10.0 * std::log10(value->operator[](0));
-        std::cout << "SINR (dB): " << sinrDb << std::endl;
-    } else {
-        std::cout << "No SINR value recorded for this UE." << std::endl;
-    }
-  }
-  #endif
-
   // finilise the simulation
   Simulator::Destroy ();
   std::cout << "Done" << std::endl;
@@ -918,17 +927,17 @@ int main (int argc, char *argv[])
   // This ensures std::clog isn’t left pointing to a buffer that’s about to vanish.
   std::clog.rdbuf(defaultBuf);
 
-  #ifdef ENABLE_SPECTRUM_VALUE_CATCHER
-  // delete pointers
-  for(auto &catcher : catchers) {
-    delete catcher;
-  }
-  #endif
-
   return 0;
 }
 
 /**
  * Example:
- * ./waf --run "nb-scenario4 --simTime=10 --num_ues=4 --ns3::LteUePhy::RsrpSinrSamplePeriod=1 --ns3::ConstantSpectrumPropagationLossModel::Loss=5 --ns3::LteUePhy::NoiseFigure=5 --ns3::LteUePhy::TxPower=10 --ns3::LteEnbPhy::NoiseFigure=5 --ns3::LteEnbPhy::TxPower=30"
+
+
+ ./waf --run "nb-scenario4 --simTime=10 --num_ues=4 \
+    --ns3::LteUePhy::RsrpSinrSamplePeriod=1 \
+    --ns3::ConstantSpectrumPropagationLossModel::Loss=5 \
+    --ns3::LteUePhy::NoiseFigure=5 --ns3::LteUePhy::TxPower=10 \
+    --ns3::LteEnbPhy::NoiseFigure=5 --ns3::LteEnbPhy::TxPower=30"
+
  */
