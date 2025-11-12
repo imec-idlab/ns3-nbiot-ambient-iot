@@ -48,6 +48,8 @@ def plot_energy_usage_consolidated(log_file, use_cumulative=True, show=False, xm
     # Plot setup
     fig, axs = plt.subplots(N, 1, figsize=(14, 7 * N), sharex=True)
     color_list = ["blue", "green", "red", "orange", "purple"]  # For five groups
+    if N == 1:
+        axs = [axs]
 
     if use_cumulative:
         max_time = df['Time'].max()
@@ -113,6 +115,8 @@ def plot_energy_usage(log_file, use_cumulative = True, show=False, xmin=None, xm
     N = len(df['IMSI'].unique())
     # Plot energy vs time for each state
     fig, axs = plt.subplots(N, 1, figsize=(14, 6 * N), sharex=True)
+    if N == 1:
+        axs = [axs]
 
     # Colors for each state
     colors = [
