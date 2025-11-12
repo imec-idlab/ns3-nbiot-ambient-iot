@@ -23,7 +23,7 @@
  This code is a sample simulation script for LTE+EPC.
  It initializes the logging system for different components such as "LenaNb5G-Cap" and "GenericCapacitor".
  The main function sets up a simulation environment with specific parameters:
- - simTime: Duration of the simulation.
+ - simDuration: Duration of the simulation.
  - seed: The seed for random number generation, initialized to 1.
  - simName: The name of the simulation, set to "cap".
  - cell_size: The size of the cell in meters, set to 2500 meters.
@@ -85,7 +85,7 @@ constexpr double PI = 3.14159265358979323846;
 
 
   To run the script, use the following command:
-  $ ./waf --run "nb-scenario4.cc --simTime=1800 --num_ues=4 \
+  $ ./waf --run "nb-scenario4.cc --simDuration=1800 --num_ues=4 \
         --ns3::LteUePhy::RsrpSinrSamplePeriod=1 \
         --ns3::ConstantSpectrumPropagationLossModel::Loss=5 \
         --ns3::LteUePhy::NoiseFigure=5 --ns3::LteUePhy::TxPower=10 \
@@ -125,10 +125,20 @@ void setLogLevels(ns3::LogLevel logLevel)
   ns3::LogComponentEnable ("LteSpectrumPhy", logLevel);
 }
 
+void MyShowProgress(double totalTime, double interval) {
+    double currentTime = Simulator::Now().GetSeconds();
+    double percent = (currentTime / totalTime) * 100.0;
+    std::cout << "\rSimulation progress: " << int(percent) << "% completed" << std::flush;
+
+    if (currentTime < totalTime) {
+        Simulator::Schedule(Seconds(interval), &MyShowProgress, totalTime, interval);
+    }
+}
+
 
 void CreateLogDirectory(const std::string& simName,
                         int num_ues,
-                        const Time& simTime,
+                        const Time& simDuration,
                         bool ciot,
                         bool edt,
                         std::string& outputPath)
@@ -141,7 +151,7 @@ void CreateLogDirectory(const std::string& simName,
 
     std::string logdir = "logs/" + simName;
     logdir += "/u" + std::to_string(num_ues);
-    logdir += "_t" + std::to_string(simTime.GetInteger());
+    logdir += "_t" + std::to_string(simDuration.GetInteger());
     logdir += "_c" + std::to_string(ciot);
     logdir += "_e" + std::to_string(edt);
     logdir += "/" + ss.str();
@@ -487,7 +497,7 @@ int main (int argc, char *argv[])
   // Simulation parameters
   //
   // --------------------------------------------------------------------------
-  ns3::Time simTime = Minutes(30);  // Total duration of the simulation
+  ns3::Time simDuration = Minutes(30);  // Total duration of the simulation
   std::string simName = "markov";  // Name of the simulation, used for logging
 
   int seed = 1;
@@ -532,7 +542,7 @@ int main (int argc, char *argv[])
   // --ns3::ConstantSpectrumPropagationLossModel::Loss=x
   // --------------------------------------------------------------------------
   CommandLine cmd (__FILE__);
-  cmd.AddValue ("simTime", "Total duration of the simulation", simTime);
+  cmd.AddValue ("simDuration", "Total duration of the simulation", simDuration);
   cmd.AddValue ("simName", "Name of the simulation", simName);
   cmd.AddValue ("randomSeed", "randomSeed", seed);
   cmd.AddValue ("num_ues", "Number of UEs", num_ues);
@@ -541,6 +551,7 @@ int main (int argc, char *argv[])
   cmd.AddValue ("cell_size", "Cell size in meters", cell_size);
   cmd.AddValue("propagationLossModel", "Propagation loss model: friis, fixed, or winner", propagationLossModel);
   cmd.AddValue("positioning", "Positioning model: uniform, random, or same", positioning);
+  cmd.AddValue("heightOfUes", "Height of UEs", heightOfUes);
   // parse again so you can override default values from the command line
   cmd.Parse (argc, argv);
   ConfigStore inputConfig;
@@ -548,7 +559,7 @@ int main (int argc, char *argv[])
 
   // create the log directory
   std::string logdir;
-  CreateLogDirectory(simName, num_ues, simTime, ciot, edt, logdir);
+  CreateLogDirectory(simName, num_ues, simDuration, ciot, edt, logdir);
 
   // --------------------------------------------------------------------------
   //
@@ -563,7 +574,7 @@ int main (int argc, char *argv[])
   }
 
   logCmdArgs << "Simulation Parameters:\n";
-  logCmdArgs << "simTime = " << simTime << "\n";
+  logCmdArgs << "simDuration = " << simDuration << "\n";
   logCmdArgs << "simName = " << simName << "\n";
   logCmdArgs << "randomSeed = " << seed << "\n";
   logCmdArgs << "num_ues = " << num_ues << "\n";
@@ -605,7 +616,6 @@ int main (int argc, char *argv[])
   RngSeedManager::SetSeed (seed);
   Ptr<UniformRandomVariable> RaUeUniformVariable = CreateObject<UniformRandomVariable> ();
   NS_LOG_DEBUG("seed: " << seed);
-
 
   /*
     ---------------- Create a single eNB  -------------
@@ -896,6 +906,10 @@ int main (int argc, char *argv[])
   // Use overlapping frequency configurations
   lteHelper->SetEnbDeviceAttribute("DlEarfcn", UintegerValue(100));
 
+
+  double updateInterval = 1.0; // update every 1 second
+  Simulator::Schedule(Seconds(updateInterval), &MyShowProgress, simDuration.GetSeconds(), updateInterval);
+
   /*
     ***********************************
     *
@@ -904,7 +918,7 @@ int main (int argc, char *argv[])
     * *********************************
   */
   AnimationInterface anim (logdir + "lena-simple-epc.xml");
-  Simulator::Stop (simTime); // Run
+  Simulator::Stop (simDuration); // Run
   auto start = std::chrono::system_clock::now();
   std::time_t start_time = std::chrono::system_clock::to_time_t(start);
 
@@ -921,7 +935,7 @@ int main (int argc, char *argv[])
 
   // finilise the simulation
   Simulator::Destroy ();
-  std::cout << "Done" << std::endl;
+  std::cout << "\nDone." << std::endl;
 
   // Restore before logFile is destroyed
   // This ensures std::clog isn’t left pointing to a buffer that’s about to vanish.
@@ -934,7 +948,7 @@ int main (int argc, char *argv[])
  * Example:
 
 
- ./waf --run "nb-scenario4 --simTime=10 --num_ues=4 \
+ ./waf --run "nb-scenario4 --simDuration=10 --num_ues=4 \
     --ns3::LteUePhy::RsrpSinrSamplePeriod=1 \
     --ns3::ConstantSpectrumPropagationLossModel::Loss=5 \
     --ns3::LteUePhy::NoiseFigure=5 --ns3::LteUePhy::TxPower=10 \
