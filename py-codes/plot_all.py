@@ -1,6 +1,7 @@
 import os
 import sys
 import argparse
+
 from check_energy import find_files
 from check_energy import plot_energy
 from nbiot_energy import plot_energy_usage, plot_energy_usage_consolidated
@@ -11,6 +12,7 @@ from mac_events import plot_mac_events, plot_mac_events_imsi
 from state_changes import plot_state_changes
 from tx_data_frame import plot_tx_data_frame
 from receive_data_packets import plot_receive_data_packets
+from get_snr import experiment_snr
 
 
 if __name__ == "__main__":
@@ -50,12 +52,13 @@ if __name__ == "__main__":
         plot_downlink_usage(filename, show=args.show)
         plot_downlink_usage_imsi(filename)
 
-    print("Processing spectral uplink files in directory:", args.dir)
-    spectral_uplink_files = find_files(args.dir, target_suffix="Spectral_Uplink.log")
-    for filename in spectral_uplink_files:
-        print("- Processing file:", filename)
-        plot_uplink_usage(filename, show=args.show)
-        plot_uplink_usage_imsi(filename)
+    # print("Processing spectral uplink files in directory:", args.dir)
+    # spectral_uplink_files = find_files(args.dir, target_suffix="Spectral_Uplink.log")
+    # for filename in spectral_uplink_files:
+    #     print("- Processing file:", filename)
+    #     plot_uplink_usage(filename, show=args.show)
+    #     print("2")
+    #     plot_uplink_usage_imsi(filename)
 
     print("Processing collision in files in directory:", args.dir)
     collision_files = find_files(args.dir, target_suffix="_MAC.log")
@@ -93,3 +96,8 @@ if __name__ == "__main__":
         print("- Processing file:", filename)
         plot_mac_events(filename, show=args.show)
         plot_mac_events_imsi(filename, show=args.show)
+
+    print("Processing experiment SNR in directory:", args.dir)
+    experiment_snr(args.dir, save=True)
+
+    print("Done.")
