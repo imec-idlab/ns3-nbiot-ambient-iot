@@ -19,7 +19,7 @@
  *
  * Authors: Danilo Abrignani <danilo.abrignani@unibo.it>
  *          Biljana Bojovic <biljana.bojovic@cttc.es>
- * Modified by: 
+ * Modified by:
  * 			Tim Gebauer <tim.gebauer@tu-dortmund.de> (NB-IoT extensions)
  *
  */
@@ -32,7 +32,7 @@ namespace ns3 {
 
 NS_LOG_COMPONENT_DEFINE ("NoOpComponentCarrierManager");
 NS_OBJECT_ENSURE_REGISTERED (NoOpComponentCarrierManager);
-  
+
 NoOpComponentCarrierManager::NoOpComponentCarrierManager ()
 {
   NS_LOG_FUNCTION (this);
@@ -105,16 +105,18 @@ void
 NoOpComponentCarrierManager::DoReportBufferStatusNb (LteMacSapProvider::ReportBufferStatusParameters params, NbIotRrcSap::NpdcchMessage::SearchSpaceType searchspace)
 {
   NS_LOG_FUNCTION (this);
+  // HENRIQUE: there was an assert error sometimes in this call.
+  // Fixed it by returning null if the UeManager is not found
   auto ueManager = m_ccmRrcSapUser->GetUeManager (params.rnti);
   if(ueManager){
-  std::map <uint8_t, LteMacSapProvider*>::iterator it = m_macSapProvidersMap.find (ueManager->GetComponentCarrierId ());
-  
-  NS_ASSERT_MSG (it != m_macSapProvidersMap.end (), "could not find Sap for ComponentCarrier ");
-  it->second->ReportBufferStatusNb (params, searchspace);
+    std::map <uint8_t, LteMacSapProvider*>::iterator it = m_macSapProvidersMap.find (ueManager->GetComponentCarrierId ());
+
+    NS_ASSERT_MSG (it != m_macSapProvidersMap.end (), "could not find Sap for ComponentCarrier ");
+    it->second->ReportBufferStatusNb (params, searchspace);
   }
 }
 
-void 
+void
 NoOpComponentCarrierManager::DoReportNoTransmissionNb(uint16_t rnti, uint8_t lcid){
   NS_LOG_FUNCTION (this);
   auto ueManager = m_ccmRrcSapUser->GetUeManager (rnti);
@@ -287,9 +289,9 @@ NoOpComponentCarrierManager::DoMoveUeToResume(uint16_t rnti, uint64_t resumeId)
   m_resumeUeAttached[resumeId] = m_ueAttached[rnti];
 }
 
-void 
+void
 NoOpComponentCarrierManager::DoResumeUe(uint16_t rnti, uint64_t resumeId){
-  m_ueState[rnti]= m_resumeUeState[resumeId]; 
+  m_ueState[rnti]= m_resumeUeState[resumeId];
   m_resumeUeState.erase(resumeId);
   m_enabledComponentCarrier[rnti]= m_resumeEnabledComponentCarrier[resumeId];
   m_resumeEnabledComponentCarrier.erase(resumeId);
