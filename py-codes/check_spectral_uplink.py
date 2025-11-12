@@ -78,7 +78,7 @@ def plot_uplink_usage_imsi(filename, show=False):
     plot_grid(imsi_grid, var_name="IMSI", img_filename=img_filename)
 
 
-def plot_grid(grid, var_name: str, img_filename: str = None):
+def plot_grid(grid, var_name: str, img_filename: str | None = None):
     # print(f"Grid shape: {grid.shape}")
     vmin = np.min(grid)
     vmax = np.max(grid)
