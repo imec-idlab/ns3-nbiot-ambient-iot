@@ -17,7 +17,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Danilo Abrignani <danilo.abrignani@unibo.it>
- * Modified by:	
+ * Modified by:
  * 			Tim Gebauer <tim.gebauer@tu-dortmund.de> (NB-IoT Extension)
  *
  */
@@ -53,11 +53,11 @@ class LteCcmRrcSapProvider
 friend class UeManager;
 /// allow LteMacSapUser class friend access
 friend class LteMacSapUser;
- 
+
 public:
-  
+
   virtual ~LteCcmRrcSapProvider ();
-  
+
   /// LcsConfig structure
   struct LcsConfig
   {
@@ -68,7 +68,7 @@ public:
 
   /**
    * \brief Reports UE measurements to the component carrier manager.
-   * \param rnti Radio Network Temporary Identity, an integer identifying 
+   * \param rnti Radio Network Temporary Identity, an integer identifying
    * the UE where the measurement report originates from.
    * \param measResults a single report of one measurement identity
    *
@@ -124,15 +124,15 @@ public:
    * \param lcid the Logical Channel id
    * \param lcGroup the Logical Channel group
    * \param msu a pointer to the LteMacSapUser, the LteEnbComponentCarrierManager
-   *             has to store a LteMacSapUser for each Rlc istance, in order to 
+   *             has to store a LteMacSapUser for each Rlc istance, in order to
    *             properly redirect the packet
    * \return vector of LcsConfig contains the lc configuration for each Mac
    *                the size of the vector is equal to the number of component
    *                carrier enabled.
    *
-   * The Logical Channel configurations for each component carrier depend on the 
+   * The Logical Channel configurations for each component carrier depend on the
    * algorithm used to split the traffic between the component carriers themself.
-   */  
+   */
   virtual std::vector<LteCcmRrcSapProvider::LcsConfig> SetupDataRadioBearer (EpsBearer bearer, uint8_t bearerId, uint16_t rnti, uint8_t lcid, uint8_t lcGroup, LteMacSapUser *msu) = 0;
 
    /**
@@ -196,7 +196,7 @@ public:
    *             UE which shall perform the ComponentCarrier
    * \param targetCellId the cell ID of the target eNodeB
    *
-   * This function is used by the ComponentCarrier manager when a decision on 
+   * This function is used by the ComponentCarrier manager when a decision on
    * component carriers configurations.
    *
    * The process to produce the decision is up to the implementation of ComponentCarrier
@@ -205,17 +205,17 @@ public:
    */
   virtual void TriggerComponentCarrier (uint16_t rnti, uint16_t targetCellId) = 0;
 
-  /** 
-   * add a new Logical Channel (LC) 
-   * 
+  /**
+   * add a new Logical Channel (LC)
+   *
    * \param lcConfig is a single structure contains logical Channel Id, Logical Channel config and Component Carrier Id
    */
   virtual void AddLcs (std::vector<LteEnbRrcSapProvider::LogicalChannelConfig> lcConfig) = 0;
 
-  /** 
+  /**
    * remove an existing LC
-   * 
-   * \param rnti 
+   *
+   * \param rnti
    * \param lcid
    */
   virtual void ReleaseLcs (uint16_t rnti, uint8_t lcid) = 0;
@@ -244,7 +244,7 @@ class MemberLteCcmRrcSapProvider : public LteCcmRrcSapProvider
 public:
   /**
    * Constructor
-   * 
+   *
    * \param owner the owner class
    */
   MemberLteCcmRrcSapProvider (C* owner);
@@ -329,7 +329,7 @@ class MemberLteCcmRrcSapUser : public LteCcmRrcSapUser
 public:
   /**
    * Constructor
-   * 
+   *
    * \param owner the owner class
    */
   MemberLteCcmRrcSapUser (C* owner);
@@ -400,4 +400,3 @@ MemberLteCcmRrcSapUser<C>::SetNumberOfComponentCarriers (uint16_t noOfComponentC
 
 
 #endif /* LTE_CCM_RRC_SAP_H */
-
