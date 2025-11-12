@@ -50,7 +50,36 @@
 #include <ns3/lte-pdcp.h>
 #include <cmath>
 
+#include <execinfo.h>
+#include <iostream>
+#include <cstdlib>
+#include <stdexcept>
 
+
+
+/**
+ * Prints the current call stack to the console.
+ *
+ * This function uses the backtrace() and backtrace_symbols() functions
+ * from the execinfo.h header to obtain the current call stack and
+ * resolve the symbols to human-readable names. It then prints the
+ * call stack to the console.
+ *
+ * This function is mostly useful for debugging purposes.
+ * It was used in LteEnbRrc::GetUeManagerbyRnti()
+ */
+void print_stack() {
+    const int max_frames = 64;
+    void* buffer[max_frames];
+    int nptrs = backtrace(buffer, max_frames);
+    char** symbols = backtrace_symbols(buffer, nptrs);
+
+    std::cout << "Call stack:\n";
+    for (int i = 0; i < nptrs; ++i)
+        std::cout << symbols[i] << '\n';
+
+    free(symbols);
+}
 
 namespace ns3 {
 
@@ -410,6 +439,7 @@ UeManager::SetSource (uint16_t sourceCellId, uint16_t sourceX2apId)
 void
 UeManager::SetImsi (uint64_t imsi)
 {
+
   m_imsi = imsi;
 }
 
@@ -1006,7 +1036,6 @@ void
 UeManager::RecvRrcConnectionRequest (LteRrcSap::RrcConnectionRequest msg)
 {
   NS_LOG_FUNCTION (this);
-  //NS_BUILD_DEBUG(std::cout << "\n"<< m_rnti << "GOT THROUGH" << std::endl);
   switch (m_state)
     {
     case INITIAL_RANDOM_ACCESS:
@@ -1016,7 +1045,6 @@ UeManager::RecvRrcConnectionRequest (LteRrcSap::RrcConnectionRequest msg)
         if (m_rrc->m_admitRrcConnectionRequest == true)
           {
             m_imsi = msg.ueIdentity;
-
             // send RRC CONNECTION SETUP to UE
             LteRrcSap::RrcConnectionSetup msg2;
             msg2.rrcTransactionIdentifier = GetNewRrcTransactionIdentifier ();
@@ -1069,6 +1097,7 @@ UeManager::AttachSuspendedNb(uint32_t imsi){
   //m_rrc->m_rrcSapUser->SendRrcConnectionSetup (m_rnti, msg2);
 
   m_imsi = imsi;
+  NS_LOG_DEBUG("UeManager::AttachSuspendedNb IMSI:" << m_imsi << " RNTI:" << m_rnti);
   RecordDataRadioBearersToBeStarted ();
   if (m_rrc->m_s1SapProvider != 0)
       {
@@ -1168,6 +1197,7 @@ UeManager::RecvRrcEarlyDataRequestNb (NbIotRrcSap::RrcEarlyDataRequestNb msg)
           {
               m_imsi = msg.sTmsiNb.mTmsi;
               m_rrc->m_s1SapProvider->InitialUeMessage(m_imsi, m_rnti);
+              // std::cout << "RecvRrcEarlyDataRequestNb: IMSI" << m_imsi << " RNTI " << m_rnti << std::endl;
 
               SwitchToState (IDLE_EARLY_DATA_TRANSMISSION);
               if(msg.dedicatedInfoNas->GetSize()>0){
@@ -2459,7 +2489,13 @@ LteEnbRrc::GetUeManagerbyRnti (uint16_t rnti)
   NS_LOG_FUNCTION (this << (uint32_t) rnti);
   NS_ASSERT (0 != rnti);
   std::map<uint16_t, Ptr<UeManager> >::iterator it = m_ueActiveMap.find (rnti);
-  NS_ASSERT_MSG (it != m_ueActiveMap.end (), "UE manager for RNTI " << rnti << " not found");
+  if (it == m_ueActiveMap.end ()) {
+    // HENRIQUE: commented out the following assert
+    // NS_ASSERT_MSG (it != m_ueActiveMap.end (), "UE manager for RNTI " << rnti << " not found");
+
+    // now the if UE manager is not found, return a null pointer so the caller can handle it
+    return nullptr;  // return a null pointer if the UE manager is not found
+  }
   NS_ASSERT (it != m_ueActiveMap.end ());
   return it->second;
 }
@@ -3311,7 +3347,7 @@ LteEnbRrc::AddUe (UeManager::State state, uint8_t componentCarrierId)
   m_ueActiveMap.insert (std::pair<uint16_t, Ptr<UeManager> > (rnti, ueManager));
   ueManager->Initialize ();
   const uint16_t cellId = ComponentCarrierToCellId (componentCarrierId);
-  NS_LOG_DEBUG (this << " New UE RNTI " << rnti << " cellId " << cellId << " srs CI " << ueManager->GetSrsConfigurationIndex ());
+  NS_LOG_DEBUG (this << "New UE RNTI:" << rnti << ", cellId:" << cellId << ", srs CI:" << ueManager->GetSrsConfigurationIndex () << ", IMSI:" << ueManager->GetImsi() );
   m_newUeContextTrace (cellId, rnti);
   return rnti;
 }
@@ -3349,6 +3385,7 @@ LteEnbRrc::MoveUeToResumed(uint16_t rnti, uint64_t resumeId){
 void
 LteEnbRrc::ResumeUe(uint16_t rnti, uint64_t resumeId){
 
+  NS_LOG_DEBUG ("UE is resumed. RNTI:" << rnti << ", resumeId:" << resumeId );
   // Remove parts of new Temporary UeManager that arent needed
   std::map <uint16_t, Ptr<UeManager> >::iterator it = m_ueActiveMap.find (rnti);
   it->second->CancelPendingEvents ();//cancel pending events
@@ -3359,6 +3396,7 @@ LteEnbRrc::ResumeUe(uint16_t rnti, uint64_t resumeId){
   m_s1SapProvider->UeContextRelease(rnti);
   // Resume Old UeManager
   m_ueActiveMap[rnti] = m_ueResumedMap[resumeId];
+  NS_LOG_DEBUG("Old UE is resumed RNTI:" << rnti << ", IMSI:" << m_ueResumedMap[resumeId]->GetImsi());
   m_ueActiveMap[rnti]->SetRnti(rnti);  // Set RNTI
   m_cmacSapProvider.at(0)->ResumeUe(rnti, resumeId);
   m_rrcSapUser->ResumeUe(rnti,resumeId);
@@ -3373,6 +3411,7 @@ LteEnbRrc::RemoveUe (uint16_t rnti)
   NS_LOG_FUNCTION (this << (uint32_t) rnti);
   std::map <uint16_t, Ptr<UeManager> >::iterator it = m_ueActiveMap.find (rnti);
   NS_ASSERT_MSG (it != m_ueActiveMap.end (), "request to remove UE info with unknown rnti " << rnti);
+  NS_LOG_DEBUG (this << "Request to remove UE info with RNTI " << rnti);
   uint64_t imsi = it->second->GetImsi ();
   uint16_t srsCi = (*it).second->GetSrsConfigurationIndex ();
   //cancel pending events
@@ -3426,7 +3465,7 @@ LteEnbRrc::RemoveUeNb(uint16_t rnti, bool resumed)
     {
       RemoveSrsConfigurationIndex (srsCi);
     }
-
+  NS_LOG_DEBUG ("LteEnbRrc::RemoveUeNb RNTI:" << rnti << ", IMSI:" << imsi);
   m_rrcSapUser->RemoveUe (rnti,resumed); // Remove UE context at RRC protocol
 }
 TypeId
@@ -3710,6 +3749,7 @@ LteEnbRrc::IsRandomAccessCompleted (uint16_t rnti)
 
 uint64_t LteEnbRrc::AttachSuspendedUeNb(uint32_t imsi){
   uint16_t rnti = AddUe(UeManager::INITIAL_RANDOM_ACCESS,0);
+  NS_LOG_DEBUG("AttachSuspendedUeNb - RNTI:" << rnti << " IMSI:" << imsi);
   return GetUeManagerbyRnti(rnti)->AttachSuspendedNb(imsi);
 }
 
