@@ -1,3 +1,4 @@
+import argparse
 import os
 import zipfile
 
@@ -16,8 +17,11 @@ def compress_ns3_logs(root_path, file_name="ns3_log_output.log"):
             os.remove(log_path)
             print(f"Compressed and removed: {log_path}")
 
+
 # Example usage
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Compress NS3 log files")
     # path to the directory you want to search the log files to compress
-    target_directory = "/home/h3dema/ns3-nbiot/logs"
-    compress_ns3_logs(target_directory)
+    parser.add_argument("-d", "--directory", type=str, default="./logs", help="Path to the directory you want to search the log files to compress")
+    args = parser.parse_args()
+    compress_ns3_logs(args.directory)
