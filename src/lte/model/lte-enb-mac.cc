@@ -723,12 +723,12 @@ LteEnbMac::CheckIfPreambleWasReceived (NbIotRrcSap::NprachParametersNb ce, bool 
 
   std::map<uint8_t, uint32_t> receivedNprachs;
   uint8_t subcarrierOffset = NbIotRrcSap::ConvertNprachSubcarrierOffset2int (ce);
+  uint32_t sub_frame = (10 * (m_frameNo - 1) + (m_subframeNo - 1));
 
   receivedNprachs = m_receivedNprachPreambleCount[subcarrierOffset];
 
   std::vector<std::pair<int, NbIotRrcSap::Rar>> m_rarQueue; // Mapping Ranti -> Rar
   NbIotRrcSap::NpdcchMessage rar_dci;
-
 
   if (receivedNprachs.size () > 0)
     {
@@ -740,7 +740,7 @@ LteEnbMac::CheckIfPreambleWasReceived (NbIotRrcSap::NprachParametersNb ce, bool 
           if (iter->second == 1)
             { // sanity check. Actually should be always equal
 
-              //NS_BUILD_DEBUG (std::cout << "Preamble received of offset " << int (subcarrierOffset) << " at Subframe " << (10 * (m_frameNo - 1) + (m_subframeNo - 1)) << std::endl);
+              NS_BUILD_DEBUG (std::cout << "Preamble received of offset " << int (subcarrierOffset) << " at Subframe " << sub_frame << std::endl);
               NbIotRrcSap::Rar rar = {};
               rar.cellRnti = m_cmacSapUser->AllocateTemporaryCellRnti ();
               rar.rapId = subcarrierOffset + iter->first;
@@ -751,7 +751,7 @@ LteEnbMac::CheckIfPreambleWasReceived (NbIotRrcSap::NprachParametersNb ce, bool 
                 std::string logfile_path = m_logdir+"MAC.log";
                 std::ofstream logfile;
                 logfile.open(logfile_path, std::ios_base::app);
-                logfile <<  rar.cellRnti << ",PreambleReceived," << Simulator::Now().GetMilliSeconds() << "\n";
+                logfile <<  rar.cellRnti << ",PreambleReceived," << Simulator::Now().GetMilliSeconds() << ", " << int (subcarrierOffset) << ", " << sub_frame << "\n";
                 logfile.close();
               }
 
@@ -775,7 +775,7 @@ LteEnbMac::CheckIfPreambleWasReceived (NbIotRrcSap::NprachParametersNb ce, bool 
                 std::string logfile_path = m_logdir+"MAC.log";
                 std::ofstream logfile;
                 logfile.open(logfile_path, std::ios_base::app);
-                logfile  << ",PreambleCollision," << Simulator::Now().GetMilliSeconds() << "\n";
+                logfile  << ",PreambleCollision," << Simulator::Now().GetMilliSeconds() << ", " << int (subcarrierOffset) << ", " << sub_frame << "\n";
                 logfile.close();
               }
 
