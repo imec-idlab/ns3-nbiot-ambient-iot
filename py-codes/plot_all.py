@@ -12,7 +12,7 @@ from mac_events import plot_mac_events, plot_mac_events_imsi
 from state_changes import plot_state_changes
 from tx_data_frame import plot_tx_data_frame
 from receive_data_packets import plot_receive_data_packets
-from get_snr import experiment_snr
+from get_snr import get_experiment_snr
 
 
 if __name__ == "__main__":
@@ -98,6 +98,6 @@ if __name__ == "__main__":
         plot_mac_events_imsi(filename, show=args.show)
 
     print("Processing experiment SNR in directory:", args.dir)
-    experiment_snr(args.dir, save=True)
+    get_experiment_snr(args.dir, save=True)
 
     print("Done.")
