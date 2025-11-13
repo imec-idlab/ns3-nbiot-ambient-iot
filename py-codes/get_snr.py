@@ -8,6 +8,37 @@ from read_noisefigure_log import parse_noise_figure, NoisePower
 from rnti_imsi_map import map_rnti_imsi_from_log
 
 
+def compute_weighted_average_snr(snr_dict):
+    """
+    Compute the weighted average SNR given a dictionary of SNR intervals.
+
+    The weighted average SNR is computed as the sum of the products of the SNR values and their corresponding durations, divided by the total duration.
+
+    Parameters
+    ----------
+    snr_dict : dict
+        A dictionary where the keys are the IMSIs and the values are lists of tuples containing the start time, end time, and SNR for each constant SNR interval.
+        e.g., the output of get_experiment_snr()
+    Returns
+    -------
+    float
+        The weighted average SNR.
+    """
+    total_weighted_snr = 0.0
+    total_duration = 0.0
+
+    for imsi, intervals in snr_dict.items():
+        for start, end, snr_value in intervals:
+            duration = end - start
+            total_weighted_snr += snr_value * duration
+            total_duration += duration
+
+    if total_duration == 0:
+        return 0.0  # Avoid division by zero
+
+    return total_weighted_snr / total_duration
+
+
 def compute_snr_per_entry(data, noisefigure: dict, df_mapping: pd.DataFrame):
     """
     Compute the SNR (in dB) for each entry in the given data.
@@ -57,7 +88,17 @@ def compute_snr_per_entry(data, noisefigure: dict, df_mapping: pd.DataFrame):
 
 
 
-def experiment_snr(path_log, verbose=False, save=True):
+def get_experiment_snr(path_log, verbose=False, save=True):
+    """
+    Compute the SNR (in dB) for each entry in the given data.
+
+    This function takes in the path to the experiment log folder, and returns a dictionary where the keys are the IMSI and the values are lists of tuples containing the start time, end time, and SNR for each constant SNR interval.
+
+    :param path_log: The path to the experiment log folder
+    :param verbose: Whether to print the computed intervals
+    :param save: Whether to save the computed intervals to a file
+    :return: A dictionary where the keys are the IMSI and the values are lists of tuples containing the start time, end time, and SNR for each constant SNR interval
+    """
     uelogfile = os.path.join(path_log, "ReportUeMeasurements.log")
     noise_figure_file = os.path.join(path_log, "NoiseFigure.log")
     connection_log_file = os.path.join(path_log, "cell_connection.log")
@@ -107,6 +148,7 @@ def experiment_snr(path_log, verbose=False, save=True):
     if save:
         with open(os.path.join(path_log, "snr_intervals.pickle"), "wb") as f:
             pickle.dump(intervals, f, protocol=pickle.DEFAULT_PROTOCOL)
+    return intervals
 
 
 if __name__ == "__main__":
@@ -115,4 +157,4 @@ if __name__ == "__main__":
     parser.add_argument('-p', '--path-log', type=str, help="Path to the log files")
     args = parser.parse_args()
 
-    experiment_snr(args.path_log, save=True)
+    get_experiment_snr(args.path_log, save=True)
