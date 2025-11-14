@@ -10,7 +10,9 @@ from utilities import find_files
 def process_mac_file_for_collisions(file_path: str) -> list:
     """
     Processes a MAC log file and returns a list of times (in seconds) of collisions.
-
+    Each line contains: CellRnti, Event, Time
+    Event = {PreambleReceived, PreambleCollision}
+    
     The times are extracted from the log file by searching for the string
     ",PreambleCollision," followed by a number (in milliseconds).
 
@@ -26,7 +28,7 @@ def process_mac_file_for_collisions(file_path: str) -> list:
     # Extract all PreambleCollision times (in ms)
     collision_times_ms = [
         int(match.group(1))
-        for match in re.finditer(r",PreambleCollision,(\d+)", log)
+        for match in re.finditer(r",PreambleCollision,(\d+),.*", log)
     ]
 
     # Convert to seconds
