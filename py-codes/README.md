@@ -8,11 +8,29 @@ There are several scripts for analyzing network simulation data, particularly fo
 <pre>
 py-codes/
 ├── check_energy.py
+├── check_scenario3.py
 ├── check_spectral_downlink.py
 ├── check_spectral_uplink.py
+├── check_tx_rx_pdu.py
 ├── collisions.py
+├── create_scripts.py
+├── experiments_energy.py
+├── experiments_collisions.py
+├── get_snr.py
+├── log_generic_capacitor.py
 ├── mac_events.py
+├── nbiot_energy.py
+├── parse_ue_measurements.py
+├── pcap.py
+├── process_scenario2_log.py
+├── read_config.py
+├── read_noisefigure_log.py
+├── receive_data_packets.py
+├── rnti_imsi_map.py
 ├── state_changes.py
+├── tx_data_frame.py
+├── utilities.py
+├── zip_ns3_log_output.py
 └── plot_all.py
 </pre>
 
