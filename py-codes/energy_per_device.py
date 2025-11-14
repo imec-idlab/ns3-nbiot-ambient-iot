@@ -68,9 +68,9 @@ def read_data(path, verbose):
 def plot_energy_dict(energy_dict, fname="energy_per_device.png"):
     # Organize data by avg_snr
     snr_data = {}
-    for num_devices, entries in energy_dict.items():
+    for num_devices, entries in sorted(energy_dict.items()):
         for entry in entries:
-            snr = entry['avg_snr']
+            snr = np.trunc(entry['avg_snr'])
             energy = entry['energy']
             if snr not in snr_data:
                 snr_data[snr] = {'x': [], 'y': []}
