@@ -740,7 +740,7 @@ LteEnbMac::CheckIfPreambleWasReceived (NbIotRrcSap::NprachParametersNb ce, bool 
           if (iter->second == 1)
             { // sanity check. Actually should be always equal
 
-              NS_BUILD_DEBUG (std::cout << "Preamble received of offset " << int (subcarrierOffset) << " at Subframe " << sub_frame << std::endl);
+              NS_LOG_DEBUG ("Preamble received of offset " << int (subcarrierOffset) << " at Subframe " << sub_frame);
               NbIotRrcSap::Rar rar = {};
               rar.cellRnti = m_cmacSapUser->AllocateTemporaryCellRnti ();
               rar.rapId = subcarrierOffset + iter->first;
