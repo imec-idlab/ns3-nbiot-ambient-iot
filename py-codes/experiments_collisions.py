@@ -112,7 +112,6 @@ def read_data(path, verbose=False):
         num_unique_imsi = map_df['IMSI'].nunique()
 
         # find snr
-        print(log_path)
         snr = get_experiment_snr(os.path.dirname(log_path), save=False)
         avg_snr = np.trunc(compute_weighted_average_snr(snr))
 
