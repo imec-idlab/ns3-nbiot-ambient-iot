@@ -9,6 +9,7 @@ Compute energy per device from nbiot_energy.log files.
 """
 import os
 import argparse
+from tqdm import tqdm
 import numpy as np
 import pandas as pd
 from collections import defaultdict
@@ -46,16 +47,16 @@ def compute_energy_per_device(log_file):
 def read_data(path, verbose):
     energy_dict = defaultdict(list)
 
-    for dirpath, _, filenames in os.walk(path):
-        if "nbiot_energy.log" in filenames:
-            log_path = os.path.join(dirpath, "nbiot_energy.log")
-            try:
-                num_devices, energy_per_device, avg_snr = compute_energy_per_device(log_path)
-                energy_dict[num_devices].append({"avg_snr": avg_snr, "energy": energy_per_device})
-                if verbose:
-                    print(f"Processed {log_path}: {num_devices} devices, {energy_per_device:.4f} J/device Average SNR: {avg_snr:.2f} dB")
-            except Exception as e:
-                print(f"Error processing {log_path}: {e}")
+    paths = [dirpath for dirpath, _, filenames in os.walk(path) if "nbiot_energy.log" in filenames]
+    for dirpath in tqdm(paths):
+        log_path = os.path.join(dirpath, "nbiot_energy.log")
+        try:
+            num_devices, energy_per_device, avg_snr = compute_energy_per_device(log_path)
+            energy_dict[num_devices].append({"avg_snr": avg_snr, "energy": energy_per_device})
+            if verbose:
+                print(f"Processed {log_path}: {num_devices} devices, {energy_per_device:.4f} J/device Average SNR: {avg_snr:.2f} dB")
+        except Exception as e:
+            print(f"Error processing {log_path}: {e}")
 
     if verbose:
         print("\nEnergy per device summary:")
@@ -92,15 +93,16 @@ def plot_energy_dict(energy_dict, fname="energy_per_device.png"):
     plt.close()
 
 
-def main():
+if __name__ == "__main__":
+    import json
+
     parser = argparse.ArgumentParser(description="Compute energy per device from nbiot_energy.log files.")
     parser.add_argument("-p", "--path", type=str, default="./logs", help="Root directory to search for log files")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
     args = parser.parse_args()
 
     energy_dict = read_data(args.path, args.verbose)
+    with open(os.path.join(args.path, "energy_stats.json"), "w") as f:
+        json.dump(energy_dict, f, indent=4)
+
     plot_energy_dict(energy_dict, fname=os.path.join(args.path, "energy_per_device.png"))
-
-
-if __name__ == "__main__":
-    main()
