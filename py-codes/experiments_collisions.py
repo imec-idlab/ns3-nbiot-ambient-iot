@@ -109,6 +109,8 @@ def read_data(path, verbose=False):
 
         map_fname = os.path.join(dirpath, "cell_connection.log")
         map_df = map_rnti_imsi_from_log(map_fname)
+        if len(map_df) == 0:
+            continue
         num_unique_imsi = map_df['IMSI'].nunique()
 
         # find snr

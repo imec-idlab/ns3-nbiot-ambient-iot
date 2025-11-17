@@ -1,5 +1,6 @@
-import argparse
+import os
 import re
+import argparse
 import pandas as pd
 
 
@@ -19,14 +20,15 @@ def map_rnti_imsi_from_log(filepath):
         A DataFrame with columns 'IMSI', 'CellId', and 'RNTI', containing the mapping from RNTI to IMSI.
     """
     data = []
-    with open(filepath, "r") as file:
-        for line in file:
-            match = re.search(r'IMSI: (\d+) CellId: (\d+) RNTI: (\d+)', line)
-            if match:
-                imsi = int(match.group(1))
-                cellid = int(match.group(2))
-                rnti = int(match.group(3))
-                data.append({'IMSI': imsi, 'CellId': cellid, 'RNTI': rnti})
+    if os.path.exists(filepath):
+        with open(filepath, "r") as file:
+            for line in file:
+                match = re.search(r'IMSI: (\d+) CellId: (\d+) RNTI: (\d+)', line)
+                if match:
+                    imsi = int(match.group(1))
+                    cellid = int(match.group(2))
+                    rnti = int(match.group(3))
+                    data.append({'IMSI': imsi, 'CellId': cellid, 'RNTI': rnti})
     return pd.DataFrame(data)
 
 
