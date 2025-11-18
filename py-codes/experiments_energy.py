@@ -33,7 +33,7 @@ def compute_energy_per_device(log_file):
     df['StateName'] = df['State'].map(state_map)
     df['Time'] = df['Time'] / 1000  # Convert ms to seconds
 
-    unique_devices = df['IMSI'].nunique()
+    unique_devices = int(df['IMSI'].apply(lambda x: int(x)).max())  # pick the max because some intermediate values can be missing
     total_energy = df['Energy'].sum()
     energy_per_device = float(total_energy) / unique_devices if unique_devices > 0 else 0.0
 
@@ -71,7 +71,7 @@ def plot_energy_dict(energy_dict, fname="energy_per_device.png"):
     snr_data = {}
     for num_devices, entries in sorted(energy_dict.items()):
         for entry in entries:
-            snr = np.trunc(entry['avg_snr'])
+            snr = int(np.trunc(entry['avg_snr']))
             energy = entry['energy']
             if snr not in snr_data:
                 snr_data[snr] = {'x': [], 'y': []}

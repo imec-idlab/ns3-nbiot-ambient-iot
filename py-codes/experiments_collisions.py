@@ -111,11 +111,11 @@ def read_data(path, verbose=False):
         map_df = map_rnti_imsi_from_log(map_fname)
         if len(map_df) == 0:
             continue
-        num_unique_imsi = map_df['IMSI'].nunique()
+        num_unique_imsi = int(map_df['IMSI'].apply(lambda x: int(x)).max())  # pick the max because some intermediate values can be missing
 
         # find snr
         snr = get_experiment_snr(os.path.dirname(log_path), save=False)
-        avg_snr = np.trunc(compute_weighted_average_snr(snr))
+        avg_snr = int(np.trunc(compute_weighted_average_snr(snr)))
 
         stats['avg_snr'] = avg_snr
 

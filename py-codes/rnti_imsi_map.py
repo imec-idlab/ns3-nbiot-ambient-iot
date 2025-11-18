@@ -42,3 +42,6 @@ if __name__ == "__main__":
 
     df = map_rnti_imsi_from_log(args.logfile)
     print(df)
+    num_unique_imsi = df['IMSI'].apply(lambda x: int(x)).max()
+    print("num_unique_imsi = ", num_unique_imsi)
+    
