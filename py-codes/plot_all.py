@@ -52,20 +52,6 @@ if __name__ == "__main__":
         plot_downlink_usage(filename, show=args.show)
         plot_downlink_usage_imsi(filename)
 
-    # print("Processing spectral uplink files in directory:", args.dir)
-    # spectral_uplink_files = find_files(args.dir, target_suffix="Spectral_Uplink.log")
-    # for filename in spectral_uplink_files:
-    #     print("- Processing file:", filename)
-    #     plot_uplink_usage(filename, show=args.show)
-    #     print("2")
-    #     plot_uplink_usage_imsi(filename)
-
-    print("Processing collision in files in directory:", args.dir)
-    collision_files = find_files(args.dir, target_suffix="_MAC.log")
-    for filename in collision_files:
-        print("- Processing file:", filename)
-        plot_collisions(filename, show=args.show)
-
     print("Processing state changes in directory:", args.dir)
     state_change_files = find_files(args.dir, target_suffix="state-changes.log")
     for filename in state_change_files:
@@ -99,5 +85,21 @@ if __name__ == "__main__":
 
     print("Processing experiment SNR in directory:", args.dir)
     get_experiment_snr(args.dir, save=True)
+
+    # --------------------- This part is very slow, so disabled for now ---------------------
+
+    # print("Processing spectral uplink files in directory:", args.dir)
+    # spectral_uplink_files = find_files(args.dir, target_suffix="Spectral_Uplink.log")
+    # for filename in spectral_uplink_files:
+    #     print("- Processing file:", filename)
+    #     plot_uplink_usage(filename, show=args.show)
+    #     print("2")
+    #     plot_uplink_usage_imsi(filename)
+
+    print("Processing collision in files in directory:", args.dir)
+    collision_files = find_files(args.dir, target_suffix="_MAC.log")
+    for filename in collision_files:
+        print("- Processing file:", filename)
+        plot_collisions(filename, show=args.show)
 
     print("Done.")
