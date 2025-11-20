@@ -22,3 +22,4 @@ sudo apt-get install mercurial
 sudo apt install qtbase5-dev qtchooser qt5-qmake qtbase5-dev-tools
 ```
 
+Then follow the [rest of the instructions](https://www.nsnam.org/wiki/NetAnim_3.108#Debian/Ubuntu_Linux_distribution:) to make the program.
