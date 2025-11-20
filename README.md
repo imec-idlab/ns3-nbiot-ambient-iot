@@ -13,3 +13,12 @@ The main contributions include:
 
 Look at [scratch/README.md](scratch/README.md) for more information on how to run the simulations.
 There are some examples of how to use the capacitor source model and the energy harvesting models in this folder.
+
+## Install requirements
+
+On Ubuntu, to install NetAnim you need:
+```bash
+sudo apt-get install mercurial
+sudo apt install qtbase5-dev qtchooser qt5-qmake qtbase5-dev-tools
+```
+
