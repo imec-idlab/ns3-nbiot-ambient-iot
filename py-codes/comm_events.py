@@ -108,6 +108,8 @@ if __name__ == "__main__":
     parser.add_argument("--min", type=float, default=None, help="Minimum time in seconds to consider for plotting")
     parser.add_argument("--max", type=float, default=None, help="Maximum time in seconds to consider for plotting")
 
+    parser.add_argument("--plot-both", action='store_false', help="Plot TX/RX separately (default is only RX)")
+
     args = parser.parse_args()
 
     if args.search is not None:
@@ -117,7 +119,7 @@ if __name__ == "__main__":
             print(file)
 
     elif args.dir is not None:
-        plot_comm(args.dir, args.show, args.min, args.max)
+        plot_comm(args.dir, args.show, args.min, args.max, only_received=args.plot_both)
 
     else:
         print("Please provide either a directory or a file name to process.")
