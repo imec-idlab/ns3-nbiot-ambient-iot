@@ -646,6 +646,11 @@ int main (int argc, char *argv[])
    */
   if (!define_propagation_loss_model (lteHelper, propagationLossModel)) return 1;  // exit program if propagation loss model is not defined
 
+  // BUG: if fading is activated as below, the simulation runs for some time, and
+  // then it crashes. No error or debug message is shown.
+  lteHelper->SetFadingModel("ns3::TraceFadingLossModel");
+  lteHelper->SetFadingModelAttribute("TraceFilename", StringValue("/home/h3dema/ns3-nbiot/src/lte/model/fading-traces/fading_trace_ETU_3kmph.fad"));
+
   // Config::SetDefault ("ns3::LteHelper::UseIdealRrc", BooleanValue (false));
   lteHelper->SetAttribute ("UseIdealRrc", BooleanValue (false));
   lteHelper->SetAttribute ("UsePdschForCqiGeneration", BooleanValue (true));
@@ -662,12 +667,13 @@ int main (int argc, char *argv[])
   // BUG: I can tell that with the current configuration, LteSpectrumPhy::UpdateSinrPerceived is never called
   //      the calls should be assigned by LteHelper::InstallSingleUeDevice, which is called by lteHelper::InstallUeDevice
 
-  // if CtrlErrorModelEnabled is true, the phy error model is enabled for DL ctrl frame
-  // BUG: why CtrlErrorModelEnabled and DataErrorModelEnabled cannot be set to true?
-  // Config::SetDefault ("ns3::LteSpectrumPhy::CtrlErrorModelEnabled", BooleanValue (true));
-
-  // BUG: raises error an instance of 'std::out_of_range'
-  // Config::SetDefault ("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue (true));
+  // BUG: if CtrlErrorModelEnabled is true, the phy error model is enabled for DL ctrl frame
+  // True is the default on LTE implementation, but Lena-NB changed it to false. Why?
+  // why CtrlErrorModelEnabled and DataErrorModelEnabled cannot be set to true?
+  // --> you can set them to true in the command line !!
+  // Config::SetAttribute ("ns3::LteSpectrumPhy::CtrlErrorModelEnabled", BooleanValue (true));
+  // Config::SetAttribute ("ns3::LteSpectrumPhy::DataErrorModelEnabled", BooleanValue (true));
+  // Config::SetDefault ("ns3::LteSpectrumPhy::EnableInterference", BooleanValue (true));
 
   // Set the noise figure for UEs and eNodeBs
   // - dont need this because can set in command line using -ns3::LteUePhy::NoiseFigure=x

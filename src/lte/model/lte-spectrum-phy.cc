@@ -249,7 +249,7 @@ LteSpectrumPhy::GetTypeId (void)
                     MakeBooleanChecker ())
     .AddAttribute ("CtrlErrorModelEnabled",
                     "Activate/Deactivate the error model of control (PCFICH-PDCCH decodification) [by default is active].",
-                    BooleanValue (false),
+                    BooleanValue (false),  // Lena-NB implementation changes the default to false. Why?
                     MakeBooleanAccessor (&LteSpectrumPhy::m_ctrlErrorModelEnabled),
                     MakeBooleanChecker ())
     .AddAttribute ("EnableInterference",
