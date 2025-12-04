@@ -1124,7 +1124,6 @@ void
 LteSpectrumPhy::UpdateSinrPerceived (const SpectrumValue& sinr)
 {
   NS_LOG_FUNCTION (this << sinr);
-  std::cout << "LteSpectrumPhy::UpdateSinrPerceived" << std::endl;  // TODO: remove me!
 
   // // ------------------------------------------------------
   ns3::Bands::const_iterator bandIt = sinr.ConstBandsBegin();
@@ -1135,7 +1134,7 @@ LteSpectrumPhy::UpdateSinrPerceived (const SpectrumValue& sinr)
       double fc = bandIt->fh; // central frequency
       double power = sinr[i]; // power in Watts?
 
-      std::cout << "Band " << i << ": [" << fl << ", " << fc << ", " << fh << "] Hz, Power = " << power << " W" << std::endl;
+      NS_LOG_INFO("Band " << i << ": [" << fl << ", " << fc << ", " << fh << "] Hz, Power = " << power << " W");
   }
   // // ------------------------------------------------------
   // NS_LOG_INFO("LteSpectrumPhy::UpdateSinrPerceived" << sinr);
@@ -1411,11 +1410,10 @@ LteSpectrumPhy::EndRxDlCtrl ()
   bool error = false;
   if (m_ctrlErrorModelEnabled)
     {
-      // TODO: raising error with nb-scenario4 because m_sinrPerceived is empty !
-      std::cout << "LteSpectrumPhy::EndRxDlCtrl PCFICH-PDCCH SINR " << m_sinrPerceived.GetValuesN () << " dB" << std::endl;  // TODO: remove me
+      // if it raises an error when m_ctrlErrorModelEnabled is True, check if --ns3::LteSpectrumPhy::EnableInterference=true
       double  errorRate = LteMiErrorModel::GetPcfichPdcchError (m_sinrPerceived);
-      std::cout << "LteSpectrumPhy::EndRxDlCtrl PCFICH-PDCCH errorRate " << errorRate << std::endl;   // TODO: remove me !
       error = m_random->GetValue () > errorRate ? false : true;
+      NS_LOG_INFO("LteSpectrumPhy::EndRxDlCtrl PCFICH-PDCCH SINR " << m_sinrPerceived.GetValuesN () << " dB, errorRate " << errorRate << ", is error? " << error);
       NS_LOG_DEBUG (this << " PCFICH-PDCCH Decodification, errorRate " << errorRate << " error " << error);
     }
 
