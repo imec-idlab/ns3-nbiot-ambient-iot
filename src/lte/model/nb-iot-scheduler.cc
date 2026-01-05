@@ -932,6 +932,7 @@ NbiotScheduler::CheckforNContiniousSubframesDl (std::vector<uint64_t> Subframes,
     return std::vector<uint64_t> ();
   }
 
+
   if (startSubframeIndex + N > Subframes.size ())
   {
     // when that happens N = 32, but Subframes contain only 8 elements.
@@ -940,8 +941,8 @@ NbiotScheduler::CheckforNContiniousSubframesDl (std::vector<uint64_t> Subframes,
 
   // Adjust N to avoid out-of-bounds access
   // BUG: this fix the segmentation fault, but the root cause should be investigated further.
-  // There 3 places in nb-iot-scheduler where CheckforNContiniousSubframesDl is called
-  N = std::min(N, Subframes.size() - startSubframeIndex);
+  // There 3 places in nb-iot-scheduler where CheckforNContiniousSubframesDl is called -> verify them
+  // N = std::min(N, Subframes.size() - startSubframeIndex);  // trick: don´t use it
 
   for (size_t i = 0; i < N; i++)
   {
@@ -956,6 +957,10 @@ NbiotScheduler::CheckforNContiniousSubframesDl (std::vector<uint64_t> Subframes,
       {
         range.push_back (Subframes[startSubframeIndex + i]);
       }
+  }
+  if (must_show)
+  {
+    std::cout << "range.size()=" << range.size() << std::endl;
   }
   return range;
 }
