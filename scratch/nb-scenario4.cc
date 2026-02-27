@@ -47,6 +47,7 @@
 #include <ctime>
 #include <fstream>
 #include <cstdlib>
+#include <filesystem>
 
 #include "ns3/core-module.h"
 #include "ns3/point-to-point-module.h"
@@ -128,7 +129,7 @@ void setLogLevels(ns3::LogLevel logLevel)
 void MyShowProgress(double totalTime, double interval) {
     double currentTime = Simulator::Now().GetSeconds();
     double percent = (currentTime / totalTime) * 100.0;
-    std::cout << "\rSimulation progress: " << int(percent) << "% completed" << std::flush;
+    std::cout << "\rSimulation progress: " << int(percent) << "% completed " << std::flush;
 
     if (currentTime < totalTime) {
         Simulator::Schedule(Seconds(interval), &MyShowProgress, totalTime, interval);
@@ -649,7 +650,8 @@ int main (int argc, char *argv[])
   // BUG: if fading is activated as below, the simulation runs for some time, and
   // then it crashes. No error or debug message is shown.
   lteHelper->SetFadingModel("ns3::TraceFadingLossModel");
-  lteHelper->SetFadingModelAttribute("TraceFilename", StringValue("/home/h3dema/ns3-nbiot/src/lte/model/fading-traces/fading_trace_ETU_3kmph.fad"));
+  std::string fadingTracePath = (std::filesystem::current_path() / "src/lte/model/fading-traces/fading_trace_ETU_3kmph.fad").string();
+  lteHelper->SetFadingModelAttribute("TraceFilename", StringValue(fadingTracePath));
 
   // Config::SetDefault ("ns3::LteHelper::UseIdealRrc", BooleanValue (false));
   lteHelper->SetAttribute ("UseIdealRrc", BooleanValue (false));

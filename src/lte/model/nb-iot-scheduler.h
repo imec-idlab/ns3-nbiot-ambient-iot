@@ -42,7 +42,7 @@ struct SearchSpaceConfig{
   {
       return lhs.R_max == rhs.R_max&&
            lhs.startSf == rhs.startSf &&
-           lhs.offset == rhs.startSf &&
+           lhs.offset == rhs.offset &&
            lhs.ce == rhs.ce;
   }
   bool operator<(const SearchSpaceConfig& rhs) const

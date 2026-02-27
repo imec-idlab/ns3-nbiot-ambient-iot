@@ -914,7 +914,7 @@ void
 LteEnbMac::DoSubframeIndicationNb (uint32_t frameNo, uint32_t subframeNo)
 {
   NS_LOG_FUNCTION (this << " EnbMac - frame " << frameNo << " subframe " << subframeNo);
-  m_edt = true; // PASCAL: Warum immer true? Was, wenn EDT als false definiert wurde?
+  //m_edt = true; // PASCAL: Warum immer true? Was, wenn EDT als false definiert wurde?
   m_frameNo = frameNo;
   m_subframeNo = subframeNo;
   if (m_schedulerNb == nullptr)
@@ -927,13 +927,13 @@ LteEnbMac::DoSubframeIndicationNb (uint32_t frameNo, uint32_t subframeNo)
           m_sib2Nb);
       m_schedulerNb->SetLogDir(m_logdir);
     }
-  // Implement NB-IoT DCI Searchspaces Type2-CSS All AL2  Liberg et al. p 282
+  // Implement NB-IoT Downlink Control Information(DCI) Searchspaces Type2-Common Search Spaces(CSS) All AL2  Liberg et al. p 282
   // Find out if current subframe is start of Type2/UE-specific search space
   // A Tutorial to NB-IoT Design zeugs
 
 
   CheckPreambleReceptionForAllCoverageClases();
-  //m_schedulerNb->SetCeLevel (m_ce0Parameter, m_ce1Parameter, m_ce2Parameter);
+  m_schedulerNb->SetCeLevel (m_ce0Parameter, m_ce1Parameter, m_ce2Parameter);
   m_schedulerNb->SetRntiRsrpMap (m_ulRsrpReceivedNb);
   std::vector<NbIotRrcSap::NpdcchMessage> scheduled = m_schedulerNb->Schedule (frameNo, subframeNo);
 

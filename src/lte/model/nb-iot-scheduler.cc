@@ -662,7 +662,7 @@ NbiotScheduler::ScheduleSearchSpace (SearchSpaceConfig ssc)
   Scheduling Magic. For now FIFO
   */
   SortBasedOnSelectedSchedulingAlgorithm (ssc);
-  std::vector<uint16_t> test_tmp = m_searchSpaceRntiMap[ssc];
+  //std::vector<uint16_t> test_tmp = m_searchSpaceRntiMap[ssc];
   for (std::vector<uint16_t>::iterator it = m_searchSpaceRntiMap[ssc].begin ();
        it != m_searchSpaceRntiMap[ssc].end ();)
     {
@@ -681,7 +681,7 @@ NbiotScheduler::ScheduleSearchSpace (SearchSpaceConfig ssc)
                   m_rntiUeConfigMap[(*it)].priority = UeConfig::SchedulePriority::UPLINK;
                 }
             }
-              else if (m_rntiUeConfigMap[(*it)].rlcUlBuffer > 0)
+          else if (m_rntiUeConfigMap[(*it)].rlcUlBuffer > 0)
                 {
                   dci_candidate =
                       CreateDciNpdcchMessage ((*it), NbIotRrcSap::NpdcchMessage::DciType::n0);
@@ -936,7 +936,9 @@ NbiotScheduler::CheckforNContiniousSubframesDl (std::vector<uint64_t> Subframes,
   if (startSubframeIndex + N > Subframes.size ())
   {
     // when that happens N = 32, but Subframes contain only 8 elements.
-    std::cout << "Subframes:" << Subframes.size() << " N=" << N << " startSubframeIndex:" << startSubframeIndex << std::endl;
+   // std::cout << " Subframes:" << Subframes.size() << " N=" << N << " startSubframeIndex:" << startSubframeIndex << std::endl;
+
+    return std::vector<uint64_t> ();
   }
 
   // Adjust N to avoid out-of-bounds access
@@ -957,11 +959,11 @@ NbiotScheduler::CheckforNContiniousSubframesDl (std::vector<uint64_t> Subframes,
       {
         range.push_back (Subframes[startSubframeIndex + i]);
       }
-  }
+  }/*
   if (must_show)
   {
     std::cout << "range.size()=" << range.size() << std::endl;
-  }
+  }*/
   return range;
 }
 std::vector<uint64_t>
@@ -1034,11 +1036,28 @@ NbiotScheduler::CreateDciNpdcchMessage (uint16_t rnti, NbIotRrcSap::NpdcchMessag
 
   //NS_BUILD_DEBUG (std::cout << "MCL of " << rnti << " is " << m_rntiRsrpMap[rnti] - 43.0 - correction_factor << std::endl);
 
-  NbIotRrcSap::NprachParametersNb::CoverageEnhancementLevel ceLevel;
   NbIotRrcSap::DciN1::DciRepetitions dciN1Repetitions;
   NbIotRrcSap::DciN0::DciRepetitions dciN0Repetitions;
 
-  if (m_rntiRsrpMap[rnti] < m_sib2config.radioResourceConfigCommon.nprachConfig
+  NbIotRrcSap::NprachParametersNb::CoverageEnhancementLevel ceLevel = m_rntiUeConfigMap[rnti].searchSpaceConfig.ce;
+
+  if (ceLevel == m_ce2.coverageEnhancementLevel)
+  {
+    dciN1Repetitions = NbIotRrcSap::DciN1::DciRepetitions::r256;
+    dciN0Repetitions = NbIotRrcSap::DciN0::DciRepetitions::r256;
+  }
+  else if (ceLevel == m_ce1.coverageEnhancementLevel)
+  {
+    dciN1Repetitions = NbIotRrcSap::DciN1::DciRepetitions::r32;
+    dciN0Repetitions = NbIotRrcSap::DciN0::DciRepetitions::r32;
+  }
+  else
+  {
+    dciN1Repetitions = NbIotRrcSap::DciN1::DciRepetitions::r2;
+    dciN0Repetitions = NbIotRrcSap::DciN0::DciRepetitions::r2;
+  }
+
+  /*if (m_rntiRsrpMap[rnti] < m_sib2config.radioResourceConfigCommon.nprachConfig
                                 .rsrpThresholdsPrachInfoList.ce2_lowerbound)
     {
       dciN1Repetitions = NbIotRrcSap::DciN1::DciRepetitions::r256;
@@ -1048,6 +1067,8 @@ NbiotScheduler::CreateDciNpdcchMessage (uint16_t rnti, NbIotRrcSap::NpdcchMessag
   else if (m_rntiRsrpMap[rnti] < m_sib2config.radioResourceConfigCommon.nprachConfig
                                      .rsrpThresholdsPrachInfoList.ce1_lowerbound)
     {
+      std::cout <<" why are you called here m_rntiRsrpMap[rnti] "<<m_rntiRsrpMap[rnti]<< " ce1_lowerbound "<< m_sib2config.radioResourceConfigCommon.nprachConfig
+                                     .rsrpThresholdsPrachInfoList.ce1_lowerbound <<std::endl;
       dciN1Repetitions = NbIotRrcSap::DciN1::DciRepetitions::r32;
       dciN0Repetitions = NbIotRrcSap::DciN0::DciRepetitions::r32;
       ceLevel = m_ce1.coverageEnhancementLevel;
@@ -1064,7 +1085,7 @@ NbiotScheduler::CreateDciNpdcchMessage (uint16_t rnti, NbIotRrcSap::NpdcchMessag
       dciN1Repetitions = NbIotRrcSap::DciN1::DciRepetitions::r2;
       dciN0Repetitions = NbIotRrcSap::DciN0::DciRepetitions::r2;
       ceLevel = m_ce0.coverageEnhancementLevel;
-    }
+    }*/
 
   NbIotRrcSap::NpdcchMessage msg;
   msg.isRar = false;
