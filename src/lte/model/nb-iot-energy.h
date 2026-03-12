@@ -121,6 +121,7 @@ public:
     void EnableLogging();
     void SetLogDir(std::string dirname);
     void SetModule(NbiotChip module);
+    std::string PowerStateToString(PowerState state);
 private:
     Ptr<EnergySource> m_battery; // Battery model
     NbiotChip m_module; // Current Nbiot Module

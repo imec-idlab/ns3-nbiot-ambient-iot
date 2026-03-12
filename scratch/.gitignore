@@ -3,3 +3,4 @@
 !.gitignore
 !subdir/
 !scratch-simulator.cc
+!nb-iot-ambient6g

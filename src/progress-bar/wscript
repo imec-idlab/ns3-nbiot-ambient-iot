@@ -1,0 +1,14 @@
+## -*- Mode: python; py-indent-offset: 4; indent-tabs-mode: nil; coding: utf-8; -*-
+import os.path
+
+def build(bld):
+    env = bld.env
+    module = bld.create_ns3_module('progress-bar', ['core'])
+    module.source = [
+        'model/progress-bar.cc'
+    ]
+    headers = bld(features='ns3header')
+    headers.module = 'progress-bar'
+    headers.source = [
+    'model/progress-bar.h'
+    ]

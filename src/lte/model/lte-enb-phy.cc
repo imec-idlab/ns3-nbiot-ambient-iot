@@ -715,7 +715,7 @@ LteEnbPhy::StartSubFrame (void)
   NS_LOG_INFO ("-----sub frame " << m_nrSubFrames << "-----");
   //m_harqPhyModule->SubframeIndication (m_nrFrames, m_nrSubFrames);
 
-  // update info on TB to be received
+  // update info on Transmission Block (TB) to be received
   std::list<UlDciLteControlMessage> uldcilist = DequeueUlDci ();
   std::list<UlDciLteControlMessage>::iterator dciIt = uldcilist.begin ();
   NS_LOG_DEBUG (this << " eNB Expected TBs " << uldcilist.size ());
@@ -730,7 +730,7 @@ LteEnbPhy::StartSubFrame (void)
         }
       else
         {
-          // send info of TB to LteSpectrumPhy
+          // send info of Transmission Block (TB) to LteSpectrumPhy
           // translate to allocation map
           std::vector <int> rbMap;
           for (int i = (*dciIt).GetDci ().m_rbStart; i < (*dciIt).GetDci ().m_rbStart + (*dciIt).GetDci ().m_rbLen; i++)

@@ -118,7 +118,7 @@ void NbiotEnergyModel::DoNotifyStateChange(PowerState newState){
     if (m_logging){
         std::ofstream logfile;
         logfile.open(m_logdir + "nbiot_energy.log", std::ios_base::app);
-        logfile << Simulator::Now().GetMilliSeconds() << ", " << m_imsi << ", " << static_cast<int>(m_lastState) << ", " << lostEnergy << std::endl;
+        logfile << Simulator::Now().GetMilliSeconds() << ", " << m_imsi << ", " << PowerStateToString( m_lastState )<< ", " << lostEnergy << std::endl;
         logfile.close();
     }
 
@@ -154,6 +154,35 @@ double NbiotEnergyModel::GetEnergyRemainingFraction(){
 void NbiotEnergyModel::SetEnergySource(Ptr<EnergySource> new_battery){
     m_battery = nullptr;  // to force deallocation
     m_battery = new_battery;
+}
+
+
+std::string NbiotEnergyModel::PowerStateToString(PowerState state) {
+  switch (state)
+  {
+    case PowerState::RRC_CONNECTED_IDLE:
+      return "RRC_CONNECTED_IDLE";
+    case PowerState::RRC_CONNECTED_RECEIVING_NPDSCH:
+      return "RRC_CONNECTED_RECEIVING_NPDSCH";
+    case PowerState::RRC_CONNECTED_RECEIVING_NPDCCH:
+      return "RRC_CONNECTED_RECEIVING_NPDCCH";
+    case PowerState::RRC_CONNECTED_SENDING_NPRACH:
+      return "RRC_CONNECTED_SENDING_NPRACH";
+    case PowerState::RRC_CONNECTED_SENDING_NPUSCH:
+      return "RRC_CONNECTED_SENDING_NPUSCH";
+    case PowerState::RRC_CONNECTED_SENDING_NPUSCH_F2:
+      return "RRC_CONNECTED_SENDING_NPUSCH_F2";
+    case PowerState::RRC_SUSPENDED_DRX:
+      return "RRC_SUSPENDED_DRX";
+    case PowerState::RRC_SUSPENDED_EDRX:
+      return "RRC_SUSPENDED_EDRX";
+    case PowerState::RRC_SUSPENDED_PSM:
+      return "RRC_SUSPENDED_PSM";
+    case PowerState::OFF:
+      return "OFF";
+    default:
+      return "UNKNOWN";
+  }
 }
 
 }
