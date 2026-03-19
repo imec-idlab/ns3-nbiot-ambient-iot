@@ -74,6 +74,11 @@ public:
   uint16_t GetPacketWindowSize () const;
 
   /**
+     * \return the total bytes received in this sink app
+     */
+    uint64_t GetTotalRx() const;
+
+  /**
    * \brief Set the size of the window used for checking loss. This value should
    *  be a multiple of 8
    * \param size the size of the window used for checking loss. This value should
@@ -101,6 +106,7 @@ private:
   Ptr<Socket> m_socket; //!< IPv4 Socket
   Ptr<Socket> m_socket6; //!< IPv6 Socket
   uint64_t m_received; //!< Number of received packets
+  uint64_t m_totalRx;   //!< Total bytes received
   PacketLossCounter m_lossCounter; //!< Lost packet counter
 
   /// Callbacks for tracing the packet Rx events

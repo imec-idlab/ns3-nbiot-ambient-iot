@@ -359,6 +359,11 @@ int main (int argc, char *argv[])
   ApplicationContainer clientApps;
   ApplicationContainer serverApps;
 
+  UdpServerHelper server (ulPort);
+  serverApps.Add(server.Install (remoteHost));
+  serverApps.Start(startTime);
+
+
   // Set up the data transmission for the Pre-Run
   for (uint16_t i = 0; i < numUes; ++i)
   {
@@ -390,9 +395,9 @@ int main (int argc, char *argv[])
       ueRrc->SetAttribute("EDT", BooleanValue(false));
     }
 
-    ++ulPort;
-    UdpServerHelper server (ulPort);
-    serverApps.Add(server.Install (remoteHost));
+    //++ulPort;
+    //UdpServerHelper server (ulPort);
+    //serverApps.Add(server.Install (remoteHost));
     //
     // Create a UdpEchoClient application to send UDP datagrams from node zero to
     // node one.
@@ -411,7 +416,6 @@ int main (int argc, char *argv[])
       client->AddApplication (ulClient);
       clientApps.Add (ulClient);
 
-      serverApps.Get(i)->SetStartTime (startTime);
       clientApps.Get(i)->SetStartTime (startTime);
 
     // this callback is used to log the UE measurements
@@ -425,6 +429,25 @@ int main (int argc, char *argv[])
   ProgressBar pg ((simDuration));
   Simulator::Stop (simDuration); // Run
   Simulator::Run ();
+
+   // Statistics
+  uint64_t rxBytes = 0;
+
+  for (uint32_t i = 0; i < serverApps.GetN (); i++)
+    {
+      rxBytes += DynamicCast<UdpServer> (serverApps.Get (i))->GetTotalRx ();
+    }
+  Simulator::Destroy ();
+
+
+  double throughput = rxBytes * 8;
+
+  std::ofstream totalStatsOutStream;
+  totalStatsOutStream.open ("rxbytes.out", std::ios::out);
+  totalStatsOutStream << "RxBytes_Mbit" << std::endl;
+  totalStatsOutStream << throughput << std::endl;
+  totalStatsOutStream.close ();
+
   std::cout << "\nDone." << std::endl;
 
 

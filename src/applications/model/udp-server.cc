@@ -109,6 +109,13 @@ UdpServer::GetReceived (void) const
   return m_received;
 }
 
+uint64_t
+UdpServer::GetTotalRx() const
+{
+    NS_LOG_FUNCTION(this);
+    return m_totalRx;
+}
+
 void
 UdpServer::DoDispose (void)
 {
@@ -176,6 +183,8 @@ UdpServer::HandleRead (Ptr<Socket> socket)
       m_rxTraceWithAddresses (packet, from, localAddress);
       if (packet->GetSize () > 0)
         {
+          uint32_t receivedSize = packet->GetSize ();
+          m_totalRx += receivedSize;
           SeqTsHeader seqTs;
           packet->RemoveHeader (seqTs);
           uint32_t currentSequenceNumber = seqTs.GetSeq ();
