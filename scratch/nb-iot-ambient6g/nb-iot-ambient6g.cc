@@ -443,7 +443,7 @@ int main (int argc, char *argv[])
   double throughput = rxBytes * 8;
 
   std::ofstream totalStatsOutStream;
-  totalStatsOutStream.open ("rxbytes.out", std::ios::out);
+  totalStatsOutStream.open (logDir + "rxbytes.out", std::ios::out);
   totalStatsOutStream << "RxBytes_Mbit" << std::endl;
   totalStatsOutStream << throughput << std::endl;
   totalStatsOutStream.close ();
