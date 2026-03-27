@@ -74,6 +74,7 @@ UdpServer::UdpServer ()
 {
   NS_LOG_FUNCTION (this);
   m_received=0;
+  m_totalRx=0;
 }
 
 UdpServer::~UdpServer ()

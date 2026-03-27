@@ -344,10 +344,10 @@ int main (int argc, char *argv[])
   // Create a Traffic Flow Template (TFT)
   Ptr<EpcTft> tft = Create<EpcTft>();
   EpcTft::PacketFilter pf;
-  pf.localPortStart = 1000;
-  pf.localPortEnd = 1000;
-  pf.remotePortStart = 1000;
-  pf.remotePortEnd = 1000;
+  pf.localPortStart = 2000;
+  pf.localPortEnd = 2000;
+  pf.remotePortStart = 2000;
+  pf.remotePortEnd = 2000;
   pf.direction = EpcTft::UPLINK;
   tft->Add(pf);
 
@@ -362,6 +362,7 @@ int main (int argc, char *argv[])
   UdpServerHelper server (ulPort);
   serverApps.Add(server.Install (remoteHost));
   serverApps.Start(startTime);
+  serverApps.Stop(simDuration);
 
 
   // Set up the data transmission for the Pre-Run
@@ -381,6 +382,11 @@ int main (int argc, char *argv[])
     ueRrc->m_energyModel.SetModule(BG96c()); // Set the NBIoT module to BG96
     ueRrc->EnableLogging();
     ueRrc->m_energyModel.SetLogDir(logDir);  // set the log directory for the energy model
+    /*
+     * BUG: When edt is true, there is a certain (fixed) quantum of packets
+     * that are received at the server side, although the clients keep
+     * generating packets.
+     * */
     if(ciot == true){
       ueRrc->SetAttribute("CIoT-Opt", BooleanValue(true));
     }
@@ -416,7 +422,12 @@ int main (int argc, char *argv[])
       client->AddApplication (ulClient);
       clientApps.Add (ulClient);
 
-      clientApps.Get(i)->SetStartTime (startTime);
+      Ptr<UniformRandomVariable> rand = CreateObject<UniformRandomVariable>();
+      Time jitter = MilliSeconds(rand->GetValue(0, 500));
+
+      clientApps.Get(i)->SetStartTime(startTime + jitter);
+      //clientApps.Get(i)->SetStartTime (startTime);
+      clientApps.Get(i)->SetStopTime (simDuration);
 
     // this callback is used to log the UE measurements
     Ptr< LteUePhy > uePhy = ueLteDevice->GetPhy ();
@@ -444,7 +455,7 @@ int main (int argc, char *argv[])
 
   std::ofstream totalStatsOutStream;
   totalStatsOutStream.open (logDir + "rxbytes.out", std::ios::out);
-  totalStatsOutStream << "RxBytes_Mbit" << std::endl;
+  totalStatsOutStream << "RxBytes_bits" << std::endl;
   totalStatsOutStream << throughput << std::endl;
   totalStatsOutStream.close ();
 
