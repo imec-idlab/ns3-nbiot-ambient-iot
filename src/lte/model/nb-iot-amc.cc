@@ -22,6 +22,7 @@
 #include "nb-iot-amc.h"
 #include <fstream>
 #include <cmath>
+#include <filesystem>
 
 namespace ns3 {
 NS_LOG_COMPONENT_DEFINE ("NbiotAmc");
@@ -30,11 +31,20 @@ NS_OBJECT_ENSURE_REGISTERED (NbiotAmc);
 
 NbiotAmc::NbiotAmc ()
 {
+  std::string csvDir = std::string(NS3_ROOT_DIR) + "/src/lte/csv/";
+  std::ifstream npusch_file (csvDir + "clean_NPUSCH_100_TRBlks.csv");
+  std::ifstream npdsch_file (csvDir + "clean_NPDSCH_100_TRBlks.csv");
 
-  std::ifstream npusch_file ("src/lte/csv/clean_NPUSCH_100_TRBlks.csv");
-  std::ifstream npdsch_file ("src/lte/csv/clean_NPDSCH_100_TRBlks.csv");
+  NS_ABORT_MSG_IF(!npusch_file.is_open(),
+    "NPUSCH CSV file not found at: " << csvDir + "clean_NPUSCH_100_TRBlks.csv");
+  NS_ABORT_MSG_IF(!npdsch_file.is_open(),
+    "NPDSCH CSV file not found at: " << csvDir + "clean_NPDSCH_100_TRBlks.csv");
+
   m_npusch_params = readNpuschCSV (npusch_file);
   m_npdsch_params = readNpdschCSV (npdsch_file);
+
+  NS_ABORT_MSG_IF(m_npdsch_params.standalone.empty(), "NPDSCH CSV returned empty standalone vector!");
+
   m_r13 = true;
   m_highestmcl = m_npdsch_params.standalone.begin ()->Pathloss;
   m_lowestmcl = m_npdsch_params.standalone.begin ()->Pathloss;
@@ -50,6 +60,7 @@ NbiotAmc::NbiotAmc ()
           m_highestmcl = it->Pathloss;
         }
     }
+
 }
 void
 NbiotAmc::DoDispose ()

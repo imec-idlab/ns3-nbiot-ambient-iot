@@ -297,7 +297,7 @@ int main (int argc, char *argv[])
 
   // enable fading
   lteHelper->SetFadingModel("ns3::TraceFadingLossModel");
-  std::string fadingTracePath = (std::filesystem::current_path() / "src/lte/model/fading-traces/fading_trace_ETU_3kmph.fad").string();
+  std::string fadingTracePath = std::string(NS3_ROOT_DIR) + "/src/lte/model/fading-traces/fading_trace_ETU_3kmph.fad";
   lteHelper->SetFadingModelAttribute("TraceFilename", StringValue(fadingTracePath));
 
   lteHelper->SetAttribute ("UseIdealRrc", BooleanValue (false));
