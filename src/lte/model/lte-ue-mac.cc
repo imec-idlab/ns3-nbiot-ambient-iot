@@ -166,6 +166,7 @@ UeMemberLteUeCmacSapProvider::NotifyPsm()
   m_mac->DoNotifyPsm();
 }
 
+
 void
 UeMemberLteUeCmacSapProvider::SetMsg5Buffer(uint32_t buffersize){
   m_mac->DoSetMsg5Buffer(buffersize);
@@ -351,6 +352,13 @@ LteUeMac::GetLteUePhySapUser (void)
 }
 
 void
+LteUeMac::SetIdealBsrCallback (IdealBsrCallback cb) { m_idealBsrCb = cb; }
+
+void
+LteUeMac::SetPersistentGrant (bool enable) { m_persistentGrant = enable; }
+
+
+void
 LteUeMac::SetLteUePhySapProvider (LteUePhySapProvider *s)
 {
   m_uePhySapProvider = s;
@@ -460,6 +468,24 @@ LteUeMac::DoReportBufferStatus (LteMacSapProvider::ReportBufferStatusParameters 
           params.lcid, params));
     }
   m_freshUlBsr = true;
+
+  if (m_persistentGrant && m_rnti != 0 && !m_idealBsrCb.IsNull ())
+  {
+    uint64_t total = 0;
+    for (auto & kv : m_ulBsrReceived)
+    {
+      total += kv.second.txQueueSize
+        + kv.second.retxQueueSize
+        + kv.second.statusPduSize;
+    }
+    if (total > 0)
+    {
+      NS_LOG_DEBUG ("UE MAC DoReportBufferStatus: firing ideal BSR"
+                    << " RNTI=" << m_rnti
+                    << " totalBytes=" << total);
+      m_idealBsrCb (m_rnti, total);
+    }
+  }
 }
 
 void
@@ -712,6 +738,13 @@ LteUeMac::RecvRaResponseNb (NbIotRrcSap::RarPayload raResponse)
   m_noRaResponseReceivedEvent.Cancel ();
   NS_LOG_INFO ("got RAR for RAPID " << (uint32_t) m_raPreambleId
                                     << ", setting T-C-RNTI = " << raResponse.cellRnti);
+  if (m_persistentGrant && m_rnti != 0){
+    NS_LOG_WARN ("RecvRaResponseNb: dropping stale RAR under persistent grant"
+                 << " (live RNTI=" << m_rnti
+                 << ", RAR T-C-RNTI=" << raResponse.cellRnti << ")"
+                 << " — orphaned RA timeout fired after suspension");
+    return;
+  }
 
   if (m_mac_logging)
   {
@@ -1073,6 +1106,7 @@ LteUeMac::DoNotifyConnectionSuccessful ()
 {
   NS_LOG_FUNCTION (this);
   m_uePhySapProvider->NotifyConnectionSuccessful ();
+  m_listenToSearchSpaces = true;
 }
 
 void

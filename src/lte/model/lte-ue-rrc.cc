@@ -305,6 +305,11 @@ LteUeRrc::GetTypeId (void)
                    BooleanValue(false), //see 3GPP 36.331 UE-TimersAndConstants & RLF-TimersAndConstants
                    MakeBooleanAccessor(&LteUeRrc::m_edt),
                    MakeBooleanChecker())
+    .AddAttribute ("PersistentGrant",
+                 "Keep C-RNTI and solicit DCI0 without re-RACH after initial access",
+                 BooleanValue (false),
+                 MakeBooleanAccessor (&LteUeRrc::m_persistentGrant),
+                 MakeBooleanChecker ())
     .AddTraceSource ("MibReceived",
                      "trace fired upon reception of Master Information Block",
                      MakeTraceSourceAccessor (&LteUeRrc::m_mibReceivedTrace),
@@ -696,9 +701,27 @@ LteUeRrc::DoSendData (Ptr<Packet> packet, uint8_t bid)
   }
 
   if (m_state == CONNECTED_NORMALLY){
+    NS_LOG_DEBUG ("UE IMSI=" << m_imsi << " DoSendData: already CONNECTED_NORMALLY, sending directly");
     SendDataNb(packet, bid);
   }
+  else if (m_persistentGrant && m_rnti != 0 && m_state == IDLE_SUSPEND_EDRX) {
+    // Persistent-grant fast-path: only applies after an initial RA (m_rnti != 0)
+    // and only when coming out of eDRX (RNTI/context persist).
+    NS_LOG_DEBUG (" UE IMSI=" << m_imsi
+                  << " DoSendData: PG fast-path RNTI=" << m_rnti
+                  << " state=IDLE_SUSPEND_EDRX -> sending without RACH");
+    SendDataNb(packet, bid);
+    if (!m_eDrxTimeout.IsExpired())  { m_eDrxTimeout.Cancel(); }
+    SwitchToState (CONNECTED_NORMALLY);
+    m_cmacSapProvider.at(0)->NotifyConnectionSuccessful();
+    return;
+  }
   else{
+    NS_LOG_DEBUG ("UE IMSI=" << m_imsi
+                  << " DoSendData: state=" << ToString (m_state)
+                  << " RNTI=" << m_rnti
+                  << " PG=" << m_persistentGrant
+                  << " -> storing packet, will RACH");
     m_packetStored.push_back(packet);
   }
 
@@ -731,7 +754,7 @@ void LteUeRrc::SendDataNb(Ptr<Packet> packet, uint8_t bid){
       params.rnti = m_rnti;
       params.lcid = it->second->m_logicalChannelIdentity;
 
-      NS_LOG_LOGIC (this << " RNTI=" << m_rnti << " sending packet " << packet
+      NS_LOG_INFO (this << " RNTI=" << m_rnti << " sending packet " << packet
                         << " on DRBID " << (uint32_t) drbid
                         << " (LCID " << (uint32_t) params.lcid << ")"
                         << " (" << packet->GetSize () << " bytes)");
@@ -877,6 +900,20 @@ LteUeRrc::DoNotifyRandomAccessSuccessful (bool edt)
         m_cmacSapProvider.at (0)->NotifyConnectionSuccessful (); //RA successful during handover
         m_handoverEndOkTrace (m_imsi, m_cellId, m_rnti);
       }
+      break;
+
+    case IDLE_SUSPEND_EDRX:
+    case IDLE_SUSPEND_PSM:
+    case CONNECTED_NORMALLY:
+      if (m_persistentGrant){
+        NS_LOG_WARN ("UE IMSI=" << m_imsi
+                     << " DoNotifyRandomAccessSuccessful: ignoring stale RAR"
+                     << " in state=" << ToString (m_state)
+                     << " RNTI=" << m_rnti
+                     << " (orphaned RA timeout under persistent grant)");
+        break;
+      }
+      NS_FATAL_ERROR ("unexpected event in state " << ToString (m_state));
       break;
 
     default:
@@ -1622,22 +1659,34 @@ LteUeRrc::DoRecvRrcConnectionReleaseNb (NbIotRrcSap::RrcConnectionReleaseNb msg)
 {
   NS_LOG_FUNCTION (this << " RNTI " << m_rnti);
   if (msg.releaseCauseNb == NbIotRrcSap::RrcConnectionReleaseNb::ReleaseCauseNb::rrc_Suspend){
+    if (m_persistentGrant && m_state == CONNECTED_NORMALLY){
+      NS_LOG_DEBUG ("UE IMSI=" << m_imsi
+                    << " DoRecvRrcConnectionReleaseNb: STALE release dropped"
+                    << " RNTI=" << m_rnti
+                    << " (UE already woke via PG fast-path)");
+      return;
+    }
     m_asSapUser->NotifyConnectionSuspended();
     if (msg.resumeIdentity != 0){
       m_resumeId = msg.resumeIdentity;
     }
-    //m_asSapUser->NotifyConnectionSuspended();
     if(m_enableEDRX){
+      NS_LOG_DEBUG ("UE IMSI=" << m_imsi
+                    << " DoRecvRrcConnectionReleaseNb: cause=rrc_Suspend"
+                    << " RNTI=" << m_rnti
+                    << " resumeId=" << m_resumeId
+                    << " PG=" << m_persistentGrant
+                    << " -> IDLE_SUSPEND_EDRX");
       SwitchToState(IDLE_SUSPEND_EDRX);
-      // Start EDRX TIMER
     }
     else if(m_enablePSM){
-      //Start PSM Timer
+      NS_LOG_DEBUG ("UE IMSI=" << m_imsi
+                    << " DoRecvRrcConnectionReleaseNb: cause=rrc_Suspend"
+                    << " RNTI=" << m_rnti
+                    << " -> IDLE_SUSPEND_PSM");
       SwitchToState(IDLE_SUSPEND_PSM);
-
     }
     return;
-
   }
   m_asSapUser->NotifyConnectionReleased();
   SwitchToState(IDLE_CAMPED_NORMALLY);
@@ -3940,7 +3989,8 @@ LteUeRrc::DoGetEnergyState(){
   return m_energyModel.DoGetState();
 }
 
-void LteUeRrc::AttachSuspendedNb(uint64_t resumeId, uint16_t cellid, uint32_t dlEarfcn, LteRrcSap::RadioResourceConfigDedicated rrcd, NbIotRrcSap::SystemInformationBlockType1Nb sib1, NbIotRrcSap::SystemInformationNb si){
+void LteUeRrc::AttachSuspendedNb(uint64_t resumeId, uint16_t cellid, uint32_t dlEarfcn, LteRrcSap::RadioResourceConfigDedicated rrcd, NbIotRrcSap::SystemInformationBlockType1Nb sib1, NbIotRrcSap::SystemInformationNb si)
+{
   m_resumeId = resumeId;
   DoForceCampedOnEnb(cellid, dlEarfcn);
   DoRecvSystemInformationBlockType1Nb(cellid, sib1);

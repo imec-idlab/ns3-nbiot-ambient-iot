@@ -70,6 +70,22 @@ public:
     };
 };
 
+void log_levels(bool all, enum LogLevel level) 
+{
+  if (all)
+  LogComponentEnableAll(level);
+  else {
+    LogComponentEnable("LteEnbRrc", level);
+    LogComponentEnable("LteEnbMac", level);
+    LogComponentEnable("LteEnbPhy", level);
+
+    LogComponentEnable("LteUeRrc", level);
+    LogComponentEnable("LteUeMac", level);
+    LogComponentEnable("LteUePhy", level);
+
+  }
+}
+
 
 /**
  * Tracer function to log state changes to the console.
@@ -132,6 +148,7 @@ int main (int argc, char *argv[])
   bool edt {false};
   std::string propagationLoss{"friis"};
   Time channelDelay {MilliSeconds (10)};
+  bool persistentGrant {true};
 
 
   CommandLine cmd (__FILE__);
@@ -144,9 +161,12 @@ int main (int argc, char *argv[])
   cmd.AddValue("propagationLoss", "Propagation loss model: friis, fixed, or winner", propagationLoss);
   cmd.AddValue("positioning", "Positioning model for ues: uniform, random, or same", positioning);
   cmd.AddValue("heightOfUes", "Height of UEs", heightOfUes);
+  cmd.AddValue ("persistentGrant",
+                "Skip re-RACH after initial access; rely on DCI0 grants", persistentGrant);
 
   cmd.Parse (argc, argv);
 
+  log_levels(false, LOG_LEVEL_DEBUG);
   /*
    * make and change into the lodDir
    * */
@@ -319,6 +339,7 @@ int main (int argc, char *argv[])
   remoteHostStaticRouting->AddNetworkRouteTo (Ipv4Address ("7.0.0.0"), Ipv4Mask ("255.0.0.0"), 1);
 
   // Install LTE Devices to the nodes
+  Config::SetDefault ("ns3::LteEnbRrc::PersistentGrant", BooleanValue (persistentGrant));
   NetDeviceContainer enbLteDevs = lteHelper->InstallEnbDevice (enbNodes);
   NetDeviceContainer ueLteDevs = lteHelper->InstallUeDevice (ueNodes);
 
@@ -401,6 +422,12 @@ int main (int argc, char *argv[])
       ueRrc->SetAttribute("EDT", BooleanValue(false));
     }
 
+    if (persistentGrant) {
+      ueRrc->SetAttribute ("PSM", BooleanValue (false));
+      ueRrc->SetAttribute ("PersistentGrant", BooleanValue (persistentGrant));
+      ueLteDevice->GetMac ()->SetPersistentGrant (persistentGrant);   // mirror to MAC
+      }
+
     //++ulPort;
     //UdpServerHelper server (ulPort);
     //serverApps.Add(server.Install (remoteHost));
@@ -450,13 +477,12 @@ int main (int argc, char *argv[])
     }
   Simulator::Destroy ();
 
-
-  double throughput = rxBytes * 8;
+  double throughput = (rxBytes * 8) / (simDuration.GetSeconds()); //Mbit/s
 
   std::ofstream totalStatsOutStream;
   totalStatsOutStream.open (logDir + "rxbytes.out", std::ios::out);
-  totalStatsOutStream << "RxBytes_bits" << std::endl;
-  totalStatsOutStream << throughput << std::endl;
+  totalStatsOutStream << "RxBytes_bits\tThroughput_Mbps" << std::endl;
+  totalStatsOutStream <<(rxBytes * 8) <<"\t" <<throughput << std::endl;
   totalStatsOutStream.close ();
 
   std::cout << "\nDone." << std::endl;

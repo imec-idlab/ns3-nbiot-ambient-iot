@@ -1417,6 +1417,7 @@ private:
   bool m_cIotOpt;
   bool m_edt;
   bool m_logging;
+  bool m_persistentGrant {false};   // NB-IoT: skip RACH if UE was previously connected
   std::vector<Ptr<Packet>> m_packetStored;
   NbIotRrcSap::RadioResourceConfigCommonNb m_rc;
 public:

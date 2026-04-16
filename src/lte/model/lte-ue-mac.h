@@ -135,6 +135,16 @@ public:
 
   void LogMessage(std::string msg);
 
+  /**Cross-layer ideal BSR callback: (rnti, bufferBytes) → eNB MAC handler.
+   **/
+  typedef Callback<void, uint16_t, uint64_t> IdealBsrCallback;
+
+  void SetIdealBsrCallback (IdealBsrCallback cb);
+  /**
+   * Enable/disable the persistent-grant ideal-BSR hook.
+   **/
+  void SetPersistentGrant (bool enable);
+
 private:
   // forwarded from MAC SAP
  /**
@@ -363,6 +373,9 @@ private:
   bool m_mac_logging;
   std::string m_logdir;
   uint32_t m_msg5Buffer;
+
+  IdealBsrCallback m_idealBsrCb;
+  bool m_persistentGrant {false};
   /**
    * \brief The `RaResponseTimeout` trace source. Fired RA response timeout.
    * Exporting IMSI, contention flag, preamble transmission counter

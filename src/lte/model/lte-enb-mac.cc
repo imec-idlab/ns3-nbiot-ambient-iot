@@ -1107,17 +1107,34 @@ LteEnbMac::DoSubframeIndicationNb (uint32_t frameNo, uint32_t subframeNo)
                                    m_enbPhySapProvider, msg);
 
               // Implement DataInactivity-Timer
-              // Notify RRC about last scheduled NPDSCH Transmission for the rnti
+              // Only treat DL as "data activity" when it carries user-plane
+              // traffic (DRB, LCID >= 3).  SRB-only DCI N1s (e.g. the
+              // RrcConnectionRelease queued by SwitchToResumeNb) must NOT
+              // reset the inactivity timer — otherwise PG UEs enter a
+              // spurious suspend/wake loop.
               if(it->rnti != 0){
-                int subframestillDataInactivity = it->dciN1.npdschOpportunity.back()- currentsubframe;
-                m_cmacSapUser->NotifyDataActivitySchedulerNb(it->rnti);
-
-                if(!m_noDataIndicators[it->rnti].IsExpired()){
-                  m_noDataIndicators[it->rnti].Cancel();
+                bool hasDrbData = false;
+                for (auto &kv : m_lastDlBSR[it->rnti])
+                {
+                  if (kv.first >= 3 &&
+                      (kv.second.txQueueSize > 0 || kv.second.retxQueueSize > 0 || kv.second.statusPduSize > 0))
+                  {
+                    hasDrbData = true;
+                    break;
+                  }
                 }
-                m_noDataIndicators[it->rnti] = Simulator::Schedule (MilliSeconds (subframestillDataInactivity),
-                                    &LteEnbCmacSapUser::NotifyDataInactivitySchedulerNb,
-                                    m_cmacSapUser, it->rnti);
+                if (hasDrbData)
+                {
+                  int subframestillDataInactivity = it->dciN1.npdschOpportunity.back()- currentsubframe;
+                  m_cmacSapUser->NotifyDataActivitySchedulerNb(it->rnti);
+
+                  if(!m_noDataIndicators[it->rnti].IsExpired()){
+                    m_noDataIndicators[it->rnti].Cancel();
+                  }
+                  m_noDataIndicators[it->rnti] = Simulator::Schedule (MilliSeconds (subframestillDataInactivity),
+                                      &LteEnbCmacSapUser::NotifyDataInactivitySchedulerNb,
+                                      m_cmacSapUser, it->rnti);
+                }
               }
 
             }
@@ -1249,6 +1266,48 @@ LteEnbMac::ReceiveBsrMessage (MacCeListElement_s bsr)
 {
   NS_LOG_FUNCTION (this);
   m_ccmMacSapUser->UlReceiveMacCe (bsr, m_componentCarrierId);
+
+  // Sum the 4 LCG buffer-size levels back to a byte count and feed the
+  // NB-IoT scheduler so it can issue DCI0 without requiring a RAR/MSG3.
+    uint64_t totalBytes = 0;
+    for (uint8_t lcg = 0; lcg < 4; ++lcg)
+    {
+      uint8_t bsrId = bsr.m_macCeValue.m_bufferStatus.at (lcg);
+      totalBytes += BufferSizeLevelBsr::BsrId2BufferSize (bsrId);
+    }
+    if (m_schedulerNb && totalBytes > 0)
+    {
+      m_schedulerNb->ScheduleUlRlcBufferReq (bsr.m_rnti, totalBytes);
+    }
+}
+
+void
+LteEnbMac::NotifyIdealUlBuffer (uint16_t rnti, uint64_t bytes)
+{
+  NS_LOG_FUNCTION (this << rnti << bytes);
+  NS_LOG_DEBUG ("LteEnbMac::NotifyIdealUlBuffer RNTI=" << rnti
+                << " bytes=" << bytes);
+  if (m_schedulerNb)
+  {
+    NS_LOG_DEBUG ("NotifyIdealUlBuffer: calling ScheduleUlRlcBufferReq RNTI=" << rnti);
+    m_schedulerNb->ScheduleUlRlcBufferReq (rnti, bytes);
+  }
+  else
+  {
+    NS_LOG_WARN ("NotifyIdealUlBuffer: m_schedulerNb is null, buffer not forwarded");
+  }
+  // Wake persistent-grant UEs: the UeManager may still be in IDLE_SUSPEND_EDRX
+  // after the previous inactivity fire. Activity here must bring it back to
+  // CONNECTED_NORMALLY so the next inactivity timer can re-arm.
+  if (m_cmacSapUser)
+  {
+    NS_LOG_DEBUG ("NotifyIdealUlBuffer: calling NotifyDataActivitySchedulerNb RNTI=" << rnti);
+    m_cmacSapUser->NotifyDataActivitySchedulerNb (rnti);
+  }
+  else
+  {
+    NS_LOG_WARN ("NotifyIdealUlBuffer: m_cmacSapUser is null, RRC not notified");
+  }
 }
 
 void

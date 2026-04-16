@@ -1103,6 +1103,11 @@ LteHelper::AttachSuspendedNb (Ptr<NetDevice> ueDevice, Ptr<NetDevice> enbDevice)
   Ptr<LteEnbRrc> enbRrc = enbLteDevice->GetRrc();
 
   uint64_t resumeId = enbRrc->AttachSuspendedUeNb(ueRrc->GetImsi());
+  Ptr<LteUeMac>  ueMac  = ueLteDevice->GetMac ();
+  Ptr<LteEnbMac> enbMac = enbLteDevice->GetMac ();
+
+  ueMac->SetIdealBsrCallback (
+      MakeCallback (&LteEnbMac::NotifyIdealUlBuffer, enbMac));
   Simulator::Schedule(MilliSeconds(20), &LteHelper::AttachSuspend, this, ueDevice, enbDevice, resumeId);
 }
 

@@ -158,6 +158,18 @@ public:
   void NotifyDataInactivitySchedulerNb();
   void NotifyDataActivitySchedulerNb();
   uint64_t AttachSuspendedNb(uint32_t imsi);
+
+  /** 
+   * Persistent-grant mode (per-UE)
+   * */
+  void SetPersistentGrant(bool enable);
+  bool IsPersistentGrant() const;
+  /**
+   * Wake this UeManager from IDLE_SUSPEND_* back to CONNECTED_NORMALLY when
+   * the UE sends an ideal BSR on the persistent grant path. Cancels pending
+   * suspend timers so the normal data-inactivity cycle can restart.
+   */
+  void WakeFromPersistentGrant();
   /**
    * Notify LC config result function
    *
@@ -691,6 +703,7 @@ private:
   Time m_eDrxCycle;
   bool m_dataReceived;
   bool m_enablePSM;
+  bool m_persistentGrant {false};
   std::list<EventId> id_suspend;
   std::string m_logdir;
 }; // end of `class UeManager`
@@ -1896,6 +1909,8 @@ private:
 
   bool m_enablePSM;
 
+  bool m_persistentGrant {false};
+
   void GenerateSystemInformationBlockType1Nb();
   void GenerateSystemInformationBlockType2Nb(std::pair<const uint8_t, ns3::Ptr<ns3::ComponentCarrierBaseStation>> cc);
   bool m_edt;
@@ -1907,6 +1922,11 @@ public:
 
   NbIotRrcSap::SystemInformationBlockType1Nb GetSib1Nb();
   NbIotRrcSap::SystemInformationNb GetSiNb();
+
+  /**
+   * Default persistent-grant flag propagated to every new UeManager.
+   **/
+  bool IsPersistentGrant() const { return m_persistentGrant; }
 
 }; // end of `class LteEnbRrc`
 

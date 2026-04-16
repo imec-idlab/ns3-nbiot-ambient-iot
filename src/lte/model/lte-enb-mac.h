@@ -156,6 +156,13 @@ public:
   * \param s a pointer to the ComponentCarrierManager provider
   */
   void SetLteCcmMacSapUser (LteCcmMacSapUser* s);
+
+  /**
+   * Cross-layer "ideal BSR" hook used in persistent-grant simulations.
+   * The UE MAC calls this directly when its RLC reports new UL data,
+   * bypassing NPRACH/MSG3/MSG4/MSG5 for the buffer update.
+   */
+  void NotifyIdealUlBuffer (uint16_t rnti, uint64_t bytes);
   
 
   /**

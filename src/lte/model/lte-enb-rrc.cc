@@ -229,7 +229,8 @@ UeManager::UeManager (Ptr<LteEnbRrc> rrc, uint16_t rnti, State s, uint8_t compon
     m_t3324(MilliSeconds(3500)),
     m_dataInactivityInterval(40), // TODO: Error in transmission multiple packets in one RRC_Connected session. For now use 40ms (like in Deutsche Telekom NB-IoT networks to release the UE quickly)
     m_eDrxCycle(0),
-    m_enablePSM(true)
+    m_enablePSM(true),
+    m_persistentGrant(false)
 {
   NS_LOG_FUNCTION (this);
 }
@@ -1097,7 +1098,9 @@ UeManager::AttachSuspendedNb(uint32_t imsi){
   //m_rrc->m_rrcSapUser->SendRrcConnectionSetup (m_rnti, msg2);
 
   m_imsi = imsi;
-  NS_LOG_DEBUG("UeManager::AttachSuspendedNb IMSI:" << m_imsi << " RNTI:" << m_rnti);
+  NS_LOG_DEBUG ("UeManager::AttachSuspendedNb IMSI=" << m_imsi
+                << " RNTI=" << m_rnti
+                << " PG=" << m_persistentGrant);
   RecordDataRadioBearersToBeStarted ();
   if (m_rrc->m_s1SapProvider != 0)
       {
@@ -1107,6 +1110,10 @@ UeManager::AttachSuspendedNb(uint32_t imsi){
   StartDataRadioBearers();
   m_resumeId = m_rrc->DoAllocateTemporaryResumeId();
   SwitchToState(IDLE_SUSPEND_PSM);
+  NS_LOG_DEBUG ("UeManager::AttachSuspendedNb IMSI=" << m_imsi
+                << " RNTI=" << m_rnti
+                << " resumeId=" << m_resumeId
+                << " -> MoveUeToResumed in 10ms");
   Simulator::Schedule(MilliSeconds(10), &LteEnbRrc::MoveUeToResumed, m_rrc, m_rnti,m_resumeId);
   return m_resumeId;
 }
@@ -1298,13 +1305,19 @@ UeManager::RecvRrcConnectionResumeCompletedNb (NbIotRrcSap::RrcConnectionResumeC
   switch (m_state)
     {
     case CONNECTION_RESUME:
+      NS_LOG_DEBUG ("UeManager::RecvRrcConnectionResumeCompletedNb"
+                    << " IMSI=" << m_imsi << " RNTI=" << m_rnti);
       m_rrc->m_cmacSapProvider.at(0)->NotifyConnectionSuccessful(m_rnti);
       m_connectionResumeTimeout.Cancel ();
       m_rrc->SendSavedPackets(m_imsi, m_rnti);
       if (m_rrc->m_s1SapProvider != 0)
         {
           m_rrc->m_s1SapProvider->InitialUeMessage (m_imsi, m_rnti);
-          SwitchToState (CONNECTED_NORMALLY);// only set new rnti
+          SwitchToState (CONNECTED_NORMALLY);
+          m_persistentGrant = m_rrc->IsPersistentGrant();
+          NS_LOG_DEBUG ("UeManager::RecvRrcConnectionResumeCompletedNb"
+                        << " RNTI=" << m_rnti
+                        << " -> CONNECTED_NORMALLY, PG armed=" << m_persistentGrant);
           if (msg.dedicatedInfoNas->GetSize() > 0){
             EpsBearerTag tag;
             tag.SetRnti (m_rnti);
@@ -1317,6 +1330,10 @@ UeManager::RecvRrcConnectionResumeCompletedNb (NbIotRrcSap::RrcConnectionResumeC
       else
         {
           SwitchToState (CONNECTED_NORMALLY);
+          m_persistentGrant = m_rrc->IsPersistentGrant();
+          NS_LOG_DEBUG ("UeManager::RecvRrcConnectionResumeCompletedNb"
+                        << " RNTI=" << m_rnti
+                        << " -> CONNECTED_NORMALLY, PG armed=" << m_persistentGrant);
         }
       m_rrc->m_connectionEstablishedTrace (m_imsi, m_rrc->ComponentCarrierToCellId (m_componentCarrierId), m_rnti);
       break;
@@ -1930,20 +1947,39 @@ void UeManager::NotifyDataInactivityNb(uint8_t lcid){
 
 }
 void UeManager::NotifyDataInactivitySchedulerNb(){
+  NS_LOG_DEBUG ("UeManager::NotifyDataInactivitySchedulerNb"
+                << " RNTI=" << m_rnti << " state=" << ToString (m_state));
   if (m_state == CONNECTED_NORMALLY){
     if(!m_dataInactivityTimeout.IsExpired()){
       m_dataInactivityTimeout.Cancel();
     }
+    NS_LOG_DEBUG ("RNTI=" << m_rnti
+                  << " starting inactivity timer " << m_dataInactivityInterval << "ms"
+                  << " -> SwitchToResumeNb");
     m_dataInactivityTimeout = Simulator::Schedule(MilliSeconds(m_dataInactivityInterval), &UeManager::SwitchToResumeNb, this);
   }
 }
 
 void UeManager::NotifyDataActivitySchedulerNb(){
+    NS_LOG_DEBUG ("UeManager::NotifyDataActivitySchedulerNb"
+                  << " RNTI=" << m_rnti << " state=" << ToString (m_state));
     if(!m_dataInactivityTimeout.IsExpired()){
       m_dataInactivityTimeout.Cancel();
     }
+    // When the UE wakes up under persistent grant, its ideal BSR triggers a
+    // NotifyDataActivity. The UeManager must follow the UE back into
+    // CONNECTED_NORMALLY so the data-inactivity timer can rearm and the normal
+    // release→eDRX cycle can fire again.
+    if (m_persistentGrant &&
+        (m_state == IDLE_SUSPEND_EDRX || m_state == IDLE_SUSPEND_PSM || m_state == CONNECTED_TAU)){
+      NS_LOG_DEBUG ("RNTI=" << m_rnti << " waking from PG (state=" << ToString (m_state) << ")");
+      WakeFromPersistentGrant();
+    }
 }
 void UeManager::SwitchToResumeNb(){
+  NS_LOG_DEBUG ("UeManager::SwitchToResumeNb RNTI=" << m_rnti
+                << " IMSI=" << m_imsi
+                << " PG=" << m_persistentGrant);
   NbIotRrcSap::RrcConnectionReleaseNb msg;
   msg.rrcTransactionIdentifier = GetNewRrcTransactionIdentifier ();
   msg.releaseCauseNb = NbIotRrcSap::RrcConnectionReleaseNb::ReleaseCauseNb::rrc_Suspend;
@@ -1951,7 +1987,38 @@ void UeManager::SwitchToResumeNb(){
   msg.resumeIdentity = m_resumeId;
   m_rrc->m_rrcSapUser->SendRrcConnectionReleaseNb(m_rnti, msg);
   SwitchToState(IDLE_SUSPEND_EDRX);
-  Simulator::Schedule(MilliSeconds(1000), &LteEnbRrc::MoveUeToResumed, m_rrc, m_rnti, m_resumeId); // After 1000ms the ConnectionRelease should be scheduled and the UE can be released
+  if (m_persistentGrant){
+    NS_LOG_DEBUG ("RNTI=" << m_rnti
+                  << " suspended to EDRX, context PRESERVED (no MoveUeToResumed)");
+    return;
+  }
+  NS_LOG_DEBUG ("RNTI=" << m_rnti
+                << " suspended, scheduling MoveUeToResumed in 1000ms");
+  Simulator::Schedule(MilliSeconds(1000), &LteEnbRrc::MoveUeToResumed, m_rrc, m_rnti, m_resumeId);
+}
+
+void UeManager::SetPersistentGrant(bool enable){
+  m_persistentGrant = enable;
+}
+
+bool UeManager::IsPersistentGrant() const{
+  return m_persistentGrant;
+}
+
+void UeManager::WakeFromPersistentGrant(){
+  NS_LOG_DEBUG ("UeManager::WakeFromPersistentGrant RNTI=" << m_rnti
+                << " state=" << ToString (m_state));
+  if (m_state != IDLE_SUSPEND_EDRX && m_state != IDLE_SUSPEND_PSM && m_state != CONNECTED_TAU){
+    NS_LOG_DEBUG ("WakeFromPersistentGrant: RNTI=" << m_rnti
+                  << " already in " << ToString (m_state) << ", skipping");
+    return;
+  }
+  if (!m_eDrxTimeout.IsExpired()){ m_eDrxTimeout.Cancel(); }
+  if (!m_psmTimeout.IsExpired()){ m_psmTimeout.Cancel(); }
+  SwitchToState(CONNECTED_NORMALLY);
+  NS_LOG_DEBUG ("WakeFromPersistentGrant: RNTI=" << m_rnti
+                << " -> CONNECTED_NORMALLY, notifying eNB MAC");
+  m_rrc->m_cmacSapProvider.at(0)->NotifyConnectionSuccessful(m_rnti);
 }
 
 void UeManager::SetLogDir(std::string logdir){
@@ -2105,6 +2172,13 @@ LteEnbRrc::GetTypeId (void)
                "If true, PSM will be enabled.",
                BooleanValue (true),
                MakeBooleanAccessor (&LteEnbRrc::m_enablePSM),
+               MakeBooleanChecker ())
+    .AddAttribute ("PersistentGrant",
+               "If true, UEs keep their RNTI and scheduler context across "
+               "eDRX suspend cycles; the eNB wakes them via DCI0 on UL data "
+               "instead of requiring a resume-via-RACH.",
+               BooleanValue (false),
+               MakeBooleanAccessor (&LteEnbRrc::m_persistentGrant),
                MakeBooleanChecker ())
 
 
@@ -2489,14 +2563,8 @@ LteEnbRrc::GetUeManagerbyRnti (uint16_t rnti)
   NS_LOG_FUNCTION (this << (uint32_t) rnti);
   NS_ASSERT (0 != rnti);
   std::map<uint16_t, Ptr<UeManager> >::iterator it = m_ueActiveMap.find (rnti);
-  if (it == m_ueActiveMap.end ()) {
-    // HENRIQUE: commented out the following assert
-    // NS_ASSERT_MSG (it != m_ueActiveMap.end (), "UE manager for RNTI " << rnti << " not found");
+  NS_ASSERT_MSG (it != m_ueActiveMap.end (), "UE manager for RNTI " << rnti << " not found");
 
-    // now the if UE manager is not found, return a null pointer so the caller can handle it
-    return nullptr;  // return a null pointer if the UE manager is not found
-  }
-  NS_ASSERT (it != m_ueActiveMap.end ());
   return it->second;
 }
 
@@ -3747,7 +3815,8 @@ LteEnbRrc::IsRandomAccessCompleted (uint16_t rnti)
     }
 }
 
-uint64_t LteEnbRrc::AttachSuspendedUeNb(uint32_t imsi){
+uint64_t LteEnbRrc::AttachSuspendedUeNb(uint32_t imsi)
+{
   uint16_t rnti = AddUe(UeManager::INITIAL_RANDOM_ACCESS,0);
   NS_LOG_DEBUG("AttachSuspendedUeNb - RNTI:" << rnti << " IMSI:" << imsi);
   return GetUeManagerbyRnti(rnti)->AttachSuspendedNb(imsi);
