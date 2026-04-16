@@ -254,8 +254,11 @@ NbiotScheduler::NbiotScheduler (std::vector<NbIotRrcSap::NprachParametersNb> ces
 void
 NbiotScheduler::DoDispose ()
 {
-  LogUplinkGrid();
-  LogDownlinkGrid ();
+  if (m_logging)
+    {
+      LogUplinkGrid();
+      LogDownlinkGrid ();
+    }
   NS_LOG_FUNCTION (this);
 }
 
@@ -1309,8 +1312,8 @@ NbiotScheduler::LogUplinkGrid ()
 }
 
 void NbiotScheduler::SetLogDir(std::string logdir){
-  std::cout << logdir << std::endl;
   m_logdir = logdir;
+  m_logging = !logdir.empty();
 }
 
 void

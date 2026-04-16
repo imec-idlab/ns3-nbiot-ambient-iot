@@ -3970,11 +3970,13 @@ void LteEnbRrc::GenerateSystemInformationBlockType2Nb(std::pair<const uint8_t, n
 
 void LteEnbRrc::SetLogDir(std::string logdir){
   m_logdir = logdir;
+  m_logging = !logdir.empty();
   m_cmacSapProvider.at(0)->SetLogDir(m_logdir);
   m_rrcSapUser->SetLogDir(logdir);
 }
 
 void LteEnbRrc::LogDataReception(uint32_t imsi, uint32_t size){
+  if (!m_logging) return;
   std::string logfile_path = m_logdir+"DataRecep.log";
   std::ofstream logfile;
   logfile.open(logfile_path, std::ios_base::app);

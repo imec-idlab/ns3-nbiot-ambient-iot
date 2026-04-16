@@ -570,7 +570,7 @@ private:
   std::map<uint16_t, std::map<uint8_t, LteMacSapProvider::ReportBufferStatusParameters>> m_lastDlBSR;
   std::map<uint16_t, EventId> m_noDataIndicators;
   bool m_edt;
-  bool m_mac_logging;
+  bool m_mac_logging {false};
   std::string m_logdir;
   };
 

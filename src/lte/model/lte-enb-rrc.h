@@ -1915,6 +1915,7 @@ private:
   void GenerateSystemInformationBlockType2Nb(std::pair<const uint8_t, ns3::Ptr<ns3::ComponentCarrierBaseStation>> cc);
   bool m_edt;
   std::string m_logdir;
+  bool m_logging {false};
 public:
   uint64_t AttachSuspendedUeNb(uint32_t imsi);
   void SetLogDir(std::string logfile);

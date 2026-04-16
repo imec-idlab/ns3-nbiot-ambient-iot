@@ -526,7 +526,7 @@ LteUeRrcProtocolReal::DoReceivePdcpSdu (LtePdcpSapUser::ReceivePdcpSduParameters
 
 void LteUeRrcProtocolReal::DoSetLogDir(std::string dirname){
   m_logdir = dirname;
-  m_logging = true;
+  m_logging = !dirname.empty();
 }
 
 NS_OBJECT_ENSURE_REGISTERED (LteEnbRrcProtocolReal);
@@ -535,7 +535,7 @@ LteEnbRrcProtocolReal::LteEnbRrcProtocolReal ()
   :  m_enbRrcSapProvider (0)
 {
   NS_LOG_FUNCTION (this);
-  m_logging = true;
+  m_logging = false;
   m_enbRrcSapUser = new MemberLteEnbRrcSapUser<LteEnbRrcProtocolReal> (this);
 }
 
@@ -1118,7 +1118,7 @@ LteEnbRrcProtocolReal::DoDecodeHandoverCommand (Ptr<Packet> p)
 
 void LteEnbRrcProtocolReal::DoSetLogDir(std::string dirname){
   m_logdir = dirname;
-  m_logging = true;
+  m_logging = !dirname.empty();
 }
 
 //////////////////////////////////////////////////////

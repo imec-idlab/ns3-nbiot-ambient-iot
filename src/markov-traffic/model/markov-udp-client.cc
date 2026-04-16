@@ -28,6 +28,7 @@
 #include "ns3/socket-factory.h"
 #include "ns3/packet.h"
 #include "ns3/uinteger.h"
+#include "ns3/boolean.h"
 #include "ns3/seq-ts-header.h"
 #include "markov-udp-client.h"
 #include <cstdlib>
@@ -83,6 +84,12 @@ MarkovUdpClient::GetTypeId (void)
                    DoubleValue (0.1),
                    MakeDoubleAccessor (&MarkovUdpClient::m_pActiveToInactive),
                    MakeDoubleChecker<double> (0.0, 1.0))
+    .AddAttribute ("SendFirst",
+                   "If true, always send a packet then decide next state (send-first mode). "
+                   "If false, decide state first then send only when active (original mode).",
+                   BooleanValue (false),
+                   MakeBooleanAccessor (&MarkovUdpClient::m_sendFirst),
+                   MakeBooleanChecker ())
     .AddTraceSource("State",
       "Markov State: 0 = INACTIVE, 1 = ACTIVE",
       MakeTraceSourceAccessor(&MarkovUdpClient::m_stateTrace),
@@ -97,7 +104,8 @@ MarkovUdpClient::MarkovUdpClient ()
     m_intervalInactive(Seconds(0.1)),
     m_intervalActive(Seconds(0.01)),
     m_pInactiveToActive(0.7),
-    m_pActiveToInactive(0.1)
+    m_pActiveToInactive(0.1),
+    m_sendFirst(false)
 {
   NS_LOG_FUNCTION (this);
   m_socket = 0;
@@ -207,55 +215,95 @@ MarkovUdpClient::StopApplication (void)
 }
 
 void
+MarkovUdpClient::SendPacket (void)
+{
+  SeqTsHeader seqTs;
+  seqTs.SetSeq (m_sent);
+  Ptr<Packet> p = Create<Packet> (m_size-(8+4)); // 8+4 : the size of the seqTs header
+  p->AddHeader (seqTs);
+
+  std::stringstream peerAddressStringStream;
+  if (Ipv4Address::IsMatchingType (m_peerAddress))
+  {
+    peerAddressStringStream << Ipv4Address::ConvertFrom (m_peerAddress);
+  }
+  else if (Ipv6Address::IsMatchingType (m_peerAddress))
+  {
+    peerAddressStringStream << Ipv6Address::ConvertFrom (m_peerAddress);
+  }
+
+  if ((m_socket->Send (p)) >= 0)
+  {
+    ++m_sent;
+    NS_LOG_INFO ("TraceDelay TX " << m_size << " bytes to "
+      << peerAddressStringStream.str () << " Uid: "
+      << p->GetUid () << " Time: "
+      << (Simulator::Now ()).As (Time::S));
+  }
+  else
+  {
+    NS_LOG_INFO ("Error while sending " << m_size << " bytes to "
+      << peerAddressStringStream.str ());
+  }
+}
+
+void
 MarkovUdpClient::Send (void)
 {
   NS_LOG_FUNCTION (this);
   NS_ASSERT (m_sendEvent.IsExpired ());
 
-  NS_LOG_DEBUG ("TraceDelay TX: Send() called at " << Simulator::Now ().GetSeconds () << "s with state: "
-    << (m_state == ACTIVE ? "ACTIVE" : "INACTIVE"));
-
-  if (m_state == ACTIVE) {
-    // only send packets when the state is ACTIVE
-
-    SeqTsHeader seqTs;
-    seqTs.SetSeq (m_sent);
-    Ptr<Packet> p = Create<Packet> (m_size-(8+4)); // 8+4 : the size of the seqTs header
-    p->AddHeader (seqTs);
-
-    std::stringstream peerAddressStringStream;
-    if (Ipv4Address::IsMatchingType (m_peerAddress))
+  if (m_sendFirst)
     {
-      peerAddressStringStream << Ipv4Address::ConvertFrom (m_peerAddress);
+      // Send-first mode: always send, then decide next state.
+      // ACTIVE  -> send, wait activeInterval, send again
+      // INACTIVE -> wait inactiveInterval, re-decide (WakeUp)
+      SendPacket ();
+      if (m_sent < m_count)
+        {
+          UpdateState ();
+          if (m_state == ACTIVE)
+            {
+              m_sendEvent = Simulator::Schedule (m_intervalActive, &MarkovUdpClient::Send, this);
+            }
+          else
+            {
+              m_sendEvent = Simulator::Schedule (m_intervalInactive, &MarkovUdpClient::WakeUp, this);
+            }
+        }
     }
-    else if (Ipv6Address::IsMatchingType (m_peerAddress))
+  else
     {
-      peerAddressStringStream << Ipv6Address::ConvertFrom (m_peerAddress);
+      // Original mode: decide state at fixed intervals, only send when ACTIVE
+      if (m_state == ACTIVE)
+        {
+          SendPacket ();
+        }
+      UpdateState ();
+      if (m_sent < m_count)
+        {
+          m_sendEvent = Simulator::Schedule (GetNextInterval (), &MarkovUdpClient::Send, this);
+        }
     }
+}
 
-    if ((m_socket->Send (p)) >= 0)
+void
+MarkovUdpClient::WakeUp (void)
+{
+  NS_LOG_FUNCTION (this);
+  NS_ASSERT (m_sendEvent.IsExpired ());
+
+  // Re-evaluate state after an inactive sleep period.
+  // If we transition to ACTIVE, send immediately.
+  // If still INACTIVE, sleep again for another inactiveInterval.
+  UpdateState ();
+  if (m_state == ACTIVE)
     {
-      ++m_sent;
-      NS_LOG_INFO ("TraceDelay TX " << m_size << " bytes to "
-        << peerAddressStringStream.str () << " Uid: "
-        << p->GetUid () << " Time: "
-        << (Simulator::Now ()).As (Time::S));
-
+      Send ();
     }
-    else
+  else if (m_sent < m_count)
     {
-      NS_LOG_INFO ("Error while sending " << m_size << " bytes to "
-        << peerAddressStringStream.str ());
-    }
-
-  }
-
-  UpdateState();  // after sending a packet, update the state using the traffic model
-  if (m_sent < m_count)
-    {
-      Time next = GetNextInterval();
-
-      m_sendEvent = Simulator::Schedule (next, &MarkovUdpClient::Send, this);
+      m_sendEvent = Simulator::Schedule (m_intervalInactive, &MarkovUdpClient::WakeUp, this);
     }
 }
 

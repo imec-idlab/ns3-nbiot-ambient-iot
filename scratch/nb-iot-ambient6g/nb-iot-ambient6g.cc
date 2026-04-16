@@ -149,6 +149,7 @@ int main (int argc, char *argv[])
   std::string propagationLoss{"friis"};
   Time channelDelay {MilliSeconds (10)};
   bool persistentGrant {true};
+  bool sendFirst {false};
 
 
   CommandLine cmd (__FILE__);
@@ -163,6 +164,8 @@ int main (int argc, char *argv[])
   cmd.AddValue("heightOfUes", "Height of UEs", heightOfUes);
   cmd.AddValue ("persistentGrant",
                 "Skip re-RACH after initial access; rely on DCI0 grants", persistentGrant);
+  cmd.AddValue ("sendFirst",
+                "Send-first traffic: always send then decide next state", sendFirst);
 
   cmd.Parse (argc, argv);
 
@@ -401,8 +404,9 @@ int main (int argc, char *argv[])
 
     // set NB-IoT module to BG96
     ueRrc->m_energyModel.SetModule(BG96c()); // Set the NBIoT module to BG96
-    ueRrc->EnableLogging();
-    ueRrc->m_energyModel.SetLogDir(logDir);  // set the log directory for the energy model
+    //ueRrc->EnableLogging();  // disabled: produces RA.log, DataTrans.log, Energy.log
+    ueRrc->m_energyModel.EnableLogging();     // enable only nbiot_energy.log
+    ueRrc->m_energyModel.SetLogDir(logDir);   // set the log directory for the energy model
     /*
      * BUG: When edt is true, there is a certain (fixed) quantum of packets
      * that are received at the server side, although the clients keep
@@ -442,6 +446,7 @@ int main (int argc, char *argv[])
     ulClient->SetAttribute ("MaxPackets", UintegerValue (1000000));
     ulClient->SetAttribute ("PacketSize", UintegerValue(packetSize));
     ulClient->SetTransitionProbabilities(0.7, 0.2);  // P(INACTIVE→ACTIVE), P(ACTIVE→INACTIVE)
+    ulClient->SetAttribute ("SendFirst", BooleanValue(sendFirst));
     ulClient->TraceConnectWithoutContext("State", MakeCallback(&StateChangeTracer));
 
       Ptr<Node> client = ueNodes.Get(i);

@@ -155,6 +155,7 @@ protected:
   std::map<SearchSpaceConfig, uint16_t> m_RoundRobinLastScheduled;
 
   std::string m_logdir;
+  bool m_logging {false};
 //std::vector<std::pair<uint64_t,uint64_t>> GetAllPossibleSearchSpaceCandidates(std::vector<uint64_t> subframes, uint64_t R_max);
   void LogUplinkGrid();
   void LogDownlinkGrid();

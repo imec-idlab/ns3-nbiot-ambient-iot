@@ -860,7 +860,7 @@ LteUeMac::RaResponseTimeoutNb (bool contention)
   if (m_preambleTransmissionCounter == m_radioResourceConfig.rachConfigCommon.preambleTransMaxCE)
     {
       NS_LOG_INFO ("RAR timeout, preambleTransMax reached => giving up");
-      LogMessage("LteUeMac::RaResponseTimeoutNb,RAR timeout: preambleTransMax reached");
+      if (m_mac_logging) LogMessage("LteUeMac::RaResponseTimeoutNb,RAR timeout: preambleTransMax reached");
 
       m_cmacSapUser->NotifyRandomAccessFailed ();
     }
@@ -876,7 +876,7 @@ LteUeMac::RaResponseTimeoutNb (bool contention)
             {
               // Increase to CE1
               NS_LOG_INFO ("RAR timeout, MaxNumPreambleAttemptCE reached => increasing CE level to CE1");
-              LogMessage("LteUeMac::RaResponseTimeoutNb,RAR timeout, MaxNumPreambleAttemptCE reached => increasing CE level to CE1");
+              if (m_mac_logging) LogMessage("LteUeMac::RaResponseTimeoutNb,RAR timeout, MaxNumPreambleAttemptCE reached => increasing CE level to CE1");
               m_CeLevel = m_radioResourceConfig.nprachConfig.nprachParametersList.nprachParametersNb1;
               m_rachConfigCe = m_radioResourceConfig.rachConfigCommon.rachInfoList.rachInfo2;
               if(m_edt){
@@ -887,7 +887,7 @@ LteUeMac::RaResponseTimeoutNb (bool contention)
             {
               // Increase to CE2
               NS_LOG_INFO ("RAR timeout, MaxNumPreambleAttemptCE reached => increasing CE level to CE2");
-              LogMessage("LteUeMac::RaResponseTimeoutNb,RAR timeout, MaxNumPreambleAttemptCE reached => increasing CE level to CE2");
+              if (m_mac_logging) LogMessage("LteUeMac::RaResponseTimeoutNb,RAR timeout, MaxNumPreambleAttemptCE reached => increasing CE level to CE2");
               m_CeLevel = m_radioResourceConfig.nprachConfig.nprachParametersList.nprachParametersNb2;
               m_rachConfigCe = m_radioResourceConfig.rachConfigCommon.rachInfoList.rachInfo3;
               if(m_edt){
@@ -898,7 +898,7 @@ LteUeMac::RaResponseTimeoutNb (bool contention)
             {
               // Can't increase further
               NS_LOG_INFO ("RAR timeout, MaxNumPreambleAttemptCE in CE2 reached => giving up");
-              LogMessage("LteUeMac::RaResponseTimeoutNb,RAR timeout, MaxNumPreambleAttemptCE in CE2 reached => giving up");
+              if (m_mac_logging) LogMessage("LteUeMac::RaResponseTimeoutNb,RAR timeout, MaxNumPreambleAttemptCE in CE2 reached => giving up");
               m_cmacSapUser->NotifyRandomAccessFailed ();
               return;
             }
@@ -919,7 +919,7 @@ LteUeMac::RaResponseTimeoutNb (bool contention)
           }
         }
       NS_LOG_INFO ("RAR timeout, re-send preamble");
-      LogMessage("LteUeMac::RaResponseTimeoutNb,RAR timeout, re-send preamble");
+      if (m_mac_logging) LogMessage("LteUeMac::RaResponseTimeoutNb,RAR timeout, re-send preamble");
       if (contention)
         {
           RandomlySelectAndSendRaPreambleNb ();
@@ -1925,7 +1925,7 @@ void LteUeMac::DoSetMsg5Buffer(uint32_t buffersize){
 
 void LteUeMac::SetLogDir(std::string dirname){
   m_logdir = dirname;
-  m_mac_logging = true;
+  m_mac_logging = !dirname.empty();
 }
 
 void LteUeMac::LogMessage(std::string msg){

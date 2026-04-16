@@ -98,6 +98,16 @@ private:
    */
   void Send (void);
 
+  /**
+   * \brief Create and transmit a single UDP packet
+   */
+  void SendPacket (void);
+
+  /**
+   * \brief Re-evaluate state after an inactive period (send-first mode only)
+   */
+  void WakeUp (void);
+
   uint32_t m_count; //!< Maximum number of packets the application will send
   uint32_t m_size; //!< Size of the sent packet (including the SeqTsHeader)
 
@@ -114,6 +124,8 @@ private:
   Time m_intervalActive;
   double m_pInactiveToActive;
   double m_pActiveToInactive;
+
+  bool m_sendFirst; //!< If true, always send then decide; if false, original interval-based behavior
 
   Ptr<UniformRandomVariable> m_uniformRv;
 

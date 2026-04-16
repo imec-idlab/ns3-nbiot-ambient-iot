@@ -1492,7 +1492,7 @@ void LteEnbMac::DoRemoveUeFromScheduler(uint16_t rnti){
 }
 void LteEnbMac::DoSetLogDir(std::string logdir){
   m_logdir = logdir;
-  m_mac_logging = true;
+  m_mac_logging = !logdir.empty();
 }
 void
 LteEnbMac::DoRemoveUe (uint16_t rnti)
