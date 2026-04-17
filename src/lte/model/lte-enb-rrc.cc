@@ -3283,6 +3283,14 @@ void
 LteEnbRrc::DoNotifyDataInactivitySchedulerNb(uint16_t rnti)
 {
   NS_LOG_FUNCTION (this << (uint32_t) rnti);
+  // The MAC schedules this callback for subframestillDataInactivity ms ahead;
+  // the UeManager may have moved to m_ueResumedMap before it fires.
+  if (!HasUeManager (rnti))
+    {
+      NS_LOG_DEBUG ("DoNotifyDataInactivitySchedulerNb: RNTI " << rnti
+                    << " already released/resumed, ignoring");
+      return;
+    }
   Ptr<UeManager> ueManager = GetUeManagerbyRnti(rnti);
   ueManager->NotifyDataInactivitySchedulerNb();
 }
@@ -3290,6 +3298,12 @@ void
 LteEnbRrc::DoNotifyDataActivitySchedulerNb(uint16_t rnti)
 {
   NS_LOG_FUNCTION (this << (uint32_t) rnti);
+  if (!HasUeManager (rnti))
+    {
+      NS_LOG_DEBUG ("DoNotifyDataActivitySchedulerNb: RNTI " << rnti
+                    << " already released/resumed, ignoring");
+      return;
+    }
   Ptr<UeManager> ueManager = GetUeManagerbyRnti(rnti);
   ueManager->NotifyDataActivitySchedulerNb();
 }
