@@ -2563,8 +2563,12 @@ LteEnbRrc::GetUeManagerbyRnti (uint16_t rnti)
   NS_LOG_FUNCTION (this << (uint32_t) rnti);
   NS_ASSERT (0 != rnti);
   std::map<uint16_t, Ptr<UeManager> >::iterator it = m_ueActiveMap.find (rnti);
-  NS_ASSERT_MSG (it != m_ueActiveMap.end (), "UE manager for RNTI " << rnti << " not found");
-
+  if (it == m_ueActiveMap.end ())
+    {
+      // Stale RNTI: the UE has been moved to m_ueResumedMap or removed.
+      NS_LOG_DEBUG ("GetUeManagerbyRnti: RNTI " << rnti << " not active (released/resumed)");
+      return nullptr;
+    }
   return it->second;
 }
 

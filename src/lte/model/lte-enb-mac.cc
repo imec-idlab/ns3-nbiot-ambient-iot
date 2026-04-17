@@ -1504,6 +1504,22 @@ LteEnbMac::DoRemoveUe (uint16_t rnti)
   m_rlcAttached.erase (rnti);
   m_miDlHarqProcessesPackets.erase (rnti);
 
+  // Cancel pending NotifyDataInactivitySchedulerNb event for this RNTI.
+  // The scheduler's m_noDataIndicators[rnti] holds a Simulator::Schedule
+  // event that fires after subframestillDataInactivity ms (hundreds of ms
+  // in NB-IoT). Without this cancellation, non-PG UEs whose RNTI is
+  // recycled into m_ueResumedMap leave a dangling timer that later calls
+  // GetUeManagerbyRnti on a released RNTI and triggers an assert.
+  auto noDataIt = m_noDataIndicators.find (rnti);
+  if (noDataIt != m_noDataIndicators.end ())
+    {
+      if (!noDataIt->second.IsExpired ())
+        {
+          noDataIt->second.Cancel ();
+        }
+      m_noDataIndicators.erase (noDataIt);
+    }
+
   NS_LOG_DEBUG ("start checking for unprocessed preamble for rnti: " << rnti);
   //remove unprocessed preamble received for RACH during handover
   std::map<uint8_t, NcRaPreambleInfo>::iterator jt = m_allocatedNcRaPreambleMap.begin ();
