@@ -1178,6 +1178,10 @@ NbiotScheduler::ScheduleDlRlcBufferReq (
             {
               buffer_size += 4; // RLC Header
             }
+          if (it->second.retxQueueSize > 0)
+            {
+              buffer_size += 4; // RLC Header for retransmissions
+            }
         }
     }
 

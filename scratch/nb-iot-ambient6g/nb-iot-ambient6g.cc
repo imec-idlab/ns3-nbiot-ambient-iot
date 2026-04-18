@@ -383,11 +383,6 @@ int main (int argc, char *argv[])
   ApplicationContainer clientApps;
   ApplicationContainer serverApps;
 
-  UdpServerHelper server (ulPort);
-  serverApps.Add(server.Install (remoteHost));
-  serverApps.Start(startTime);
-  serverApps.Stop(simDuration);
-
 
   // Set up the data transmission for the Pre-Run
   for (uint16_t i = 0; i < numUes; ++i)
@@ -432,16 +427,13 @@ int main (int argc, char *argv[])
       ueLteDevice->GetMac ()->SetPersistentGrant (persistentGrant);   // mirror to MAC
       }
 
-    //++ulPort;
-    //UdpServerHelper server (ulPort);
-    //serverApps.Add(server.Install (remoteHost));
-    //
-    // Create a UdpEchoClient application to send UDP datagrams from node zero to
-    // node one.
-    //
+    UdpServerHelper server (ulPort);
+    serverApps.Add(server.Install (remoteHost));
+
     Ptr<MarkovUdpClient> ulClient = CreateObject<MarkovUdpClient>();
 
     ulClient->SetRemote(remoteHostAddr, ulPort);
+    ++ulPort;
     ulClient->SetRates(packetGenInterval, packetGenInterval); // INACTIVE and ACTIVE intervals
     ulClient->SetAttribute ("MaxPackets", UintegerValue (1000000));
     ulClient->SetAttribute ("PacketSize", UintegerValue(packetSize));
@@ -469,6 +461,9 @@ int main (int argc, char *argv[])
     // uePhy->SetAttribute ("NoiseFigure", DoubleValue (9.0));
   }
 
+  serverApps.Start(startTime);
+  serverApps.Stop(simDuration);
+
   ProgressBar pg ((simDuration));
   Simulator::Stop (simDuration); // Run
   Simulator::Run ();
@@ -476,10 +471,20 @@ int main (int argc, char *argv[])
    // Statistics
   uint64_t rxBytes = 0;
 
+  // Per-UE byte logging
+  std::ofstream perUeOutStream;
+  perUeOutStream.open (logDir + "rxbytes_per_ue.out", std::ios::out);
+  perUeOutStream << "UE_ID\tRxBytes_bits\tThroughput_Mbps" << std::endl;
+
   for (uint32_t i = 0; i < serverApps.GetN (); i++)
     {
-      rxBytes += DynamicCast<UdpServer> (serverApps.Get (i))->GetTotalRx ();
+      uint64_t ueRxBytes = DynamicCast<UdpServer> (serverApps.Get (i))->GetTotalRx ();
+      rxBytes += ueRxBytes;
+      double ueThroughput = (ueRxBytes * 8) / (simDuration.GetSeconds());
+      perUeOutStream << (i + 1) << "\t" << (ueRxBytes * 8) << "\t" << ueThroughput << std::endl;
     }
+  perUeOutStream.close ();
+
   Simulator::Destroy ();
 
   double throughput = (rxBytes * 8) / (simDuration.GetSeconds()); //Mbit/s
