@@ -474,24 +474,24 @@ int main (int argc, char *argv[])
   // Per-UE byte logging
   std::ofstream perUeOutStream;
   perUeOutStream.open (logDir + "rxbytes_per_ue.out", std::ios::out);
-  perUeOutStream << "UE_ID\tRxBytes_bits\tThroughput_Mbps" << std::endl;
+  perUeOutStream << "UE_ID\tRxBytes_bits\tThroughput_kbps" << std::endl;
 
   for (uint32_t i = 0; i < serverApps.GetN (); i++)
     {
       uint64_t ueRxBytes = DynamicCast<UdpServer> (serverApps.Get (i))->GetTotalRx ();
       rxBytes += ueRxBytes;
-      double ueThroughput = (ueRxBytes * 8) / (simDuration.GetSeconds());
+      double ueThroughput = (ueRxBytes * 8) / (simDuration.GetSeconds()) / 1000.0;
       perUeOutStream << (i + 1) << "\t" << (ueRxBytes * 8) << "\t" << ueThroughput << std::endl;
     }
   perUeOutStream.close ();
 
   Simulator::Destroy ();
 
-  double throughput = (rxBytes * 8) / (simDuration.GetSeconds()); //Mbit/s
+  double throughput = (rxBytes * 8) / (simDuration.GetSeconds()) / 1000.0; //kbit/s
 
   std::ofstream totalStatsOutStream;
   totalStatsOutStream.open (logDir + "rxbytes.out", std::ios::out);
-  totalStatsOutStream << "RxBytes_bits\tThroughput_Mbps" << std::endl;
+  totalStatsOutStream << "RxBytes_bits\tThroughput_kbps" << std::endl;
   totalStatsOutStream <<(rxBytes * 8) <<"\t" <<throughput << std::endl;
   totalStatsOutStream.close ();
 
