@@ -1659,11 +1659,15 @@ LteUeRrc::DoRecvRrcConnectionReleaseNb (NbIotRrcSap::RrcConnectionReleaseNb msg)
 {
   NS_LOG_FUNCTION (this << " RNTI " << m_rnti);
   if (msg.releaseCauseNb == NbIotRrcSap::RrcConnectionReleaseNb::ReleaseCauseNb::rrc_Suspend){
-    if (m_persistentGrant && m_state == CONNECTED_NORMALLY){
+
+    if (m_persistentGrant && m_state != CONNECTED_NORMALLY && m_resumeId != 0
+        && msg.resumeIdentity != 0 && msg.resumeIdentity < m_resumeId) {
+
       NS_LOG_DEBUG ("UE IMSI=" << m_imsi
                     << " DoRecvRrcConnectionReleaseNb: STALE release dropped"
                     << " RNTI=" << m_rnti
-                    << " (UE already woke via PG fast-path)");
+                    << " msgResumeId=" << msg.resumeIdentity
+                    << " currentResumeId=" << m_resumeId);
       return;
     }
     m_asSapUser->NotifyConnectionSuspended();
