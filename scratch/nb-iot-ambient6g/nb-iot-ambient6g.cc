@@ -49,6 +49,10 @@
 
 #include "ns3/log.h"
 #include "ns3/nb-iot-energy.h"
+#include "ns3/generic-capacitor.h"
+#include "ns3/basic-energy-harvester.h"
+#include "ns3/flow-monitor-helper.h"
+#include "ns3/ipv4-flow-classifier.h"
 
 using namespace ns3;
 
@@ -86,6 +90,46 @@ void log_levels(bool all, enum LogLevel level)
   }
 }
 
+
+// Per-UE ambient-IoT trackers: harvested energy, depletion/recovery cycles,
+// uptime above capacitor threshold. Populated by trace hooks + periodic polling.
+struct UeEnergyTracker {
+    Ptr<GenericCapacitor> cap;
+    double cutoffJ             = 0.0;
+    double harvestedJ          = 0.0;
+    Time   uptime              = Seconds(0);
+    uint32_t nDepletions       = 0;
+    Time   firstDepletionTime  = Time::Max();
+    Time   firstRecoveryTime   = Time::Max();
+    bool   wasDepletedLastTick = false;
+    bool   everDepleted        = false;
+};
+
+static void OnHarvestedTrace (double* slot, double /*oldVal*/, double newVal) {
+    *slot = newVal;
+}
+
+// Periodic poller: compares cap remaining energy to its cutoff and updates
+// uptime / depletion-cycle counters. Self-reschedules until simEnd.
+static void PollUeEnergy (UeEnergyTracker* t, Time interval, Time simEnd) {
+    bool depletedNow = (t->cap->GetRemainingEnergy() <= t->cutoffJ + 1e-9);
+    if (!depletedNow) t->uptime += interval;
+    if (depletedNow && !t->wasDepletedLastTick) {
+        ++t->nDepletions;
+        if (!t->everDepleted) {
+            t->firstDepletionTime = Simulator::Now();
+            t->everDepleted = true;
+        }
+    }
+    if (!depletedNow && t->wasDepletedLastTick
+        && t->everDepleted && t->firstRecoveryTime == Time::Max()) {
+        t->firstRecoveryTime = Simulator::Now();
+    }
+    t->wasDepletedLastTick = depletedNow;
+    if (Simulator::Now() + interval <= simEnd) {
+        Simulator::Schedule(interval, &PollUeEnergy, t, interval, simEnd);
+    }
+}
 
 /**
  * Tracer function to log state changes to the console.
@@ -397,7 +441,6 @@ int main (int argc, char *argv[])
     // Log the received packets
     //ueLteDevice->SetReceiveCallback (MakeBoundCallback (&ReceiveCallback, logdir, ueLteDevice->GetImsi()));
 
-    // set NB-IoT module to BG96
     ueRrc->m_energyModel.SetModule(BG96c()); // Set the NBIoT module to BG96
     //ueRrc->EnableLogging();  // disabled: produces RA.log, DataTrans.log, Energy.log
     ueRrc->m_energyModel.EnableLogging();     // enable only nbiot_energy.log
@@ -461,8 +504,68 @@ int main (int argc, char *argv[])
     // uePhy->SetAttribute ("NoiseFigure", DoubleValue (9.0));
   }
 
+  // Add a GenericCapacitor and a BasicEnergyHarvester ----
+  const Time   pollInterval    = MilliSeconds(100);
+  const double capThreshV      = 1.8;
+  const double capCapacitance  = 1.0;
+  const double cutoffJ         = 0.5 * capCapacitance * capThreshV * capThreshV;
+
+  std::vector<Ptr<GenericCapacitor>>     ueCaps(numUes);
+  std::vector<Ptr<BasicEnergyHarvester>> ueHarvs(numUes);
+  std::vector<UeEnergyTracker>           ueTracker(numUes);
+  for (uint16_t i = 0; i < numUes; ++i)
+  {
+    Ptr<Node> node = ueNodes.Get(i);
+    Ptr<LteUeNetDevice> ueDev = ueLteDevs.Get(i)->GetObject<LteUeNetDevice>();
+    Ptr<LteUeRrc> ueRrc = ueDev->GetRrc();
+
+    Ptr<GenericCapacitor> cap = CreateObject<GenericCapacitor>();
+    cap->SetAttribute("Capacitance",                   DoubleValue(capCapacitance));
+    cap->SetAttribute("MaxCapacitorVoltage",           DoubleValue(3.3));
+    cap->SetAttribute("InitialCapacitorVoltage",       DoubleValue(3.3));
+    cap->SetAttribute("ThresholdVoltage",              DoubleValue(capThreshV));
+    cap->SetAttribute("SupplyVoltage",                 DoubleValue(3.3));
+    cap->SetAttribute("InternalResistance",            DoubleValue(0.1));
+    cap->SetAttribute("LeakageResistance",             DoubleValue(1e6));
+    cap->SetAttribute("PeriodicEnergyUpdateInterval",  TimeValue(pollInterval));
+    cap->SetNode(node);
+
+    Ptr<BasicEnergyHarvester> harv = CreateObject<BasicEnergyHarvester>();
+    harv->SetAttribute("PeriodicHarvestedPowerUpdateInterval",
+                       TimeValue(pollInterval));
+
+    // Harvester near the per-UE consumption so depletion
+    // patterns actually vary across the nUe sweep.
+    harv->SetAttribute("HarvestablePower",
+                       StringValue("ns3::ConstantRandomVariable[Constant=0.08]"));  // 80 mW
+    harv->SetNode(node);
+    harv->SetEnergySource(cap);
+    cap->ConnectEnergyHarvester(harv);      // register on the source side too
+
+    cap->Initialize();
+    harv->Initialize();
+
+    ueRrc->m_energyModel.SetEnergySource(cap);
+
+    ueCaps[i]  = cap;
+    ueHarvs[i] = harv;
+
+    // Ambient-IoT trackers
+    ueTracker[i].cap      = cap;
+    ueTracker[i].cutoffJ  = cutoffJ;
+    harv->TraceConnectWithoutContext(
+        "TotalEnergyHarvested",
+        MakeBoundCallback(&OnHarvestedTrace, &ueTracker[i].harvestedJ));
+    Simulator::Schedule(pollInterval, &PollUeEnergy,
+                        &ueTracker[i], pollInterval, simDuration);
+  }
+
   serverApps.Start(startTime);
   serverApps.Stop(simDuration);
+
+  // FlowMonitor: IP-layer delay + packet loss (UE -> remote host)
+  FlowMonitorHelper flowHelper;
+  Ptr<FlowMonitor>  flowMon = flowHelper.InstallAll();
 
   ProgressBar pg ((simDuration));
   Simulator::Stop (simDuration); // Run
@@ -484,6 +587,120 @@ int main (int argc, char *argv[])
       perUeOutStream << (i + 1) << "\t" << (ueRxBytes * 8) << "\t" << ueThroughput << std::endl;
     }
   perUeOutStream.close ();
+
+  // FlowMonitor: per-flow delay + loss
+  // UE -> remote-host flow end-to-end delay from FlowMonitor includes the
+  // fixed EPC delays (S1-U + PGW<->remoteHost p2p link). Subtract those to
+  // report the UE -> eNB radio-layer delay directly.
+  TimeValue s1Delay;
+  epcHelper->GetAttribute("S1uLinkDelay", s1Delay);
+  const double excludeMs =
+      s1Delay.Get().GetMilliSeconds() + channelDelay.GetMilliSeconds();
+
+  flowMon->CheckForLostPackets();
+  Ptr<Ipv4FlowClassifier> classifier =
+      DynamicCast<Ipv4FlowClassifier>(flowHelper.GetClassifier());
+
+  std::ofstream flowOut(logDir + "flow_stats.out");
+  flowOut << "FlowId\tSrc\tDst\tTxPkts\tRxPkts\tLostPkts\tLossRatio\t"
+             "RawDelay_ms\tUE_to_eNB_Delay_ms\tMeanJitter_ms\n";
+
+  uint64_t aggTx = 0, aggRx = 0, aggLost = 0;
+  double   aggDelayMs = 0.0;        // accumulates UE->eNB (corrected) delay * rxPkts
+  for (auto& kv : flowMon->GetFlowStats())
+    {
+      const auto& s = kv.second;
+      Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(kv.first);
+      double rawDelay   = s.rxPackets
+          ? s.delaySum.GetMilliSeconds()  / double(s.rxPackets)      : 0.0;
+      double ueEnbDelay = std::max(0.0, rawDelay - excludeMs);
+      double meanJitter = s.rxPackets > 1
+          ? s.jitterSum.GetMilliSeconds() / double(s.rxPackets - 1)  : 0.0;
+      double lossRatio  = s.txPackets
+          ? double(s.lostPackets) / s.txPackets                      : 0.0;
+
+      flowOut << kv.first << "\t" << t.sourceAddress << "\t" << t.destinationAddress
+              << "\t" << s.txPackets << "\t" << s.rxPackets << "\t" << s.lostPackets
+              << "\t" << lossRatio << "\t" << rawDelay << "\t" << ueEnbDelay
+              << "\t" << meanJitter << "\n";
+
+      aggTx      += s.txPackets;
+      aggRx      += s.rxPackets;
+      aggLost    += s.lostPackets;
+      aggDelayMs += ueEnbDelay * s.rxPackets;    // rx-weighted mean of UE->eNB
+    }
+  flowOut.close();
+  double aggMeanDelay = aggRx ? aggDelayMs / double(aggRx) : 0.0;  // UE->eNB only
+  double aggLossRatio = aggTx ? double(aggLost) / aggTx   : 0.0;
+
+  // Per-UE ambient-IoT snapshot. GetEnergyRemaining() flushes the last state
+  // into m_timeSpendInState so GetDutyCycle() reflects the full sim.
+  std::ofstream enOut(logDir + "energy_per_ue.out");
+  enOut << "UE_ID\tRemaining_J\tFraction\tDepleted\tFirstDepletionTime_ms\t"
+           "FirstRecoveryTime_ms\tNDepletions\tHarvested_J\t"
+           "UptimeFraction\tDutyCycle\n";
+
+  uint32_t nDepleted     = 0;
+  double   sumHarvestedJ = 0.0;
+  double   sumUptimeFrac = 0.0;
+  double   sumDutyCycle  = 0.0;
+  uint32_t sumNDep       = 0;
+  const double capMaxJ = 0.5 * capCapacitance * 3.3 * 3.3;   // C * Vmax^2 / 2
+  for (uint16_t i = 0; i < numUes; ++i)
+    {
+      Ptr<LteUeNetDevice> ueDev = ueLteDevs.Get(i)->GetObject<LteUeNetDevice>();
+      auto& em = ueDev->GetRrc()->m_energyModel;
+      em.FlushStateTime();                       // no battery access -> no NaN
+
+      const auto& tr = ueTracker[i];
+      double rem  = tr.cap->GetRemainingEnergy();
+      double frac = capMaxJ > 0 ? rem / capMaxJ : 0.0;
+      double duty = em.GetDutyCycle();
+
+      bool dep = tr.everDepleted;
+      if (dep) ++nDepleted;
+
+      double uptimeFrac = (simDuration.GetSeconds() > 0)
+          ? tr.uptime.GetSeconds() / simDuration.GetSeconds() : 0.0;
+
+      enOut << (i + 1) << "\t" << rem << "\t" << frac << "\t"
+            << dep << "\t"
+            << (dep ? tr.firstDepletionTime.GetMilliSeconds() : -1) << "\t"
+            << ((tr.firstRecoveryTime == Time::Max()) ? -1
+                : tr.firstRecoveryTime.GetMilliSeconds()) << "\t"
+            << tr.nDepletions << "\t" << tr.harvestedJ << "\t"
+            << uptimeFrac << "\t" << duty << "\n";
+
+      sumHarvestedJ += tr.harvestedJ;
+      sumUptimeFrac += uptimeFrac;
+      sumDutyCycle  += duty;
+      sumNDep       += tr.nDepletions;
+    }
+  enOut.close();
+
+  double avgHarvestedJ = numUes > 0 ? sumHarvestedJ / numUes : 0.0;
+  double avgUptimeFrac = numUes > 0 ? sumUptimeFrac / numUes : 0.0;
+  double avgDutyCycle  = numUes > 0 ? sumDutyCycle  / numUes : 0.0;
+
+  std::ofstream sumOut(logDir + "summary.out");
+  sumOut << "numUes\tpersistentGrant\tsendFirst\taggTx\taggRx\taggLost\taggLossRatio\t"
+            "aggMeanUEtoENBDelay_ms\tnDepleted\tavgHarvested_J\tavgUptimeFrac\t"
+            "avgDutyCycle\tsumDepletionEvents\n";
+  sumOut << numUes << "\t" << persistentGrant << "\t" << sendFirst << "\t"
+         << aggTx << "\t" << aggRx << "\t" << aggLost << "\t" << aggLossRatio
+         << "\t" << aggMeanDelay << "\t" << nDepleted << "\t"
+         << avgHarvestedJ << "\t" << avgUptimeFrac << "\t"
+         << avgDutyCycle << "\t" << sumNDep << "\n";
+  sumOut.close();
+
+  std::cout << "Flows Tx=" << aggTx << " Rx=" << aggRx << " Lost=" << aggLost
+            << " UE->eNB meanDelay=" << aggMeanDelay << "ms"
+            << " (excluded EPC fixed=" << excludeMs << "ms)\n"
+            << "Ambient-IoT: depleted=" << nDepleted << "/" << numUes
+            << " depletion-events=" << sumNDep
+            << " avgHarvested=" << avgHarvestedJ << "J"
+            << " avgUptimeFrac=" << avgUptimeFrac
+            << " avgDutyCycle=" << avgDutyCycle << std::endl;
 
   Simulator::Destroy ();
 

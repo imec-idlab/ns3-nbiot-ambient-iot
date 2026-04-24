@@ -312,13 +312,26 @@ GenericCapacitor::UpdateVoltageBasedOnEnergy(double energyJ)
 
   Time now = Simulator::Now ();
   Time duration = now - m_lastUpdateTime;
+  if (duration.GetSeconds () <= 0.0 || m_currentVoltage <= 0.0)
+  {
+    // Same-instant call after a periodic UpdateEnergySource (or zero voltage):
+    // adjust the stored energy directly to avoid divide-by-zero in the
+    // current/voltage equations. Voltage is then re-derived from energy.
+    double newEnergy = m_remainingEnergyJ + energyJ;
+    if (newEnergy < 0.0) newEnergy = 0.0;
+    if (newEnergy > GetCapacitorEnergy(m_maxVoltage))
+        newEnergy = GetCapacitorEnergy(m_maxVoltage);
+    m_remainingEnergyJ = newEnergy;
+    m_currentVoltage   = std::sqrt(2.0 * m_remainingEnergyJ / m_capacitanceF);
+    return true;
+  }
   // I = E / (V . t)
   double current = energyJ / (m_currentVoltage * duration.GetSeconds ());
   m_currentVoltage = GetCapacitorModelVoltage(current, duration.GetSeconds ());
   m_remainingEnergyJ = GetCapacitorEnergy(m_currentVoltage);
   m_lastUpdateTime = now;
 
-  return true;  // Yes, there is an update
+  return true;
 }
 
 void

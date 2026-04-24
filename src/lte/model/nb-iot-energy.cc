@@ -123,7 +123,18 @@ void NbiotEnergyModel::DoNotifyStateChange(PowerState newState){
     }
 
     m_lastStateChange = Simulator::Now();
-    m_battery->DecreaseRemainingEnergy(lostEnergy);
+    // Skip the battery call if there was no time in the previous state — some
+    // EnergySource implementations (GenericCapacitor) divide by duration in
+    // DecreaseRemainingEnergy and produce NaN when it's zero.
+    if (lostEnergy > 0.0 && stateTime.GetSeconds() > 0.0)
+    {
+        m_battery->DecreaseRemainingEnergy(lostEnergy);
+        if (!m_depleted && m_battery->GetRemainingEnergy() <= 0.0)
+        {
+            m_depleted = true;
+            m_depletionTime = Simulator::Now();
+        }
+    }
     m_timeSpendInState[m_lastState] += stateTime.GetMilliSeconds();
     m_energySpendInState[m_lastState] += lostEnergy;
     m_lastState = newState;
@@ -154,6 +165,45 @@ double NbiotEnergyModel::GetEnergyRemainingFraction(){
 void NbiotEnergyModel::SetEnergySource(Ptr<EnergySource> new_battery){
     m_battery = nullptr;  // to force deallocation
     m_battery = new_battery;
+}
+
+void NbiotEnergyModel::FlushStateTime() {
+    Time stateTime = Simulator::Now() - m_lastStateChange;
+    if (stateTime.GetMilliSeconds() > 0) {
+        m_timeSpendInState[m_lastState] += stateTime.GetMilliSeconds();
+        m_lastStateChange = Simulator::Now();
+    }
+}
+
+double NbiotEnergyModel::GetActiveTimeMs() const {
+    double t = 0.0;
+    for (const auto& kv : m_timeSpendInState) {
+        switch (kv.first) {
+            case PowerState::RRC_CONNECTED_RECEIVING_NPDCCH:
+            case PowerState::RRC_CONNECTED_RECEIVING_NPDSCH:
+            case PowerState::RRC_CONNECTED_SENDING_NPRACH:
+            case PowerState::RRC_CONNECTED_SENDING_NPUSCH:
+            case PowerState::RRC_CONNECTED_SENDING_NPUSCH_F2:
+                t += kv.second;
+                break;
+            default:
+                break;
+        }
+    }
+    return t;
+}
+
+double NbiotEnergyModel::GetTotalAccountedTimeMs() const {
+    double t = 0.0;
+    for (const auto& kv : m_timeSpendInState) {
+        t += kv.second;
+    }
+    return t;
+}
+
+double NbiotEnergyModel::GetDutyCycle() const {
+    double total = GetTotalAccountedTimeMs();
+    return total > 0 ? GetActiveTimeMs() / total : 0.0;
 }
 
 

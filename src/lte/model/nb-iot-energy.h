@@ -115,8 +115,22 @@ public:
     void SetImsi(uint32_t imsi);
 
     void SetEnergySource(Ptr<EnergySource> new_battery);
+    Ptr<EnergySource> GetEnergySource() const { return m_battery; }
 
     void DecreaseRemainingEnergy(double lostEnergy);
+
+    bool IsDepleted() const { return m_depleted; }
+    Time GetDepletionTime() const { return m_depletionTime; }
+
+    // Duty-cycle: sum of NPDCCH/NPDSCH/NPUSCH/NPUSCH_F2/NPRACH dwell time over
+    // total accounted time. FlushStateTime() folds the current state's elapsed
+    // time into m_timeSpendInState WITHOUT touching the battery (avoids
+    // zero-duration divides on periodic energy sources). Call it before reading
+    // GetDutyCycle() at simulation end.
+    void   FlushStateTime();
+    double GetActiveTimeMs() const;
+    double GetTotalAccountedTimeMs() const;
+    double GetDutyCycle() const;
 
     void EnableLogging();
     void SetLogDir(std::string dirname);
@@ -133,6 +147,8 @@ private:
     std::vector<std::pair<PowerState,uint32_t>> m_states;
     std::string m_logdir;
     bool m_logging = false;
+    bool m_depleted = false;
+    Time m_depletionTime = Time::Max();
 };
 }
 #endif /* FF_MAC_SCHEDULER_H */
