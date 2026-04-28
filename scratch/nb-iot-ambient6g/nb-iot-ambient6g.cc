@@ -109,6 +109,38 @@ static void OnHarvestedTrace (double* slot, double /*oldVal*/, double newVal) {
     *slot = newVal;
 }
 
+// Brown-out callback: pause/resume the Markov client.
+static void OnBrownout (Ptr<MarkovUdpClient> client,
+                        uint32_t /*imsi*/,
+                        bool entering) {
+    if (!client) return;
+    if (entering) client->Pause();
+    else          client->Resume();
+}
+
+// Diurnal solar profile: P(t) = Pmax * sin^2(pi * t / T_day), driven by
+// retuning a per-UE ConstantRandomVariable that the harvester reads each
+// tick.
+struct SolarRetuneCfg {
+    Ptr<ConstantRandomVariable> rv;
+    double Pmax;     // W
+    Time   period;   // full sin^2 hump (= one "day")
+    Time   step;     // retune cadence
+    Time   simEnd;
+};
+
+static void RetuneSolarHarvester(SolarRetuneCfg cfg) {
+    double phase = std::fmod(Simulator::Now().GetSeconds(),
+                             cfg.period.GetSeconds())
+                   / cfg.period.GetSeconds();
+    double s = std::sin(M_PI * phase);
+    double P = cfg.Pmax * s * s;             // sin^2 envelope: 0 -> Pmax -> 0
+    cfg.rv->SetAttribute("Constant", DoubleValue(P));
+    if (Simulator::Now() + cfg.step <= cfg.simEnd) {
+        Simulator::Schedule(cfg.step, &RetuneSolarHarvester, cfg);
+    }
+}
+
 // Periodic poller: compares cap remaining energy to its cutoff and updates
 // uptime / depletion-cycle counters. Self-reschedules until simEnd.
 static void PollUeEnergy (UeEnergyTracker* t, Time interval, Time simEnd) {
@@ -171,7 +203,7 @@ void ReportUeMeasurements(std::string logdir, uint16_t rnti, uint16_t cell_id, d
 
 int main (int argc, char *argv[])
 {
-  Time simDuration {Seconds(10)};
+  Time simDuration {Seconds(3600)};            // 1 hour
   std::string logDir {"output"};
   int numUes {10};
   double cellSize {2500};
@@ -183,9 +215,24 @@ int main (int argc, char *argv[])
    * UDP Header and IP Header are added by NS-3
    * */
   int packetSize {49};
-  Time packetGenInterval {Seconds(10)};
+  Time packetGenInterval {Seconds(300)};       // 5 min - matches deep-ambient KPI
   Time startTime { MilliSeconds(10)};
 
+  // Energy front-end: super-cap + diurnal solar harvester
+  // (sin^2 over the sim window: 0 -> Pmax -> 0)
+  bool   solarProfile  {true};                 // false => constant Pmean
+  double harvestPmaxW  {0.005};                // 5 mW peak (mean = 2.5 mW)
+  double capCapacitanceF {1.0};                // 1 F supercap
+  double capMaxV       {3.3};
+  double capInitV      {2.5};                  // start near cutoff (battery-less cold-start)
+  double capCutoffV    {2.4};                  // raise from 1.8 V; usable = 2.5 J
+  // Leakage resistance: tau = R_leak * C sets the RC charge time-constant.
+  // Default 10 kohm gives tau ~ 10^4 s,
+  // so the cap visibly approaches its asymptote (charging slows near V_max)
+  // instead of charging linearly. Trade-off: leakage power = V^2/R_leak,
+  // ~0.9 mW at 3 V (i.e. ~36 % of the 2.5 mW mean harvest is dissipated).
+  // Matches the CAP-XX HS-series 1 F super-cap leakage spec (~10 kohm).
+  double capLeakageR   {10000.0};              // 10 kohm
 
 
   bool ciot {false};
@@ -210,6 +257,25 @@ int main (int argc, char *argv[])
                 "Skip re-RACH after initial access; rely on DCI0 grants", persistentGrant);
   cmd.AddValue ("sendFirst",
                 "Send-first traffic: always send then decide next state", sendFirst);
+  cmd.AddValue ("solarProfile",
+                "Use sin^2 diurnal solar harvest profile (else constant)", solarProfile);
+  cmd.AddValue ("harvestPmaxW",
+                "Peak harvested power in W (mean = Pmax/2 under solar)", harvestPmaxW);
+  cmd.AddValue ("capCapacitanceF",
+                "Supercap capacitance in F", capCapacitanceF);
+  cmd.AddValue ("capMaxV",
+                "Cap full-charge voltage in V", capMaxV);
+  cmd.AddValue ("capInitV",
+                "Cap starting voltage in V", capInitV);
+  cmd.AddValue ("capCutoffV",
+                "Cap depletion-cutoff voltage in V", capCutoffV);
+  cmd.AddValue ("capLeakageR",
+                "Leakage resistance in ohm; tau = R*C sets RC time-constant. "
+                "Use ~1e6 to disable visible asymptote, ~1e4 to model it",
+                capLeakageR);
+  cmd.AddValue ("packetGenIntervalSec",
+                "Markov tick (= mean inter-arrival in s)",
+                packetGenInterval);
 
   cmd.Parse (argc, argv);
 
@@ -283,7 +349,7 @@ int main (int argc, char *argv[])
     pos_a.Set ("rho", DoubleValue (cellSize/2));
     Ptr<PositionAllocator> m_position = pos_a.Create ()->GetObject<PositionAllocator> ();
     for (int i = 0; i < numUes; ++i){
-      Vector position = m_position->GetNext ();
+        Vector position = m_position->GetNext ();
       positionAllocUe->Add (position);
     }
   }
@@ -506,9 +572,18 @@ int main (int argc, char *argv[])
 
   // Add a GenericCapacitor and a BasicEnergyHarvester ----
   const Time   pollInterval    = MilliSeconds(100);
-  const double capThreshV      = 1.8;
-  const double capCapacitance  = 1.0;
-  const double cutoffJ         = 0.5 * capCapacitance * capThreshV * capThreshV;
+  const Time   solarRetuneStep = Seconds(60);     // sun moves slowly: 60 s tick is plenty
+  const double cutoffJ         = 0.5 * capCapacitanceF * capCutoffV * capCutoffV;
+  const double meanHarvestW    = solarProfile ? 0.5 * harvestPmaxW : harvestPmaxW;
+
+  // Brown-out gate: when cap voltage falls below capCutoffV the energy model
+  // stops draining and the Markov client stops generating traffic, mimicking a
+  // real PMIC's brown-out cut-off. Recovery requires the cap to climb back
+  // above (capCutoffV + brownoutHystV) to avoid chatter.
+  const double brownoutHystV   = 0.2;             // 200 mV hysteresis
+  const double recoveryV       = capCutoffV + brownoutHystV;
+  const double brownoutJ       = cutoffJ;
+  const double recoveryJ       = 0.5 * capCapacitanceF * recoveryV * recoveryV;
 
   std::vector<Ptr<GenericCapacitor>>     ueCaps(numUes);
   std::vector<Ptr<BasicEnergyHarvester>> ueHarvs(numUes);
@@ -520,13 +595,13 @@ int main (int argc, char *argv[])
     Ptr<LteUeRrc> ueRrc = ueDev->GetRrc();
 
     Ptr<GenericCapacitor> cap = CreateObject<GenericCapacitor>();
-    cap->SetAttribute("Capacitance",                   DoubleValue(capCapacitance));
-    cap->SetAttribute("MaxCapacitorVoltage",           DoubleValue(3.3));
-    cap->SetAttribute("InitialCapacitorVoltage",       DoubleValue(3.3));
-    cap->SetAttribute("ThresholdVoltage",              DoubleValue(capThreshV));
-    cap->SetAttribute("SupplyVoltage",                 DoubleValue(3.3));
+    cap->SetAttribute("Capacitance",                   DoubleValue(capCapacitanceF));
+    cap->SetAttribute("MaxCapacitorVoltage",           DoubleValue(capMaxV));
+    cap->SetAttribute("InitialCapacitorVoltage",       DoubleValue(capInitV));
+    cap->SetAttribute("ThresholdVoltage",              DoubleValue(capCutoffV));
+    cap->SetAttribute("SupplyVoltage",                 DoubleValue(capMaxV));
     cap->SetAttribute("InternalResistance",            DoubleValue(0.1));
-    cap->SetAttribute("LeakageResistance",             DoubleValue(1e6));
+    cap->SetAttribute("LeakageResistance",             DoubleValue(capLeakageR));
     cap->SetAttribute("PeriodicEnergyUpdateInterval",  TimeValue(pollInterval));
     cap->SetNode(node);
 
@@ -534,10 +609,11 @@ int main (int argc, char *argv[])
     harv->SetAttribute("PeriodicHarvestedPowerUpdateInterval",
                        TimeValue(pollInterval));
 
-    // Harvester near the per-UE consumption so depletion
-    // patterns actually vary across the nUe sweep.
-    harv->SetAttribute("HarvestablePower",
-                       StringValue("ns3::ConstantRandomVariable[Constant=0.08]"));  // 80 mW
+    // Harvester is fed by a per-UE ConstantRandomVariable. In solar mode a
+    // periodic retune callback rewrites that constant from a sin^2 envelope.
+    Ptr<ConstantRandomVariable> hrv = CreateObject<ConstantRandomVariable>();
+    hrv->SetAttribute("Constant", DoubleValue(solarProfile ? 0.0 : meanHarvestW));
+    harv->SetAttribute("HarvestablePower", PointerValue(hrv));
     harv->SetNode(node);
     harv->SetEnergySource(cap);
     cap->ConnectEnergyHarvester(harv);      // register on the source side too
@@ -545,7 +621,24 @@ int main (int argc, char *argv[])
     cap->Initialize();
     harv->Initialize();
 
+    if (solarProfile) {
+      SolarRetuneCfg cfg{hrv, harvestPmaxW, simDuration, solarRetuneStep, simDuration};
+      Simulator::ScheduleNow(&RetuneSolarHarvester, cfg);
+    }
+
     ueRrc->m_energyModel.SetEnergySource(cap);
+    ueRrc->m_energyModel.SetBrownoutThresholds(brownoutJ, recoveryJ);
+
+    // Brown-out callback: pause this UE's Markov client when the energy model
+    // crosses the cut-off threshold; resume it when the cap recharges past the
+    // hysteresis recovery point. Captures the per-UE client by index, so the
+    // ulClient pointer (in the apps loop above) is reachable via clientApps.
+    Ptr<MarkovUdpClient> uClient = clientApps.Get(i)->GetObject<MarkovUdpClient>();
+    if (uClient)
+    {
+      ueRrc->m_energyModel.SetBrownoutCallback(
+          MakeBoundCallback(&OnBrownout, uClient));
+    }
 
     ueCaps[i]  = cap;
     ueHarvs[i] = harv;
@@ -645,7 +738,7 @@ int main (int argc, char *argv[])
   double   sumUptimeFrac = 0.0;
   double   sumDutyCycle  = 0.0;
   uint32_t sumNDep       = 0;
-  const double capMaxJ = 0.5 * capCapacitance * 3.3 * 3.3;   // C * Vmax^2 / 2
+  const double capMaxJ = 0.5 * capCapacitanceF * capMaxV * capMaxV;
   for (uint16_t i = 0; i < numUes; ++i)
     {
       Ptr<LteUeNetDevice> ueDev = ueLteDevs.Get(i)->GetObject<LteUeNetDevice>();

@@ -82,6 +82,21 @@ public:
    */
   void SetTransitionProbabilities(double inactiveToActive, double activeToInactive);
 
+  /**
+   * @brief Pause Markov ticking. Cancels the next send event without tearing
+   *        down the socket. Idempotent. Used by the energy front-end to
+   *        suppress traffic generation while a UE is browned out.
+   */
+  void Pause();
+
+  /**
+   * @brief Resume Markov ticking. Re-arms a single send event one tick from
+   *        now (using the current state's interval). Idempotent.
+   */
+  void Resume();
+
+  bool IsPaused() const { return m_paused; }
+
 protected:
   virtual void DoDispose (void);
 
@@ -126,6 +141,7 @@ private:
   double m_pActiveToInactive;
 
   bool m_sendFirst; //!< If true, always send then decide; if false, original interval-based behavior
+  bool m_paused {false}; //!< Pause flag set by Pause()/Resume() (energy brown-out gate)
 
   Ptr<UniformRandomVariable> m_uniformRv;
 

@@ -253,6 +253,16 @@ MarkovUdpClient::Send (void)
   NS_LOG_FUNCTION (this);
   NS_ASSERT (m_sendEvent.IsExpired ());
 
+  // Brown-out gate: when paused by the energy front-end, swallow this tick
+  // and reschedule one inactive interval later so we wake up to check again.
+  if (m_paused)
+    {
+      if (m_sent < m_count)
+        m_sendEvent = Simulator::Schedule (m_intervalInactive,
+                                           &MarkovUdpClient::Send, this);
+      return;
+    }
+
   if (m_sendFirst)
     {
       // Send-first mode: always send, then decide next state.
@@ -293,9 +303,6 @@ MarkovUdpClient::WakeUp (void)
   NS_LOG_FUNCTION (this);
   NS_ASSERT (m_sendEvent.IsExpired ());
 
-  // Re-evaluate state after an inactive sleep period.
-  // If we transition to ACTIVE, send immediately.
-  // If still INACTIVE, sleep again for another inactiveInterval.
   UpdateState ();
   if (m_state == ACTIVE)
     {
@@ -323,6 +330,36 @@ Time
 MarkovUdpClient::GetNextInterval()
 {
   return (m_state == INACTIVE) ? m_intervalInactive : m_intervalActive;
+}
+
+void
+MarkovUdpClient::Pause()
+{
+  if (m_paused) return;
+  m_paused = true;
+  Simulator::Cancel (m_sendEvent);
+}
+
+void
+MarkovUdpClient::Resume()
+{
+  if (!m_paused) return;
+  m_paused = false;
+  if (m_sent < m_count)
+    {
+      // Wake-up decision: every recovery from brown-out is a fresh Markov
+      // transition. If the post-recovery state is ACTIVE, send a packet
+      // immediately (modelling an energy-aware app that opportunistically
+      // transmits when power is available). Then resume the normal Markov
+      // cadence with one full inter-arrival from now.
+      UpdateState ();
+      if (m_state == ACTIVE)
+        {
+          Simulator::ScheduleNow (&MarkovUdpClient::SendPacket, this);
+        }
+      m_sendEvent = Simulator::Schedule (GetNextInterval (),
+                                         &MarkovUdpClient::Send, this);
+    }
 }
 
 

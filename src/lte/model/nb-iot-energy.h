@@ -132,6 +132,17 @@ public:
     double GetTotalAccountedTimeMs() const;
     double GetDutyCycle() const;
 
+    // Brown-out gating: when remaining energy drops below m_brownoutEnergyJ the
+    // model freezes — DoNotifyStateChange records timing for completeness but
+    // does not drain the battery and does not accumulate active-state time.
+    // Hysteresis: model stays browned out until energy rises above
+    // m_recoveryEnergyJ. Disabled by default (thresholds 0).
+    void   SetBrownoutThresholds(double brownoutJ, double recoveryJ);
+    bool   IsBrownedOut() const { return m_brownedOut; }
+    uint32_t GetBrownoutCount() const { return m_brownoutCount; }
+    typedef Callback<void, uint32_t /*imsi*/, bool /*entering*/> BrownoutCb;
+    void   SetBrownoutCallback(BrownoutCb cb);
+
     void EnableLogging();
     void SetLogDir(std::string dirname);
     void SetModule(NbiotChip module);
@@ -149,6 +160,13 @@ private:
     bool m_logging = false;
     bool m_depleted = false;
     Time m_depletionTime = Time::Max();
+
+    // Brown-out gate state
+    double  m_brownoutEnergyJ = 0.0;     // freeze threshold (in J)
+    double  m_recoveryEnergyJ = 0.0;     // resume threshold (J), > brownoutJ
+    bool    m_brownedOut      = false;
+    uint32_t m_brownoutCount  = 0;       // number of brown-out entries
+    BrownoutCb m_brownoutCb;             // optional, fires on entry/exit
 };
 }
 #endif /* FF_MAC_SCHEDULER_H */

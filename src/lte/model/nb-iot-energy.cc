@@ -123,6 +123,27 @@ void NbiotEnergyModel::DoNotifyStateChange(PowerState newState){
     }
 
     m_lastStateChange = Simulator::Now();
+
+    // Brown-out gate. While browned out we do not drain the battery and do
+    // not accumulate dwell time toward the duty-cycle numerator/denominator —
+    // mirrors a real chip whose regulator has cut the modem off. The harvester
+    // continues to charge the cap; once GetRemainingEnergy() rises above the
+    // recovery threshold we exit brown-out and resume normal accounting on
+    // the *next* state transition.
+    if (m_brownedOut)
+    {
+        if (m_battery->GetRemainingEnergy() >= m_recoveryEnergyJ
+            && m_recoveryEnergyJ > 0.0)
+        {
+            m_brownedOut = false;
+            if (!m_brownoutCb.IsNull()) m_brownoutCb(m_imsi, false);
+        }
+        // While browned out, don't drain and don't accumulate dwell time.
+        // We still advance m_lastStateChange so post-recovery timing is clean.
+        m_lastState = newState;
+        return;
+    }
+
     // Skip the battery call if there was no time in the previous state — some
     // EnergySource implementations (GenericCapacitor) divide by duration in
     // DecreaseRemainingEnergy and produce NaN when it's zero.
@@ -137,7 +158,26 @@ void NbiotEnergyModel::DoNotifyStateChange(PowerState newState){
     }
     m_timeSpendInState[m_lastState] += stateTime.GetMilliSeconds();
     m_energySpendInState[m_lastState] += lostEnergy;
+
+    // Brown-out trigger: this drain may have pushed us below the threshold.
+    if (m_brownoutEnergyJ > 0.0
+        && m_battery->GetRemainingEnergy() <= m_brownoutEnergyJ)
+    {
+        m_brownedOut = true;
+        ++m_brownoutCount;
+        if (!m_brownoutCb.IsNull()) m_brownoutCb(m_imsi, true);
+    }
+
     m_lastState = newState;
+}
+
+void NbiotEnergyModel::SetBrownoutThresholds(double brownoutJ, double recoveryJ){
+    m_brownoutEnergyJ = brownoutJ;
+    m_recoveryEnergyJ = recoveryJ;
+}
+
+void NbiotEnergyModel::SetBrownoutCallback(BrownoutCb cb){
+    m_brownoutCb = cb;
 }
 
 double NbiotEnergyModel::GetEnergyRemaining(){
