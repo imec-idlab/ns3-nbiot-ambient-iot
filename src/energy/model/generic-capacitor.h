@@ -190,6 +190,7 @@ private:
   double m_loadResistance;                // load resistance, in Ohms
   double m_sourceResistance=0.0;          // source resistance, in Ohms
   std::string m_logdir = "";  // log directory for the capacitor traces
+  bool m_enableLog = false;   // gate per-tick CapacitorData.log writes (off by default to avoid GBs of disk usage)
 
 };
 

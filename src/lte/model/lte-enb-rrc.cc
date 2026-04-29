@@ -225,10 +225,15 @@ UeManager::UeManager (Ptr<LteEnbRrc> rrc, uint16_t rnti, State s, uint8_t compon
     m_needPhyMacConfiguration (false),
     m_caSupportConfigured (false),
     m_pendingStartDataRadioBearers (false),
-    m_t3412(Days(5)),
-    m_t3324(MilliSeconds(3500)),
-    m_dataInactivityInterval(40), // TODO: Error in transmission multiple packets in one RRC_Connected session. For now use 40ms (like in Deutsche Telekom NB-IoT networks to release the UE quickly)
-    m_eDrxCycle(0),
+    // 3GPP / GSMA NB-IoT mass-IoT deployment-guide values:
+    //   T3324      = 20 s   (active timer)
+    //   T3412      = 1 h    (periodic TAU)
+    //   eDRX cycle = 20.48 s
+    //   RRC release inactivity = 5 s
+    m_t3412(Hours(1)),
+    m_t3324(Seconds(20)),
+    m_dataInactivityInterval(5000),
+    m_eDrxCycle(MilliSeconds(20480)),
     m_enablePSM(true),
     m_persistentGrant(false)
 {
@@ -250,7 +255,8 @@ UeManager::DoInitialize ()
   m_physicalConfigDedicated.havePdschConfigDedicated = true;
   m_physicalConfigDedicated.pdschConfigDedicated.pa = LteRrcSap::PdschConfigDedicated::dB0;
 
-  //m_dataInactivityInterval = m_rrc->m_dataInactivityInterval;
+  // Pull NB-IoT timer values from LteEnbRrc into this UeManager.
+  m_dataInactivityInterval = m_rrc->m_dataInactivityInterval;
 
   for (uint8_t i = 0; i < m_rrc->m_numberOfComponentCarriers; i++)
     {
@@ -1286,9 +1292,10 @@ UeManager::RecvRrcConnectionSetupCompleted (LteRrcSap::RrcConnectionSetupComplet
         {
           SwitchToState (CONNECTED_NORMALLY);
         }
-      //m_t3324 =  (MilliSeconds (m_rrc->m_t3324));    // Multiple of 10.24 up-to 1090*10.24
-      //m_t3412 =  (MilliSeconds (m_rrc->m_t3412));
-      //m_eDrxCycle   =  (MilliSeconds (m_rrc->m_eDrxCycle));   // ptw ranges from 2.56 to 40.96 (2.56/16)
+      // Pull NB-IoT timer values from the LteEnbRrc attributes so
+      m_t3324     = MilliSeconds (m_rrc->m_t3324);    // Multiple of 10.24 up-to 1090*10.24
+      m_t3412     = MilliSeconds (m_rrc->m_t3412);
+      m_eDrxCycle = MilliSeconds (m_rrc->m_eDrxCycle);   // ptw ranges from 2.56 to 40.96 (2.56/16)
 
       m_rrc->m_connectionEstablishedTrace (m_imsi, m_rrc->ComponentCarrierToCellId (m_componentCarrierId), m_rnti);
       break;
@@ -2149,23 +2156,32 @@ LteEnbRrc::GetTypeId (void)
                    MakeTimeAccessor (&LteEnbRrc::m_systemInformationPeriodicity),
                    MakeTimeChecker ())
     .AddAttribute ("T3324",
-                "Timer for the T3324 ",
-                IntegerValue ( (0)),
+                "NB-IoT Active timer T3324 in ms (3GPP TS 24.008 §10.5.7.4a). "
+                "Time spent in IDLE_SUSPEND_EDRX after RRC release before "
+                "entering PSM. Operator-typical: 20 s (mass IoT).",
+                IntegerValue (20000),  // 20 s, GSMA NB-IoT deployment guide
                 MakeIntegerAccessor (&LteEnbRrc::m_t3324),
                 MakeIntegerChecker<int32_t> ())
     .AddAttribute ("T3412",
-                  "Timer for the T3412 ",
-                  IntegerValue ( (10000)),
+                  "NB-IoT Periodic TAU timer T3412 in ms (3GPP TS 24.008 "
+                  "§10.5.7.3). Time in PSM before periodic TAU wake. "
+                  "Operator-typical: 1 h (mass IoT).",
+                  IntegerValue (3600000),  // 1 h
                   MakeIntegerAccessor (&LteEnbRrc::m_t3412),
                   MakeIntegerChecker<int64_t> ())
     .AddAttribute ("TeDRXC",
-              "Timer for the TeDRXC ",
-              IntegerValue ( (0)),
+              "NB-IoT eDRX cycle in ms (TS 36.331 -NB). Standard NB-IoT "
+              "values: 2.56*2^k for k=0..15 → 2.56s..23304s. Operator-"
+              "typical: 20.48 s.",
+              IntegerValue (20480),  // 20.48 s
               MakeIntegerAccessor (&LteEnbRrc::m_eDrxCycle),
               MakeIntegerChecker<int32_t> ())
     .AddAttribute ("RrcReleaseInterval",
-              "Rrc Release Interval in ms",
-              UintegerValue(50000),
+              "RRC inactivity release timer in ms — eNB releases the UE "
+              "this long after the last UL/DL data event. Operator-typical: "
+              "5 s. Set to a small value (e.g. 40) to mimic the aggressive "
+              "release behaviour of some NB-IoT deployments.",
+              UintegerValue (5000),  // 5 s, vs. legacy 50000
               MakeUintegerAccessor (&LteEnbRrc::m_dataInactivityInterval),
               MakeUintegerChecker<uint16_t> (0, 60000) )
     .AddAttribute ("EnablePSM",

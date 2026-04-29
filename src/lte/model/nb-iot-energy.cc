@@ -180,6 +180,20 @@ void NbiotEnergyModel::SetBrownoutCallback(BrownoutCb cb){
     m_brownoutCb = cb;
 }
 
+void NbiotEnergyModel::PollBrownoutRecovery(){
+    // Mirrors the recovery branch inside DoNotifyStateChange but without
+    // requiring an LTE state change. Needed for RA mode where the UE parks in
+    // PSM during brown-out and the event-driven path stops firing entirely.
+    if (m_brownedOut
+        && m_recoveryEnergyJ > 0.0
+        && m_battery
+        && m_battery->GetRemainingEnergy() >= m_recoveryEnergyJ)
+    {
+        m_brownedOut = false;
+        if (!m_brownoutCb.IsNull()) m_brownoutCb(m_imsi, false);
+    }
+}
+
 double NbiotEnergyModel::GetEnergyRemaining(){
     // Update Power when reading
     DoNotifyStateChange(m_lastState);

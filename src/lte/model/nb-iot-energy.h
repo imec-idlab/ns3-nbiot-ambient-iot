@@ -142,6 +142,13 @@ public:
     uint32_t GetBrownoutCount() const { return m_brownoutCount; }
     typedef Callback<void, uint32_t /*imsi*/, bool /*entering*/> BrownoutCb;
     void   SetBrownoutCallback(BrownoutCb cb);
+    // Standalone recovery probe: must be called periodically from outside
+    // (e.g. the per-UE polling task in the scenario). The brown-out gate's
+    // recovery check normally rides on LTE state-change events, but during
+    // brown-out the LTE stack often parks in PSM with no transitions, which
+    // would deadlock recovery detection. This method runs the same check
+    // without requiring a state change.
+    void   PollBrownoutRecovery();
 
     void EnableLogging();
     void SetLogDir(std::string dirname);

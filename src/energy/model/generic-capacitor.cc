@@ -22,6 +22,7 @@
 #include "ns3/log.h"
 #include "ns3/assert.h"
 #include "ns3/double.h"
+#include "ns3/boolean.h"
 #include "ns3/trace-source-accessor.h"
 #include "ns3/simulator.h"
 
@@ -102,6 +103,13 @@ GenericCapacitor::GetTypeId (void)
                    MakeDoubleAccessor (&GenericCapacitor::SetSupplyVoltage,
                                        &GenericCapacitor::GetSupplyVoltage),
                    MakeDoubleChecker<double> ())
+    .AddAttribute ("EnableLog",
+                   "Write per-tick capacitor voltage / current / energy rows "
+                   "to <m_logdir>/CapacitorData.log. Off by default to avoid "
+                   "multi-GB disk usage at 21+ UEs over 1 h sims.",
+                   BooleanValue (false),
+                   MakeBooleanAccessor (&GenericCapacitor::m_enableLog),
+                   MakeBooleanChecker ())
   ;
   return tid;
 }
@@ -470,9 +478,11 @@ GenericCapacitor::CalculateRemainingEnergy (void)
     m_remainingEnergyJ << " J, V: " << m_currentVoltage <<
     " V, at " << now.GetSeconds() << " s");
 
-  std::ostringstream msg;
-  msg << totalCurrentA << "," << m_currentVoltage << "," << m_remainingEnergyJ;
-  LogData(msg.str());
+  if (m_enableLog) {
+    std::ostringstream msg;
+    msg << totalCurrentA << "," << m_currentVoltage << "," << m_remainingEnergyJ;
+    LogData(msg.str());
+  }
 }
 
 /**

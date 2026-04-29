@@ -347,11 +347,11 @@ MarkovUdpClient::Resume()
   m_paused = false;
   if (m_sent < m_count)
     {
-      // Wake-up decision: every recovery from brown-out is a fresh Markov
-      // transition. If the post-recovery state is ACTIVE, send a packet
-      // immediately (modelling an energy-aware app that opportunistically
-      // transmits when power is available). Then resume the normal Markov
-      // cadence with one full inter-arrival from now.
+      // Wake-up decision: every recovery from brown-out advances the gating
+      // Markov chain by one step. If the post-recovery state is ACTIVE, send
+      // a packet immediately (modelling an energy-aware app that
+      // opportunistically transmits on each restored-supply event), then
+      // resume the regular Markov cadence.
       UpdateState ();
       if (m_state == ACTIVE)
         {

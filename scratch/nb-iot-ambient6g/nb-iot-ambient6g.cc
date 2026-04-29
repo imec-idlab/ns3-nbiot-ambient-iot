@@ -95,6 +95,7 @@ void log_levels(bool all, enum LogLevel level)
 // uptime above capacitor threshold. Populated by trace hooks + periodic polling.
 struct UeEnergyTracker {
     Ptr<GenericCapacitor> cap;
+    NbiotEnergyModel*     energyModel = nullptr;  // for polled brown-out recovery
     double cutoffJ             = 0.0;
     double harvestedJ          = 0.0;
     Time   uptime              = Seconds(0);
@@ -143,6 +144,11 @@ static void RetuneSolarHarvester(SolarRetuneCfg cfg) {
 
 // Periodic poller: compares cap remaining energy to its cutoff and updates
 // uptime / depletion-cycle counters. Self-reschedules until simEnd.
+//
+// Also drives the energy model's brown-out recovery probe: in RA mode the UE
+// parks in PSM during brown-out and the LTE stack stops generating state
+// changes, so the event-driven recovery check inside DoNotifyStateChange
+// would never fire. Polling decouples that check from LTE activity.
 static void PollUeEnergy (UeEnergyTracker* t, Time interval, Time simEnd) {
     bool depletedNow = (t->cap->GetRemainingEnergy() <= t->cutoffJ + 1e-9);
     if (!depletedNow) t->uptime += interval;
@@ -158,6 +164,7 @@ static void PollUeEnergy (UeEnergyTracker* t, Time interval, Time simEnd) {
         t->firstRecoveryTime = Simulator::Now();
     }
     t->wasDepletedLastTick = depletedNow;
+    if (t->energyModel) t->energyModel->PollBrownoutRecovery();
     if (Simulator::Now() + interval <= simEnd) {
         Simulator::Schedule(interval, &PollUeEnergy, t, interval, simEnd);
     }
@@ -242,6 +249,24 @@ int main (int argc, char *argv[])
   bool persistentGrant {true};
   bool sendFirst {false};
 
+  // Realistic NB-IoT mass-IoT timers (3GPP / GSMA deployment guide).
+  // Override on the command line to study sensitivity.
+  uint32_t t3324_ms     {20000};    // Active timer  (20 s)
+  uint64_t t3412_ms     {3600000};  // Periodic TAU  (1 h)
+  uint32_t edrxCycle_ms {20480};    // eDRX cycle    (20.48 s)
+  uint32_t rrcRelease_ms{5000};     // RRC inactivity release (5 s)
+
+  // Ambient-IoT mode: when true, override the mass-IoT timers above to a
+  // Class-C "active batteryless with brief listening windows" set. Short
+  // post-data listen and longer eDRX cycle keep the per-packet on-time
+  // affordable under harvest-only operation while still leaving a 2 s
+  // Energy-budget check: ~1.4 J/h drain vs ~9 J/h harvest = 6.4x margin.
+  bool     ambientIoT   {false};
+  uint32_t aiotT3324Ms       {2000};      // 2 s post-data listen for ACK / MT trigger
+  uint64_t aiotT3412Ms       {86400000};  // 24 h TAU — never fires in a 1 h sim
+  uint32_t aiotEdrxCycleMs   {40960};     // 40.96 s — rare paging-window cycling
+  uint32_t aiotRrcReleaseMs  {1000};      // 1 s release after RLC drain
+
 
   CommandLine cmd (__FILE__);
   cmd.AddValue ("simDuration", "Total duration of the simulation", simDuration);
@@ -276,6 +301,15 @@ int main (int argc, char *argv[])
   cmd.AddValue ("packetGenIntervalSec",
                 "Markov tick (= mean inter-arrival in s)",
                 packetGenInterval);
+  cmd.AddValue ("t3324Ms",     "T3324 active timer in ms (3GPP-typical 20000)", t3324_ms);
+  cmd.AddValue ("t3412Ms",     "T3412 periodic TAU timer in ms (typical 3600000)", t3412_ms);
+  cmd.AddValue ("eDrxCycleMs", "eDRX cycle in ms (NB-IoT: 2560*2^k; typical 20480)", edrxCycle_ms);
+  cmd.AddValue ("rrcReleaseMs","RRC inactivity release in ms (typical 5000)", rrcRelease_ms);
+  cmd.AddValue ("ambientIoT",  "If true, use Class-C active-batteryless timers for both "
+                                "PG and RA (T3324=2s, T3412=24h, eDRX=40.96s, "
+                                "RrcRelease=1s). Trade-off: brief reachability window "
+                                "kept so PG can operate; energy still ~6x under harvest.",
+                ambientIoT);
 
   cmd.Parse (argc, argv);
 
@@ -453,6 +487,19 @@ int main (int argc, char *argv[])
 
   // Install LTE Devices to the nodes
   Config::SetDefault ("ns3::LteEnbRrc::PersistentGrant", BooleanValue (persistentGrant));
+
+  if (ambientIoT) {
+      t3324_ms      = aiotT3324Ms;
+      t3412_ms      = aiotT3412Ms;
+      edrxCycle_ms  = aiotEdrxCycleMs;
+      rrcRelease_ms = aiotRrcReleaseMs;
+  }
+
+  // Apply effective timer values to the eNB-RRC defaults.
+  Config::SetDefault ("ns3::LteEnbRrc::T3324",              IntegerValue ((int32_t) t3324_ms));
+  Config::SetDefault ("ns3::LteEnbRrc::T3412",              IntegerValue ((int64_t) t3412_ms));
+  Config::SetDefault ("ns3::LteEnbRrc::TeDRXC",             IntegerValue ((int32_t) edrxCycle_ms));
+  Config::SetDefault ("ns3::LteEnbRrc::RrcReleaseInterval", UintegerValue ((uint16_t) rrcRelease_ms));
   NetDeviceContainer enbLteDevs = lteHelper->InstallEnbDevice (enbNodes);
   NetDeviceContainer ueLteDevs = lteHelper->InstallUeDevice (ueNodes);
 
@@ -644,8 +691,9 @@ int main (int argc, char *argv[])
     ueHarvs[i] = harv;
 
     // Ambient-IoT trackers
-    ueTracker[i].cap      = cap;
-    ueTracker[i].cutoffJ  = cutoffJ;
+    ueTracker[i].cap         = cap;
+    ueTracker[i].energyModel = &ueRrc->m_energyModel;
+    ueTracker[i].cutoffJ     = cutoffJ;
     harv->TraceConnectWithoutContext(
         "TotalEnergyHarvested",
         MakeBoundCallback(&OnHarvestedTrace, &ueTracker[i].harvestedJ));
