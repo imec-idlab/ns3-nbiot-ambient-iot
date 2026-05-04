@@ -834,15 +834,6 @@ int main (int argc, char *argv[])
          << avgDutyCycle << "\t" << sumNDep << "\n";
   sumOut.close();
 
-  std::cout << "Flows Tx=" << aggTx << " Rx=" << aggRx << " Lost=" << aggLost
-            << " UE->eNB meanDelay=" << aggMeanDelay << "ms"
-            << " (excluded EPC fixed=" << excludeMs << "ms)\n"
-            << "Ambient-IoT: depleted=" << nDepleted << "/" << numUes
-            << " depletion-events=" << sumNDep
-            << " avgHarvested=" << avgHarvestedJ << "J"
-            << " avgUptimeFrac=" << avgUptimeFrac
-            << " avgDutyCycle=" << avgDutyCycle << std::endl;
-
   Simulator::Destroy ();
 
   double throughput = (rxBytes * 8) / (simDuration.GetSeconds()) / 1000.0; //kbit/s

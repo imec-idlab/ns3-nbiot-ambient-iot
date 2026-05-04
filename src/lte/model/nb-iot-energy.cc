@@ -114,22 +114,14 @@ void NbiotEnergyModel::DoNotifyStateChange(PowerState newState){
         break;
     }
 
-    // Log the energy comsumption per state
-    if (m_logging){
-        std::ofstream logfile;
-        logfile.open(m_logdir + "nbiot_energy.log", std::ios_base::app);
-        logfile << Simulator::Now().GetMilliSeconds() << ", " << m_imsi << ", " << PowerStateToString( m_lastState )<< ", " << lostEnergy << std::endl;
-        logfile.close();
-    }
-
     m_lastStateChange = Simulator::Now();
 
-    // Brown-out gate. While browned out we do not drain the battery and do
-    // not accumulate dwell time toward the duty-cycle numerator/denominator —
-    // mirrors a real chip whose regulator has cut the modem off. The harvester
-    // continues to charge the cap; once GetRemainingEnergy() rises above the
-    // recovery threshold we exit brown-out and resume normal accounting on
-    // the *next* state transition.
+    // Brown-out gate. While browned out we do not drain the battery, do not
+    // accumulate dwell time, and do not emit a log entry — mirrors a real chip
+    // whose regulator has cut the modem off, so no real energy was drawn from
+    // the cap during this interval. The harvester continues to charge the cap;
+    // once GetRemainingEnergy() rises above the recovery threshold we exit
+    // brown-out and resume normal accounting on the *next* state transition.
     if (m_brownedOut)
     {
         if (m_battery->GetRemainingEnergy() >= m_recoveryEnergyJ
@@ -138,10 +130,15 @@ void NbiotEnergyModel::DoNotifyStateChange(PowerState newState){
             m_brownedOut = false;
             if (!m_brownoutCb.IsNull()) m_brownoutCb(m_imsi, false);
         }
-        // While browned out, don't drain and don't accumulate dwell time.
-        // We still advance m_lastStateChange so post-recovery timing is clean.
         m_lastState = newState;
         return;
+    }
+
+    if (m_logging){
+        std::ofstream logfile;
+        logfile.open(m_logdir + "nbiot_energy.log", std::ios_base::app);
+        logfile << Simulator::Now().GetMilliSeconds() << ", " << m_imsi << ", " << PowerStateToString( m_lastState )<< ", " << lostEnergy << std::endl;
+        logfile.close();
     }
 
     // Skip the battery call if there was no time in the previous state — some
