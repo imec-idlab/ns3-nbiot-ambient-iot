@@ -51,6 +51,7 @@
 #include "ns3/nb-iot-energy.h"
 #include "ns3/generic-capacitor.h"
 #include "ns3/basic-energy-harvester.h"
+#include "ns3/solar-energy-harvester.h"
 #include "ns3/flow-monitor-helper.h"
 #include "ns3/ipv4-flow-classifier.h"
 
@@ -119,36 +120,8 @@ static void OnBrownout (Ptr<MarkovUdpClient> client,
     else          client->Resume();
 }
 
-// Diurnal solar profile: P(t) = Pmax * sin^2(pi * t / T_day), driven by
-// retuning a per-UE ConstantRandomVariable that the harvester reads each
-// tick.
-struct SolarRetuneCfg {
-    Ptr<ConstantRandomVariable> rv;
-    double Pmax;     // W
-    Time   period;   // full sin^2 hump (= one "day")
-    Time   step;     // retune cadence
-    Time   simEnd;
-};
-
-static void RetuneSolarHarvester(SolarRetuneCfg cfg) {
-    double phase = std::fmod(Simulator::Now().GetSeconds(),
-                             cfg.period.GetSeconds())
-                   / cfg.period.GetSeconds();
-    double s = std::sin(M_PI * phase);
-    double P = cfg.Pmax * s * s;             // sin^2 envelope: 0 -> Pmax -> 0
-    cfg.rv->SetAttribute("Constant", DoubleValue(P));
-    if (Simulator::Now() + cfg.step <= cfg.simEnd) {
-        Simulator::Schedule(cfg.step, &RetuneSolarHarvester, cfg);
-    }
-}
-
 // Periodic poller: compares cap remaining energy to its cutoff and updates
 // uptime / depletion-cycle counters. Self-reschedules until simEnd.
-//
-// Also drives the energy model's brown-out recovery probe: in RA mode the UE
-// parks in PSM during brown-out and the LTE stack stops generating state
-// changes, so the event-driven recovery check inside DoNotifyStateChange
-// would never fire. Polling decouples that check from LTE activity.
 static void PollUeEnergy (UeEnergyTracker* t, Time interval, Time simEnd) {
     bool depletedNow = (t->cap->GetRemainingEnergy() <= t->cutoffJ + 1e-9);
     if (!depletedNow) t->uptime += interval;
@@ -212,6 +185,9 @@ int main (int argc, char *argv[])
 {
   Time simDuration {Seconds(3600)};            // 1 hour
   std::string logDir {"output"};
+  // Verbose ns-3 LTE NS_LOG_DEBUG. OFF by default: at large N it floods stdout
+  // (GBs) and throttles the sim to a crawl (the .out metrics are unaffected).
+  bool ns3Debug {false};
   int numUes {10};
   double cellSize {2500};
   double heightOfUes {1.5};
@@ -232,13 +208,14 @@ int main (int argc, char *argv[])
   double capCapacitanceF {1.0};                // 1 F supercap
   double capMaxV       {3.3};
   double capInitV      {2.5};                  // start near cutoff (battery-less cold-start)
+  // Ambient-IoT: randomise each UE's start voltage in [capInitVMin, capMaxV]
+  // (devices have been harvesting for different times before the run). Off =>
+  // every UE starts at the fixed capInitV above.
+  bool   capInitVRandom {false};
+  double capInitVMin    {2.7};                 // lower bound of the per-UE random start band
   double capCutoffV    {2.4};                  // raise from 1.8 V; usable = 2.5 J
   // Leakage resistance: tau = R_leak * C sets the RC charge time-constant.
   // Default 10 kohm gives tau ~ 10^4 s,
-  // so the cap visibly approaches its asymptote (charging slows near V_max)
-  // instead of charging linearly. Trade-off: leakage power = V^2/R_leak,
-  // ~0.9 mW at 3 V (i.e. ~36 % of the 2.5 mW mean harvest is dissipated).
-  // Matches the CAP-XX HS-series 1 F super-cap leakage spec (~10 kohm).
   double capLeakageR   {10000.0};              // 10 kohm
 
 
@@ -248,6 +225,25 @@ int main (int argc, char *argv[])
   Time channelDelay {MilliSeconds (10)};
   bool persistentGrant {true};
   bool sendFirst {false};
+  // Model 1 (deep-sleep + SR-resurrect): FUG UE sleeps in PSM (~15 uW) between
+  // packets and self-resurrects via the SR, instead of paying the connected
+  // NPDCCH-monitoring floor (~3 mW). Disable to recover the connected-floor model.
+  bool deepSleepFug {true};
+  // Connected-mode DRX for the FUG-off baseline (deepSleepFug=false). Instead of
+  // the bare connected NPDCCH-monitoring floor, the UE stays RRC-connected but
+  // monitors NPDCCH only during the on-duration of each long DRX cycle
+  // (TS 36.321 5.7; DRX-Config-NB-r13, drx-Cycle-v1430 -> sf10240 = 10.24 s).
+  bool     cdrxFug {false};
+  uint32_t cdrxCycleMs     {10240};  // long DRX cycle (sf10240 = 10.24 s)
+  uint32_t cdrxInactivityMs {500};   // drx-InactivityTimer (extends Active Time after a grant)
+  bool     proactiveFug {false};
+  uint32_t srDedicatedSubcarriers {4};   // SR subcarriers carved from the 12-tone NPRACH pool
+  uint32_t srBaseNprachPeriodMs   {80};  // CE0 NPRACH occasion period (round-robin base); matches
+                                         // lte-enb-rrc.cc CE0 ms80. Sensitivity floor ms40 (CE0-only).
+  uint32_t srPeriodMs {0};               // manual override in ms; 0 = derive from round-robin model
+  bool     srPreambleSr {false};         // faithful dedicated SR via real NPRACH preamble
+  bool     srHybridContention {false};   // unscheduled UEs also contend on the shared pool (needs srPreambleSr)
+  uint32_t srContentionSubcarriers {6};  // offset: reserved SR subcarriers start above this many
 
   // Realistic NB-IoT mass-IoT timers (3GPP / GSMA deployment guide).
   // Override on the command line to study sensitivity.
@@ -282,6 +278,37 @@ int main (int argc, char *argv[])
                 "Skip re-RACH after initial access; rely on DCI0 grants", persistentGrant);
   cmd.AddValue ("sendFirst",
                 "Send-first traffic: always send then decide next state", sendFirst);
+  cmd.AddValue ("deepSleepFug",
+                "Model 1: FUG UE deep-sleeps (PSM) between packets and resurrects via SR "
+                "(else stays in the connected NPDCCH-monitoring floor)", deepSleepFug);
+  cmd.AddValue ("cdrxFug",
+                "FUG-off baseline: use connected-mode DRX (gate NPDCCH monitoring to the "
+                "on-duration of each DRX cycle) instead of bare monitoring. Needs !deepSleepFug",
+                cdrxFug);
+  cmd.AddValue ("cdrxCycleMs", "Connected-mode long DRX cycle in ms (NB-IoT max sf10240=10240)", cdrxCycleMs);
+  cmd.AddValue ("proactiveFug",
+                "Standalone 4th mode: proactive FUG (eNB predicts each UE's period and pushes "
+                "grants, no SR). Implies persistentGrant + deepSleepFug", proactiveFug);
+  cmd.AddValue ("srPreambleSr",
+                "Faithful dedicated SR: UE transmits a real NPRACH preamble on its reserved "
+                "subcarrier; eNB resolves identity from its resource->RNTI map (TS 36.331 "
+                "SchedulingRequestConfig-NB)", srPreambleSr);
+  cmd.AddValue ("srHybridContention",
+                "Hybrid SR: a connected UE waiting for its reserved occasion also contends on the "
+                "shared pool every base NPRACH occasion; a singleton from a connected UE is granted "
+                "(no RAR). The reserved slot stays the guaranteed floor. Needs srPreambleSr",
+                srHybridContention);
+  cmd.AddValue ("srContentionSubcarriers", "Offset: reserved SR subcarriers start above this many "
+                "(RA/contention pool size)", srContentionSubcarriers);
+  cmd.AddValue ("srDedicatedSubcarriers",
+                "Dedicated SR subcarriers reserved from the NPRACH pool; effective SR "
+                "period = srBaseNprachPeriod * ceil(numUes / this)", srDedicatedSubcarriers);
+  cmd.AddValue ("srBaseNprachPeriod",
+                "Base NPRACH occasion period in ms (CE0) for the SR round-robin model",
+                srBaseNprachPeriodMs);
+  cmd.AddValue ("srPeriod",
+                "Manual override for the dedicated-NPRACH SR period in ms; 0 = derive from "
+                "the round-robin model (srBaseNprachPeriod * ceil(numUes/pool))", srPeriodMs);
   cmd.AddValue ("solarProfile",
                 "Use sin^2 diurnal solar harvest profile (else constant)", solarProfile);
   cmd.AddValue ("harvestPmaxW",
@@ -291,7 +318,11 @@ int main (int argc, char *argv[])
   cmd.AddValue ("capMaxV",
                 "Cap full-charge voltage in V", capMaxV);
   cmd.AddValue ("capInitV",
-                "Cap starting voltage in V", capInitV);
+                "Cap starting voltage in V (used when capInitVRandom=false)", capInitV);
+  cmd.AddValue ("capInitVRandom",
+                "Randomise each UE's start voltage uniformly in [capInitVMin, capMaxV]", capInitVRandom);
+  cmd.AddValue ("capInitVMin",
+                "Lower bound of the per-UE random start voltage band (V)", capInitVMin);
   cmd.AddValue ("capCutoffV",
                 "Cap depletion-cutoff voltage in V", capCutoffV);
   cmd.AddValue ("capLeakageR",
@@ -311,9 +342,14 @@ int main (int argc, char *argv[])
                                 "kept so PG can operate; energy still ~6x under harvest.",
                 ambientIoT);
 
+  cmd.AddValue ("ns3Debug", "Enable verbose ns-3 LTE NS_LOG_DEBUG (floods stdout at large N; off by default)", ns3Debug);
   cmd.Parse (argc, argv);
 
-  log_levels(false, LOG_LEVEL_DEBUG);
+  // Proactive FUG (4th mode) is a deep-sleep, persistent-grant mode whose grants
+  // come from the eNB predictor instead of an SR. Force the implied settings.
+  if (proactiveFug) { persistentGrant = true; deepSleepFug = true; cdrxFug = false; }
+
+  if (ns3Debug) log_levels(false, LOG_LEVEL_DEBUG);
   /*
    * make and change into the lodDir
    * */
@@ -503,6 +539,11 @@ int main (int argc, char *argv[])
   NetDeviceContainer enbLteDevs = lteHelper->InstallEnbDevice (enbNodes);
   NetDeviceContainer ueLteDevs = lteHelper->InstallUeDevice (ueNodes);
 
+  // Proactive FUG (4th mode): put the cell scheduler in proactive mode so it
+  // predicts each UE's period and pushes grants instead of waiting for an SR.
+  Ptr<LteEnbNetDevice> enbDev = enbLteDevs.Get (0)->GetObject<LteEnbNetDevice> ();
+  enbDev->GetMac ()->SetProactiveFug (proactiveFug);
+
 
   // Attach a Ipv4 to UEs
   // Install the IP stack on the UEs
@@ -541,6 +582,24 @@ int main (int argc, char *argv[])
   ApplicationContainer serverApps;
 
 
+  uint32_t srRoundRobinPeriods =
+      (srDedicatedSubcarriers == 0)
+          ? 1u
+          : (static_cast<uint32_t> (numUes) + srDedicatedSubcarriers - 1) / srDedicatedSubcarriers;
+  uint32_t effSrPeriodMs =
+      (srPeriodMs != 0) ? srPeriodMs : srBaseNprachPeriodMs * srRoundRobinPeriods;
+  std::cout << "[SR model] numUes=" << numUes
+            << " dedicatedSubcarriers=" << srDedicatedSubcarriers
+            << " base=" << srBaseNprachPeriodMs << "ms"
+            << " roundRobinPeriods=" << srRoundRobinPeriods
+            << " => effSrPeriod=" << effSrPeriodMs << "ms" << std::endl;
+
+  if (srPreambleSr && !proactiveFug) {
+    enbDev->GetMac ()->SetSrTopology (srDedicatedSubcarriers, srContentionSubcarriers,
+                                      srRoundRobinPeriods);
+    enbDev->GetMac ()->SetSrHybridContention (srHybridContention);
+  }
+
   // Set up the data transmission for the Pre-Run
   for (uint16_t i = 0; i < numUes; ++i)
   {
@@ -578,9 +637,18 @@ int main (int argc, char *argv[])
     }
 
     if (persistentGrant) {
-      ueRrc->SetAttribute ("PSM", BooleanValue (false));
+      ueRrc->SetAttribute ("PSM",  BooleanValue (deepSleepFug));
+      ueRrc->SetAttribute ("eDRX", BooleanValue (false));
       ueRrc->SetAttribute ("PersistentGrant", BooleanValue (persistentGrant));
       ueLteDevice->GetMac ()->SetPersistentGrant (persistentGrant);   // mirror to MAC
+      ueLteDevice->GetMac ()->SetSrPeriod (effSrPeriodMs);            // round-robin SR cadence: base*ceil(N/pool)
+      ueLteDevice->GetMac ()->SetDeepSleepFug (deepSleepFug);         // (Stage B will use this for SR-resume)
+      ueLteDevice->GetMac ()->SetCdrx (cdrxFug && !deepSleepFug, cdrxCycleMs, cdrxInactivityMs);
+      ueLteDevice->GetMac ()->SetProactiveFug (proactiveFug);         // 4th mode: no SR, await predicted grant
+      if (srPreambleSr && !proactiveFug) {
+        ueLteDevice->GetMac ()->SetSrDedicated (i, srDedicatedSubcarriers, srContentionSubcarriers);
+        ueLteDevice->GetMac ()->SetSrHybridContention (srHybridContention);
+      }
       }
 
     UdpServerHelper server (ulPort);
@@ -617,9 +685,8 @@ int main (int argc, char *argv[])
     // uePhy->SetAttribute ("NoiseFigure", DoubleValue (9.0));
   }
 
-  // Add a GenericCapacitor and a BasicEnergyHarvester ----
+  // Add a GenericCapacitor and a SolarEnergyHarvester ----
   const Time   pollInterval    = MilliSeconds(100);
-  const Time   solarRetuneStep = Seconds(60);     // sun moves slowly: 60 s tick is plenty
   const double cutoffJ         = 0.5 * capCapacitanceF * capCutoffV * capCutoffV;
   const double meanHarvestW    = solarProfile ? 0.5 * harvestPmaxW : harvestPmaxW;
 
@@ -633,18 +700,25 @@ int main (int argc, char *argv[])
   const double recoveryJ       = 0.5 * capCapacitanceF * recoveryV * recoveryV;
 
   std::vector<Ptr<GenericCapacitor>>     ueCaps(numUes);
-  std::vector<Ptr<BasicEnergyHarvester>> ueHarvs(numUes);
+  std::vector<Ptr<SolarEnergyHarvester>> ueHarvs(numUes);
   std::vector<UeEnergyTracker>           ueTracker(numUes);
+  // Per-UE random start voltage (ambient-IoT cold-start heterogeneity). Own
+  // RngStream so the draw is reproducible and varies with RngRun.
+  Ptr<UniformRandomVariable> capInitVar = CreateObject<UniformRandomVariable> ();
+  capInitVar->SetAttribute ("Min", DoubleValue (capInitVMin));
+  capInitVar->SetAttribute ("Max", DoubleValue (capMaxV));
+  capInitVar->SetStream (777);
   for (uint16_t i = 0; i < numUes; ++i)
   {
     Ptr<Node> node = ueNodes.Get(i);
     Ptr<LteUeNetDevice> ueDev = ueLteDevs.Get(i)->GetObject<LteUeNetDevice>();
     Ptr<LteUeRrc> ueRrc = ueDev->GetRrc();
 
+    double initV = capInitVRandom ? capInitVar->GetValue () : capInitV;
     Ptr<GenericCapacitor> cap = CreateObject<GenericCapacitor>();
     cap->SetAttribute("Capacitance",                   DoubleValue(capCapacitanceF));
     cap->SetAttribute("MaxCapacitorVoltage",           DoubleValue(capMaxV));
-    cap->SetAttribute("InitialCapacitorVoltage",       DoubleValue(capInitV));
+    cap->SetAttribute("InitialCapacitorVoltage",       DoubleValue(initV));
     cap->SetAttribute("ThresholdVoltage",              DoubleValue(capCutoffV));
     cap->SetAttribute("SupplyVoltage",                 DoubleValue(capMaxV));
     cap->SetAttribute("InternalResistance",            DoubleValue(0.1));
@@ -652,15 +726,21 @@ int main (int argc, char *argv[])
     cap->SetAttribute("PeriodicEnergyUpdateInterval",  TimeValue(pollInterval));
     cap->SetNode(node);
 
-    Ptr<BasicEnergyHarvester> harv = CreateObject<BasicEnergyHarvester>();
-    harv->SetAttribute("PeriodicHarvestedPowerUpdateInterval",
-                       TimeValue(pollInterval));
-
-    // Harvester is fed by a per-UE ConstantRandomVariable. In solar mode a
-    // periodic retune callback rewrites that constant from a sin^2 envelope.
-    Ptr<ConstantRandomVariable> hrv = CreateObject<ConstantRandomVariable>();
-    hrv->SetAttribute("Constant", DoubleValue(solarProfile ? 0.0 : meanHarvestW));
-    harv->SetAttribute("HarvestablePower", PointerValue(hrv));
+    // SolarEnergyHarvester: encapsulates the analytic
+    //   P_h(t) = Pmax * sin^2(pi * (t / DayPeriod + PhaseOffset))
+    Ptr<SolarEnergyHarvester> harv = CreateObject<SolarEnergyHarvester>();
+    if (solarProfile) {
+        harv->SetAttribute("PeakPower",   DoubleValue(harvestPmaxW));
+        harv->SetAttribute("DayPeriod",   TimeValue(simDuration));
+        harv->SetAttribute("PhaseOffset", DoubleValue(0.0));
+    } else {
+        // Flat profile at meanHarvestW: long DayPeriod + noon offset
+        // pins sin^2 at ~1 for the entire sim.
+        harv->SetAttribute("PeakPower",   DoubleValue(meanHarvestW));
+        harv->SetAttribute("DayPeriod",   TimeValue(Seconds(1e9)));
+        harv->SetAttribute("PhaseOffset", DoubleValue(0.5));
+    }
+    harv->SetAttribute("UpdateInterval", TimeValue(pollInterval));
     harv->SetNode(node);
     harv->SetEnergySource(cap);
     cap->ConnectEnergyHarvester(harv);      // register on the source side too
@@ -668,18 +748,10 @@ int main (int argc, char *argv[])
     cap->Initialize();
     harv->Initialize();
 
-    if (solarProfile) {
-      SolarRetuneCfg cfg{hrv, harvestPmaxW, simDuration, solarRetuneStep, simDuration};
-      Simulator::ScheduleNow(&RetuneSolarHarvester, cfg);
-    }
-
     ueRrc->m_energyModel.SetEnergySource(cap);
     ueRrc->m_energyModel.SetBrownoutThresholds(brownoutJ, recoveryJ);
 
-    // Brown-out callback: pause this UE's Markov client when the energy model
-    // crosses the cut-off threshold; resume it when the cap recharges past the
-    // hysteresis recovery point. Captures the per-UE client by index, so the
-    // ulClient pointer (in the apps loop above) is reachable via clientApps.
+    // Brown-out callback
     Ptr<MarkovUdpClient> uClient = clientApps.Get(i)->GetObject<MarkovUdpClient>();
     if (uClient)
     {
@@ -823,15 +895,18 @@ int main (int argc, char *argv[])
   double avgUptimeFrac = numUes > 0 ? sumUptimeFrac / numUes : 0.0;
   double avgDutyCycle  = numUes > 0 ? sumDutyCycle  / numUes : 0.0;
 
+  // issued >> packets carried => many wasted (mispredicted) grants.
+  uint64_t proactiveGrants = enbDev->GetMac ()->GetProactiveGrantsIssued ();
+
   std::ofstream sumOut(logDir + "summary.out");
   sumOut << "numUes\tpersistentGrant\tsendFirst\taggTx\taggRx\taggLost\taggLossRatio\t"
             "aggMeanUEtoENBDelay_ms\tnDepleted\tavgHarvested_J\tavgUptimeFrac\t"
-            "avgDutyCycle\tsumDepletionEvents\n";
+            "avgDutyCycle\tsumDepletionEvents\tproactiveGrants\n";
   sumOut << numUes << "\t" << persistentGrant << "\t" << sendFirst << "\t"
          << aggTx << "\t" << aggRx << "\t" << aggLost << "\t" << aggLossRatio
          << "\t" << aggMeanDelay << "\t" << nDepleted << "\t"
          << avgHarvestedJ << "\t" << avgUptimeFrac << "\t"
-         << avgDutyCycle << "\t" << sumNDep << "\n";
+         << avgDutyCycle << "\t" << sumNDep << "\t" << proactiveGrants << "\n";
   sumOut.close();
 
   Simulator::Destroy ();

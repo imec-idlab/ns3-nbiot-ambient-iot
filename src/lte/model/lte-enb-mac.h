@@ -163,7 +163,13 @@ public:
    * bypassing NPRACH/MSG3/MSG4/MSG5 for the buffer update.
    */
   void NotifyIdealUlBuffer (uint16_t rnti, uint64_t bytes);
-  
+
+  /**
+   * AS RAI (TS 36.321 5.4.5): the UE reported "no further UL/DL data" -- forward
+   * to the RRC so it releases/suspends the UE immediately (skip the inactivity timer).
+   */
+  void NotifyRai (uint16_t rnti);
+
 
   /**
    * TracedCallback signature for DL scheduling events.
@@ -390,6 +396,23 @@ public:
    */
   void DoReceivePhyPdu (Ptr<Packet> p);
 
+  // Proactive FUG (4th mode). SetProactiveFug puts the cell scheduler in
+  // proactive mode (applied when the scheduler is lazily created).
+  // GetProactiveGrantsIssued returns the running count of proactive grants
+  // pushed (denominator for false-positive accounting).
+  void SetProactiveFug (bool enable);
+  uint64_t GetProactiveGrantsIssued () const;
+
+  // Dedicated SR on the real NPRACH (TS 36.331 SchedulingRequestConfig-NB). The
+  // eNB holds the resource->UE mapping: a UE configured with dedicated SR index
+  // srIndex owns reserved subcarrier (contentionOffset + srIndex % reserved) at
+  // round-robin phase (srIndex / reserved). A preamble on that reserved
+  // subcarrier carries NO identity; the eNB derives the C-RNTI from this map and
+  // grants DCI N0. RegisterDedicatedSr models the RRC config exchange.
+  void RegisterDedicatedSr (uint16_t rnti, uint32_t srIndex);
+  void SetSrTopology (uint32_t reservedSubcarriers, uint32_t contentionOffset, uint32_t cycle);
+  void SetSrHybridContention (bool en);   ///< resolve singleton contention-pool preambles from connected UEs as SR grants
+
 private:
   /**
   * \brief UL Info List ELements HARQ Feedback function
@@ -536,11 +559,19 @@ private:
   
   
   void DoRemoveUeFromScheduler(uint16_t rnti);
+  void DoParkUeInScheduler(uint16_t rnti);
   
   void DoSetLogDir(std::string logdir);
   
 
   NbiotScheduler* m_schedulerNb = nullptr;
+  bool m_enbProactiveMode = false;       ///< proactive FUG; applied to the scheduler on creation
+  // Dedicated-SR resource->UE map (the eNB-held identity, set via RRC config).
+  std::map<uint32_t, uint16_t> m_dedicatedSrIndexToRnti; ///< srIndex -> C-RNTI
+  uint32_t m_srReservedSubcarriers = 0;  ///< N_res reserved for dedicated SR (0 = disabled)
+  uint32_t m_srContentionOffset = 0;     ///< first reserved subcarrier index (= N_cont)
+  uint32_t m_srCycle = 1;                 ///< round-robin cycle in occasions = ceil(N/N_res)
+  bool m_srHybridContention = false;     ///< treat singleton contention-pool preambles from connected UEs as SR
   std::map<uint16_t, uint32_t> m_rapIdRantiMap; ///< RAPID RNTI map
   std::map<uint32_t, NbIotRrcSap::NprachParametersNb::CoverageEnhancementLevel> m_RntiCeMap;
   std::map<uint16_t, bool> m_rapIdCollisionMap; // Used when contention resolution is involved

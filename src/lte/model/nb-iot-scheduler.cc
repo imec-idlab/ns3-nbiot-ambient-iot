@@ -331,6 +331,7 @@ NbiotScheduler::ScheduleRarReq (NbIotRrcSap::NpdcchMessage msg, SearchSpaceConfi
       m_rntiUeConfigMap[it->cellRnti].rlcUlBuffer = 0;
       m_rntiUeConfigMap[it->cellRnti].rnti = it->cellRnti;
       m_rntiUeConfigMap[it->cellRnti].searchSpaceConfig = ssc;
+      m_rntiUeConfigMap[it->cellRnti].proactive = m_proactiveMode; // 4th mode: predict+push grants, no SR
     }
   m_rarQueue[ssc].push_back (msg);
 }
@@ -345,6 +346,32 @@ NbiotScheduler::Schedule (uint64_t frameNo, uint64_t subframeNo)
   if (frameNo == 1 && subframeNo == 1)
     {
       return ret;
+    }
+  // Proactive FUG (4th mode): for each UE whose period has been learned, push a
+  // blind minimum grant at the predicted occasion -- NO scheduling request. The
+  // grant flows through the normal rlcUlBuffer>0 gate below. If the UE has data
+  // it fills the grant (+ a BSR for follow-ups); if not, the grant is wasted (a
+  // false positive). RNTIs are collected first to avoid mutating the maps mid-
+  // iteration.
+  if (m_proactiveMode)
+    {
+      uint64_t nowSf = 10 * (frameNo - 1) + (subframeNo - 1);
+      std::vector<uint16_t> toGrant;
+      for (auto & kv : m_rntiUeConfigMap)
+        {
+          UeConfig & ue = kv.second;
+          if (!ue.proactive || ue.predPeriodSf == 0)
+            continue;
+          if (nowSf >= ue.nextGrantSf)
+            {
+              toGrant.push_back (ue.rnti);
+              ue.proactiveGrantsIssued++;
+              m_proactiveGrantsIssued++;
+              do { ue.nextGrantSf += ue.predPeriodSf; } while (nowSf >= ue.nextGrantSf);
+            }
+        }
+      for (uint16_t r : toGrant)
+        ScheduleUlRlcBufferReq (r, 50); // blind service-sized grant (~1 ambient packet), as the SR path
     }
   // check and Schedule DCIs for SearchSpaceType2 (RAR, HARQ, RRC)
   SearchSpaceConfig currentSearchSpace;
@@ -1263,6 +1290,63 @@ NbiotScheduler::RemoveUe (uint16_t rnti)
       m_searchSpaceRntiMap[ue.searchSpaceConfig].erase (it);
     }
   m_rntiUeConfigMap.erase (rnti);
+}
+
+void
+NbiotScheduler::ParkUe (uint16_t rnti)
+{
+  // FUG suspend: stop actively scheduling this UE (so it isn't granted/woken
+  // while RRC-suspended) but KEEP its context so it can resume contention-free.
+  auto cfgIt = m_rntiUeConfigMap.find (rnti);
+  if (cfgIt == m_rntiUeConfigMap.end ()) { return; }
+  cfgIt->second.rlcUlBuffer = 0;
+  cfgIt->second.rlcDlBuffer = 0;
+  auto &ss = m_searchSpaceRntiMap[cfgIt->second.searchSpaceConfig];
+  auto it = std::find (ss.begin (), ss.end (), rnti);
+  if (it != ss.end ()) { ss.erase (it); }
+}
+
+void
+NbiotScheduler::SetProactiveMode (bool enable)
+{
+  m_proactiveMode = enable;
+}
+
+void
+NbiotScheduler::NotifyUlArrival (uint16_t rnti, uint64_t nowSf)
+{
+  // Feed the per-UE traffic predictor an observed UL arrival. EWMA (alpha=0.5)
+  // of the inter-arrival gap estimates the period; nextGrantSf is the predicted
+  // time of the NEXT arrival -> the proactive grant target. >=2 arrivals are
+  // needed before any period exists (bootstrap packets are served reactively).
+  auto it = m_rntiUeConfigMap.find (rnti);
+  if (it == m_rntiUeConfigMap.end ())
+    return;
+  UeConfig & ue = it->second;
+  if (!ue.proactive)
+    return;
+  // Filter intra-epoch follow-up PDUs (blind grant + BSR-driven grants for the
+  // SAME packet land ms apart). A genuinely new arrival is separated by a large
+  // gap; any realistic ambient inter-arrival (>= seconds) clears this threshold,
+  // while same-epoch PDUs (< 2 s apart) do not.
+  const uint64_t MIN_EPOCH_GAP_SF = 2000; // 2 s
+  if (ue.arrivalCount >= 1 && (nowSf - ue.lastArrivalSf) < MIN_EPOCH_GAP_SF)
+    return;
+  if (ue.arrivalCount >= 1 && nowSf > ue.lastArrivalSf)
+    {
+      uint64_t gap = nowSf - ue.lastArrivalSf;
+      ue.predPeriodSf = (ue.predPeriodSf == 0) ? gap : (ue.predPeriodSf + gap) / 2;
+    }
+  ue.lastArrivalSf = nowSf;
+  ue.arrivalCount++;
+  if (ue.predPeriodSf > 0)
+    ue.nextGrantSf = nowSf + ue.predPeriodSf; // re-anchor the prediction on this arrival
+}
+
+uint64_t
+NbiotScheduler::GetProactiveGrantsIssued () const
+{
+  return m_proactiveGrantsIssued;
 }
 
 

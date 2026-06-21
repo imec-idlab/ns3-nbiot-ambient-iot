@@ -703,6 +703,7 @@ public:
   {
     uint8_t rrcTransactionIdentifier; ///< RRC transaction identifier
     RadioResourceConfigDedicated radioResourceConfigDedicated; ///< radio resource config dedicated
+    uint64_t contentionResolutionId {0}; ///< UE Contention Resolution Identity (IMSI echo, TS 36.321 5.1.5); carried via packet tag, not ASN.1-serialized
   };
 
   /// RrcConnectionSetupCompleted structure

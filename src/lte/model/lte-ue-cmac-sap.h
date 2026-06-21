@@ -148,6 +148,14 @@ public:
 
   virtual void SetMsg5Buffer(uint32_t buffersize) = 0;
 
+  // Arm a connected-UE RA that keeps the given C-RNTI (Msg3 C-RNTI MAC CE +
+  // Msg4 contention resolution). Used by the resume path / test hook.
+  virtual void SetRaKeepCrnti(uint16_t crnti) = 0;
+
+  // Tell the MAC that contention resolution failed (Msg4 not for this UE, TS
+  // 36.321 5.1.5) so it backs off before re-RACHing.
+  virtual void NotifyContentionResolutionFailedNb() = 0;
+
   virtual NbIotRrcSap::NprachParametersNb::CoverageEnhancementLevel GetCoverageEnhancementLevel() =0;
 };
 

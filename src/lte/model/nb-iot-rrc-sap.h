@@ -889,6 +889,7 @@ class NbIotRrcSap{
         NbIotRrcSap::DciN1 dciN1;
         NbIotRrcSap::DciN0 dciN0;
         std::vector<Rar> rars;
+        uint8_t backoffIndicator {0}; ///< RAR Backoff Indicator index (TS 36.321 7.2-2, NB-IoT)
         std::vector<uint64_t> npdschOpportunity;
         std::vector<std::pair<uint64_t,std::vector<uint64_t>>> npuschOpportunity;
         std::vector<uint64_t> dciRepetitionsubframes;

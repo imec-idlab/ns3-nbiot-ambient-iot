@@ -20,6 +20,7 @@
  * Author: Marco Miozzo <marco.miozzo@cttc.es>
  * Modified by:	
  *			Tim Gebauer <tim.gebauer@tu-dortmund.de> (NB-IoT Extension)
+ *			Douglas D. Agbeve <douglas.agbeve@uantwerpen.be> (Backoff)
  */
 
 #ifndef LTE_CONTROL_MESSAGES_H
@@ -644,9 +645,16 @@ public:
    */
   std::list<NbIotRrcSap::Rar>::const_iterator RarListEnd () const;
 
+  // Backoff Indicator (TS 36.321 5.1.4 / Table 7.2-2). Carried in the RAR MAC PDU
+  // (addressed to the RA-RNTI), so every UE that sent a preamble in this window --
+  // including colliders that get no RAPID match -- reads it and backs off.
+  void SetBackoffIndicator (uint8_t bi) { m_backoffIndicator = bi; }
+  uint8_t GetBackoffIndicator () const { return m_backoffIndicator; }
+
 private:
   std::list<NbIotRrcSap::Rar> m_rarList; ///< RAR list
   uint16_t m_raRnti; ///< RA RNTI
+  uint8_t m_backoffIndicator {0}; ///< RAR Backoff Indicator index (Table 7.2-2)
 
 
 };

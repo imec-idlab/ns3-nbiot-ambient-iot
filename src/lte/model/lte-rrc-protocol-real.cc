@@ -36,6 +36,7 @@
 #include "lte-enb-rrc.h"
 #include "lte-enb-net-device.h"
 #include "lte-ue-net-device.h"
+#include "nb-iot-contention-resolution-tag.h"
 
 #include <chrono>
 #include <iomanip>
@@ -468,6 +469,15 @@ LteUeRrcProtocolReal::DoReceivePdcpPdu (Ptr<Packet> p)
       // RrcConnectionSetup
       p->RemoveHeader (rrcConnectionSetupHeader);
       rrcConnectionSetupMsg = rrcConnectionSetupHeader.GetMessage ();
+      {
+        // Recover the UE Contention Resolution Identity (TS 36.321 5.1.5) the
+        // eNB echoed on Msg4, so the UE RRC can decide if this Msg4 is for it.
+        ContentionResolutionIdTag crTag;
+        if (p->RemovePacketTag (crTag))
+          {
+            rrcConnectionSetupMsg.contentionResolutionId = crTag.GetImsi ();
+          }
+      }
       m_ueRrcSapProvider->RecvRrcConnectionSetup (rrcConnectionSetupMsg);
       break;
     case 4:
@@ -790,6 +800,14 @@ LteEnbRrcProtocolReal::DoSendRrcConnectionSetup (uint16_t rnti, LteRrcSap::RrcCo
   rrcConnectionSetupHeader.SetMessage (msg);
 
   packet->AddHeader (rrcConnectionSetupHeader);
+
+  // Contention Resolution Identity (TS 36.321 5.1.5): carry the winning IMSI on
+  // the Msg4 packet so colliders sharing the Temporary C-RNTI can tell whether
+  // Msg4 is meant for them. Not part of the ASN.1 message -- a packet tag.
+  if (msg.contentionResolutionId != 0)
+    {
+      packet->AddPacketTag (ContentionResolutionIdTag (msg.contentionResolutionId));
+    }
 
   LteRlcSapProvider::TransmitPdcpPduParameters transmitPdcpPduParameters;
   transmitPdcpPduParameters.pdcpPdu = packet;

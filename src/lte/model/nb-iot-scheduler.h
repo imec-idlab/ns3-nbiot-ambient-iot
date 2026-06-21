@@ -69,6 +69,16 @@ struct UeConfig{
   uint64_t rlcUlBuffer;
   uint64_t lastUl;
   uint64_t lastDl;
+  // Proactive Fast Uplink Grant (standalone 4th mode, distinct from the reactive
+  // SR-based FUG): the eNB predicts this UE's traffic period and pushes a grant
+  // at the predicted time with NO scheduling request. These fields are used ONLY
+  // when proactive==true; all other modes leave them at their defaults.
+  bool     proactive    = false;  ///< this UE is served by proactive FUG
+  uint64_t predPeriodSf = 0;      ///< EWMA-estimated inter-arrival period [subframes]; 0 = not yet learned
+  uint64_t lastArrivalSf = 0;     ///< absolute subframe of the last observed UL arrival
+  uint64_t nextGrantSf  = 0;      ///< absolute subframe of the next proactive grant
+  uint32_t arrivalCount = 0;      ///< observed UL arrivals (>=2 needed to estimate a period)
+  uint64_t proactiveGrantsIssued = 0; ///< proactive DCI N0 grants pushed (denominator for FP accounting)
 };
 
 
@@ -119,6 +129,15 @@ void SetLogDir(std::string logdir);
 void RoundRobinScheduling(SearchSpaceConfig ssc);
 std::vector<int> m_downlink;
 void RemoveUe(uint16_t rnti);
+  void ParkUe(uint16_t rnti);
+  // Proactive FUG (4th mode). SetProactiveMode: put the whole cell in proactive
+  // FUG -- every UE added thereafter is predicted and granted without an SR.
+  // NotifyUlArrival: feed the predictor an observed UL arrival (called by the
+  // eNB MAC on UL data reception). GetProactiveGrantsIssued: total proactive
+  // grants pushed (FP denominator).
+  void SetProactiveMode (bool enable);
+  void NotifyUlArrival (uint16_t rnti, uint64_t nowSf);
+  uint64_t GetProactiveGrantsIssued () const;
 protected:
   std::vector<std::vector<int>> m_uplink;
   std::vector<NbIotRrcSap::NpdcchMessage> m_rars_to_schedule;
@@ -141,6 +160,8 @@ protected:
 
   std::map<SearchSpaceConfig, std::vector<uint16_t>> m_searchSpaceRntiMap;
   std::map<uint16_t, UeConfig> m_rntiUeConfigMap;
+  bool m_proactiveMode = false;          ///< cell-wide proactive FUG (4th mode)
+  uint64_t m_proactiveGrantsIssued = 0;  ///< running total of proactive grants pushed
   std::map<SearchSpaceConfig, std::vector<NbIotRrcSap::NpdcchMessage>> m_rarQueue;
   bool m_only15KhzSpacing = true;
   uint64_t m_frameNo;

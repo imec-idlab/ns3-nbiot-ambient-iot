@@ -1211,8 +1211,24 @@ LteUeRrc::DoRecvMasterInformationBlockNb (uint16_t cellId,
     {
     case IDLE_WAIT_MIB:
       if(m_resumePending){
-        // UE has to receive MIB after PSM for Random Access
-        StartConnectionNb(m_useEdtPreamble);
+        if (m_persistentGrant && m_rnti != 0) {
+          // FUG (Model 1): the MIB re-acquisition above is the REAL PSM-exit
+          // re-sync (DL timing/SFN). Now resume CONTENTION-FREE via the
+          // dedicated SR using the retained RNTI/context (the eNB preserved it
+          // on suspend) -- NOT contention RA. Go connected and re-inject the
+          // stored data; the MAC then fires the SR -> DCI N0 -> transmit. This
+          // avoids the RA collisions that collapse a synchronized wake-up.
+          m_resumePending = false;
+          SwitchToState (CONNECTED_NORMALLY);
+          m_cmacSapProvider.at(0)->NotifyConnectionSuccessful();
+          while (!m_packetStored.empty()) {
+            SendDataNb (m_packetStored.front(), 1);
+            m_packetStored.erase (m_packetStored.begin());
+          }
+        } else {
+          // UE has to receive MIB after PSM for Random Access
+          StartConnectionNb(m_useEdtPreamble);
+        }
       }
       else{
       // manual attachment
@@ -1387,6 +1403,22 @@ void
 LteUeRrc::DoRecvRrcConnectionSetup (LteRrcSap::RrcConnectionSetup msg)
 {
   NS_LOG_FUNCTION (this << " RNTI " << m_rnti);
+  // Contention resolution (TS 36.321 5.1.5): if Msg4 carries a UE Contention
+  // Resolution Identity that does not match our IMSI, another UE won the shared
+  // Temporary C-RNTI. Discard Msg4 and stay in IDLE_CONNECTING; T300 expires and
+  // ConnectionTimeout re-RACHes (with backoff). Identity 0 == no contention info.
+  if (msg.contentionResolutionId != 0 && msg.contentionResolutionId != m_imsi)
+    {
+      NS_LOG_INFO ("Msg4 contention resolution: IMSI " << m_imsi
+                   << " lost (Msg4 belongs to IMSI " << msg.contentionResolutionId
+                   << ") -- discarding, will re-RACH on T300 with backoff");
+      // Carry the backoff into the upcoming re-RACH (TS 36.321 5.1.5).
+      for (uint16_t i = 0; i < m_numberOfComponentCarriers; i++)
+        {
+          m_cmacSapProvider.at (i)->NotifyContentionResolutionFailedNb ();
+        }
+      return;
+    }
   switch (m_state)
     {
     case IDLE_CONNECTING:
@@ -3724,14 +3756,26 @@ LteUeRrc::ConnectionTimeout ()
     }
   else
     {
+      // Connection (Msg4) did not complete -- e.g. a contention-resolution loser
+      // whose shared Temporary C-RNTI went to another UE (TS 36.321 5.1.5), on
+      // either the setup or the resume path. Carry the last RAR's backoff into
+      // the upcoming re-RACH BEFORE resetting the MAC (Reset keeps the backoff
+      // parameter; the carry-over field survives it), so losers spread out.
+      for (uint16_t i = 0; i < m_numberOfComponentCarriers; i++)
+          {
+            m_cmacSapProvider.at(i)->NotifyContentionResolutionFailedNb ();
+          }
       for (uint16_t i = 0; i < m_numberOfComponentCarriers; i++)
           {
             m_cmacSapProvider.at(i)->Reset (); // reset the MAC
           }
         m_hasReceivedSib2 = false;         // invalidate the previously received SIB2
         SwitchToState (IDLE_CAMPED_NORMALLY);
-        m_srb0->m_rlc->DoReset();
-        m_srb1->m_rlc->DoReset();
+        // srb1 only exists once ApplyRadioResourceConfigDedicated has run (Msg4
+        // accepted). A contention-resolution loser (TS 36.321 5.1.5) discards
+        // Msg4 and times out here before srb1 is built -- guard the deref.
+        if (m_srb0) m_srb0->m_rlc->DoReset();
+        if (m_srb1) m_srb1->m_rlc->DoReset();
         m_connectionTimeoutTrace (m_imsi, m_cellId, m_rnti, m_connEstFailCount);
         //Following call to UE NAS will force the UE to immediately
         //perform the random access to the same cell again.

@@ -110,6 +110,7 @@ public:
   virtual NbIotRrcSap::SystemInformationBlockType2Nb GetCurrentSystemInformationBlockType2Nb();
   virtual void NotifyDataInactivityNb(uint16_t rnti, uint8_t lcid);
   virtual void NotifyDataInactivitySchedulerNb(uint16_t rnti);
+  virtual void NotifyReleaseAssistanceNb(uint16_t rnti);
   virtual void NotifyDataActivitySchedulerNb(uint16_t rnti);
 
 private:
@@ -160,6 +161,11 @@ void
 EnbRrcMemberLteEnbCmacSapUser::NotifyDataInactivitySchedulerNb(uint16_t rnti)
 {
   m_rrc->DoNotifyDataInactivitySchedulerNb(rnti);
+}
+void
+EnbRrcMemberLteEnbCmacSapUser::NotifyReleaseAssistanceNb(uint16_t rnti)
+{
+  m_rrc->DoNotifyReleaseAssistanceNb(rnti);
 }
 void
 EnbRrcMemberLteEnbCmacSapUser::NotifyDataActivitySchedulerNb(uint16_t rnti)
@@ -1056,6 +1062,12 @@ UeManager::RecvRrcConnectionRequest (LteRrcSap::RrcConnectionRequest msg)
             LteRrcSap::RrcConnectionSetup msg2;
             msg2.rrcTransactionIdentifier = GetNewRrcTransactionIdentifier ();
             msg2.radioResourceConfigDedicated = BuildRadioResourceConfigDedicated ();
+            // Contention resolution (TS 36.321 5.1.5): echo the IMSI of THIS (the
+            // first, i.e. winning) Msg3. If several UEs shared the Temporary
+            // C-RNTI, only the one whose IMSI matches accepts Msg4; the others
+            // discard it and re-RACH on T300. Duplicate requests land in the
+            // CONNECTION_SETUP case below and are ignored.
+            msg2.contentionResolutionId = m_imsi;
 
             m_rrc->m_rrcSapUser->SendRrcConnectionSetup (m_rnti, msg2);
 
@@ -1966,6 +1978,18 @@ void UeManager::NotifyDataInactivitySchedulerNb(){
     m_dataInactivityTimeout = Simulator::Schedule(MilliSeconds(m_dataInactivityInterval), &UeManager::SwitchToResumeNb, this);
   }
 }
+void UeManager::ReleaseOnRai(){
+  // AS RAI (TS 36.321 5.4.5): the UE indicated no further UL/DL data -> release
+  // immediately, skipping the data-inactivity timer. This is what makes the
+  // FUG suspend prompt and deterministic for single-packet ambient traffic.
+  NS_LOG_DEBUG ("UeManager::ReleaseOnRai RNTI=" << m_rnti << " state=" << ToString (m_state));
+  if (m_state == CONNECTED_NORMALLY){
+    if(!m_dataInactivityTimeout.IsExpired()){
+      m_dataInactivityTimeout.Cancel();
+    }
+    SwitchToResumeNb();
+  }
+}
 
 void UeManager::NotifyDataActivitySchedulerNb(){
     NS_LOG_DEBUG ("UeManager::NotifyDataActivitySchedulerNb"
@@ -1979,7 +2003,6 @@ void UeManager::NotifyDataActivitySchedulerNb(){
     // release→eDRX cycle can fire again.
     if (m_persistentGrant &&
         (m_state == IDLE_SUSPEND_EDRX || m_state == IDLE_SUSPEND_PSM || m_state == CONNECTED_TAU)){
-      NS_LOG_DEBUG ("RNTI=" << m_rnti << " waking from PG (state=" << ToString (m_state) << ")");
       WakeFromPersistentGrant();
     }
 }
@@ -1995,6 +2018,10 @@ void UeManager::SwitchToResumeNb(){
   m_rrc->m_rrcSapUser->SendRrcConnectionReleaseNb(m_rnti, msg);
   SwitchToState(IDLE_SUSPEND_EDRX);
   if (m_persistentGrant){
+    // Park the UE in the scheduler: stop UL scheduling (so residual buffer can't
+    // trigger a spurious DCI N0 that re-wakes the just-suspended UE) while KEEPING
+    // its context for a contention-free SR-resume. Fixes the suspend<->wake loop.
+    m_rrc->m_cmacSapProvider.at(0)->ParkUeInScheduler(m_rnti);
     NS_LOG_DEBUG ("RNTI=" << m_rnti
                   << " suspended to EDRX, context PRESERVED (no MoveUeToResumed)");
     return;
@@ -2879,10 +2906,17 @@ void
 LteEnbRrc::ConnectionSetupTimeout (uint16_t rnti)
 {
   NS_LOG_FUNCTION (this << rnti);
-  NS_ASSERT_MSG (GetUeManagerbyRnti (rnti)->GetState () == UeManager::CONNECTION_SETUP,
-                 "ConnectionSetupTimeout in unexpected state " << ToString (GetUeManagerbyRnti (rnti)->GetState ()));
-  m_rrcTimeoutTrace (GetUeManagerbyRnti (rnti)->GetImsi (), rnti,
-                     ComponentCarrierToCellId (GetUeManagerbyRnti (rnti)->GetComponentCarrierId ()), "ConnectionSetupTimeout");
+  // The UE may already be gone (resumed/removed) under capture/contention
+  // resolution; GetUeManagerbyRnti then returns null.
+  Ptr<UeManager> ueManager = GetUeManagerbyRnti (rnti);
+  if (ueManager == nullptr)
+    {
+      return;
+    }
+  NS_ASSERT_MSG (ueManager->GetState () == UeManager::CONNECTION_SETUP,
+                 "ConnectionSetupTimeout in unexpected state " << ToString (ueManager->GetState ()));
+  m_rrcTimeoutTrace (ueManager->GetImsi (), rnti,
+                     ComponentCarrierToCellId (ueManager->GetComponentCarrierId ()), "ConnectionSetupTimeout");
   RemoveUe (rnti);
 }
 
@@ -2890,20 +2924,32 @@ void
 LteEnbRrc::ConnectionResumeTimeout (uint16_t rnti)
 {
   NS_LOG_FUNCTION (this << rnti);
-  NS_ASSERT_MSG (GetUeManagerbyRnti (rnti)->GetState () == UeManager::CONNECTION_RESUME,
-                 "ConnectionSetupTimeout in unexpected state " << ToString (GetUeManagerbyRnti (rnti)->GetState ()));
-  //m_rrcTimeoutTrace (GetUeManagerbyRnti (rnti)->GetImsi (), rnti,
-  //                   ComponentCarrierToCellId (GetUeManagerbyRnti (rnti)->GetComponentCarrierId ()), "ConnectionResumeTimeout");
+  // By the time this fires the UE may already have resumed (moved to
+  // m_ueResumedMap) or, under capture/contention resolution, lost the shared
+  // Temporary C-RNTI and been removed -- GetUeManagerbyRnti then returns null.
+  // The body is a no-op anyway, so just bail out safely.
+  Ptr<UeManager> ueManager = GetUeManagerbyRnti (rnti);
+  if (ueManager == nullptr || ueManager->GetState () != UeManager::CONNECTION_RESUME)
+    {
+      return;
+    }
+  //m_rrcTimeoutTrace (ueManager->GetImsi (), rnti,
+  //                   ComponentCarrierToCellId (ueManager->GetComponentCarrierId ()), "ConnectionResumeTimeout");
   //RemoveUe (rnti);
 }
 void
 LteEnbRrc::ConnectionRejectedTimeout (uint16_t rnti)
 {
   NS_LOG_FUNCTION (this << rnti);
-  NS_ASSERT_MSG (GetUeManagerbyRnti (rnti)->GetState () == UeManager::CONNECTION_REJECTED,
-                 "ConnectionRejectedTimeout in unexpected state " << ToString (GetUeManagerbyRnti (rnti)->GetState ()));
-  m_rrcTimeoutTrace (GetUeManagerbyRnti (rnti)->GetImsi (), rnti,
-                     ComponentCarrierToCellId (GetUeManagerbyRnti (rnti)->GetComponentCarrierId ()), "ConnectionRejectedTimeout");
+  Ptr<UeManager> ueManager = GetUeManagerbyRnti (rnti);
+  if (ueManager == nullptr)
+    {
+      return;
+    }
+  NS_ASSERT_MSG (ueManager->GetState () == UeManager::CONNECTION_REJECTED,
+                 "ConnectionRejectedTimeout in unexpected state " << ToString (ueManager->GetState ()));
+  m_rrcTimeoutTrace (ueManager->GetImsi (), rnti,
+                     ComponentCarrierToCellId (ueManager->GetComponentCarrierId ()), "ConnectionRejectedTimeout");
   RemoveUe (rnti);
 }
 
@@ -3313,6 +3359,18 @@ LteEnbRrc::DoNotifyDataInactivitySchedulerNb(uint16_t rnti)
     }
   Ptr<UeManager> ueManager = GetUeManagerbyRnti(rnti);
   ueManager->NotifyDataInactivitySchedulerNb();
+}
+void
+LteEnbRrc::DoNotifyReleaseAssistanceNb(uint16_t rnti)
+{
+  NS_LOG_FUNCTION (this << (uint32_t) rnti);
+  if (!HasUeManager (rnti))
+    {
+      NS_LOG_DEBUG ("DoNotifyReleaseAssistanceNb: RNTI " << rnti
+                    << " already released/resumed, ignoring");
+      return;
+    }
+  GetUeManagerbyRnti(rnti)->ReleaseOnRai();
 }
 void
 LteEnbRrc::DoNotifyDataActivitySchedulerNb(uint16_t rnti)
@@ -3912,8 +3970,14 @@ void LteEnbRrc::GenerateSystemInformationBlockType2Nb(std::pair<const uint8_t, n
   // Values from Vodafone Cell / temporary
   NbIotRrcSap::NprachParametersNb ce0;
   ce0.coverageEnhancementLevel = NbIotRrcSap::NprachParametersNb::CoverageEnhancementLevel::zero;
-  ce0.nprachPeriodicity = NbIotRrcSap::NprachParametersNb::NprachPeriodicity::ms320;
-  ce0.nprachStartTime = NbIotRrcSap::NprachParametersNb::NprachStartTime::ms256;
+  // CE0 NPRACH periodicity set to 80 ms (TS 36.331 enum: ms40..ms2560). This is the
+  // SR/RA occasion cadence for the good-coverage class; it cuts the round-robin SR
+  // wait 4x vs the 320 ms default at ~8% NPRACH airtime (6.4 ms preamble / 80 ms).
+  // Sensitivity floor: ms40 halves the SR wait again but doubles airtime to ~16% and
+  // is CE0-only (CE1/CE2 preambles, 51.2/204.8 ms, do not fit a 40 ms period).
+  // Note: nprachStartTime must be < periodicity, hence ms64 (was ms256 at 320 ms).
+  ce0.nprachPeriodicity = NbIotRrcSap::NprachParametersNb::NprachPeriodicity::ms80;
+  ce0.nprachStartTime = NbIotRrcSap::NprachParametersNb::NprachStartTime::ms64;
   ce0.nprachSubcarrierOffset = NbIotRrcSap::NprachParametersNb::NprachSubcarrierOffset::n36;
   ce0.nprachNumSubcarriers = NbIotRrcSap::NprachParametersNb::NprachNumSubcarriers::n12;
   ce0.nprachSubcarrierMsg3RangeStart = NbIotRrcSap::NprachParametersNb::NprachSubcarrierMsg3RangeStart::twoThird;
@@ -3925,7 +3989,7 @@ void LteEnbRrc::GenerateSystemInformationBlockType2Nb(std::pair<const uint8_t, n
 
   NbIotRrcSap::NprachParametersNb ce1;
   ce1.coverageEnhancementLevel = NbIotRrcSap::NprachParametersNb::CoverageEnhancementLevel::one;
-  ce1.nprachPeriodicity = NbIotRrcSap::NprachParametersNb::NprachPeriodicity::ms640;
+  ce1.nprachPeriodicity = NbIotRrcSap::NprachParametersNb::NprachPeriodicity::ms160;
   ce1.nprachStartTime = NbIotRrcSap::NprachParametersNb::NprachStartTime::ms256;
   ce1.nprachSubcarrierOffset = NbIotRrcSap::NprachParametersNb::NprachSubcarrierOffset::n24;
   ce1.nprachNumSubcarriers = NbIotRrcSap::NprachParametersNb::NprachNumSubcarriers::n12;
@@ -3938,7 +4002,7 @@ void LteEnbRrc::GenerateSystemInformationBlockType2Nb(std::pair<const uint8_t, n
 
   NbIotRrcSap::NprachParametersNb ce2;
   ce2.coverageEnhancementLevel = NbIotRrcSap::NprachParametersNb::CoverageEnhancementLevel::two;
-  ce2.nprachPeriodicity = NbIotRrcSap::NprachParametersNb::NprachPeriodicity::ms2560;
+  ce2.nprachPeriodicity = NbIotRrcSap::NprachParametersNb::NprachPeriodicity::ms640;
   ce2.nprachStartTime = NbIotRrcSap::NprachParametersNb::NprachStartTime::ms256;
   ce2.nprachSubcarrierOffset = NbIotRrcSap::NprachParametersNb::NprachSubcarrierOffset::n12;
   ce2.nprachNumSubcarriers = NbIotRrcSap::NprachParametersNb::NprachNumSubcarriers::n12;
@@ -3952,8 +4016,8 @@ void LteEnbRrc::GenerateSystemInformationBlockType2Nb(std::pair<const uint8_t, n
 
   NbIotRrcSap::NprachParametersNbR14 ce0v14;
   ce0v14.coverageEnhancementLevel = NbIotRrcSap::NprachParametersNb::CoverageEnhancementLevel::zero;
-  ce0v14.nprachPeriodicity = NbIotRrcSap::NprachParametersNb::NprachPeriodicity::ms320;
-  ce0v14.nprachStartTime = NbIotRrcSap::NprachParametersNb::NprachStartTime::ms128;
+  ce0v14.nprachPeriodicity = NbIotRrcSap::NprachParametersNb::NprachPeriodicity::ms80; // match ce0 (80 ms; floor ms40)
+  ce0v14.nprachStartTime = NbIotRrcSap::NprachParametersNb::NprachStartTime::ms64;     // must be < periodicity
   ce0v14.nprachSubcarrierOffset = NbIotRrcSap::NprachParametersNb::NprachSubcarrierOffset::n36;
   ce0v14.nprachNumSubcarriers = NbIotRrcSap::NprachParametersNb::NprachNumSubcarriers::n12;
   ce0v14.nprachSubcarrierMsg3RangeStart = NbIotRrcSap::NprachParametersNb::NprachSubcarrierMsg3RangeStart::twoThird;

@@ -692,6 +692,21 @@ LteRlcUm::DoNotifyTxOpportunityNb (LteMacSapUser::TxOpportunityParameters txOpPa
       m_rbsTimer.Cancel ();
       m_rbsTimer = Simulator::Schedule (MilliSeconds (10), &LteRlcUm::ExpireRbsTimer, this);
     }
+  else
+    {
+      // Buffer drained by this grant: report the now-empty buffer so the MAC's
+      // persistent-grant path sees total==0 -- it closes the grant session and
+      // triggers AS RAI (prompt suspend). Without this, RLC-UM stays silent on
+      // drain and the MAC never learns the buffer emptied, so the UE lingers
+      // connected for the full data-inactivity window instead of deep-sleeping.
+      // Aligned with the PDU transmission so RAI follows the last UL data.
+      // Stored in m_rbsTimer (cancelled in DoDispose) so it does NOT fire on a
+      // torn-down RLC bearer -- e.g. in RA mode the context is released after
+      // the packet, and a bare uncancellable event would dereference freed
+      // memory (null-ptr assert).
+      m_rbsTimer.Cancel ();
+      m_rbsTimer = Simulator::Schedule (MilliSeconds (schedulingDelay), &LteRlcUm::DoReportBufferStatus, this);
+    }
 }
 
 

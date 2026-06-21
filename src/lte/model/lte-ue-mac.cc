@@ -35,6 +35,7 @@
 #include "lte-radio-bearer-tag.h"
 #include "nb-iot-data-volume-and-power-headroom-tag.h"
 #include "nb-iot-buffer-status-report-tag.h"
+#include "nb-iot-crnti-mac-ce-tag.h"
 #include <ns3/ff-mac-common.h>
 #include <ns3/lte-control-messages.h>
 #include <ns3/simulator.h>
@@ -46,6 +47,15 @@ namespace ns3 {
 NS_LOG_COMPONENT_DEFINE ("LteUeMac");
 
 NS_OBJECT_ENSURE_REGISTERED (LteUeMac);
+
+// TS 36.321 Table 7.2-2: NB-IoT Backoff Parameter values (ms) by BI index.
+static uint32_t NbiotBackoffMs (uint8_t bi)
+{
+  static const uint32_t kTable[16] = {
+    0, 256, 512, 1024, 2048, 4096, 8192, 16384,
+    32768, 65536, 131072, 262144, 524288, 524288, 524288, 524288 };
+  return kTable[bi & 0x0F];
+}
 
 ///////////////////////////////////////////////////////////
 // SAP forwarders
@@ -79,6 +89,8 @@ public:
   virtual void NotifyEdrx();
   virtual void NotifyPsm();
   virtual void SetMsg5Buffer(uint32_t buffersize);
+  virtual void SetRaKeepCrnti(uint16_t crnti);
+  virtual void NotifyContentionResolutionFailedNb();
   virtual NbIotRrcSap::NprachParametersNb::CoverageEnhancementLevel GetCoverageEnhancementLevel();
 
 private:
@@ -170,6 +182,14 @@ UeMemberLteUeCmacSapProvider::NotifyPsm()
 void
 UeMemberLteUeCmacSapProvider::SetMsg5Buffer(uint32_t buffersize){
   m_mac->DoSetMsg5Buffer(buffersize);
+}
+void
+UeMemberLteUeCmacSapProvider::SetRaKeepCrnti(uint16_t crnti){
+  m_mac->SetRaKeepCrnti(crnti);
+}
+void
+UeMemberLteUeCmacSapProvider::NotifyContentionResolutionFailedNb(){
+  m_mac->NotifyContentionResolutionFailedNb();
 }
 
 NbIotRrcSap::NprachParametersNb::CoverageEnhancementLevel UeMemberLteUeCmacSapProvider::GetCoverageEnhancementLevel(){
@@ -339,6 +359,8 @@ LteUeMac::DoDispose ()
 {
   NS_LOG_FUNCTION (this);
   m_miUlHarqProcessesPacket.clear ();
+  m_srEvent.Cancel ();
+  m_srContentionEvent.Cancel ();
   delete m_macSapProvider;
   delete m_cmacSapProvider;
   delete m_uePhySapUser;
@@ -355,7 +377,237 @@ void
 LteUeMac::SetIdealBsrCallback (IdealBsrCallback cb) { m_idealBsrCb = cb; }
 
 void
+LteUeMac::SetRaiCallback (RaiCallback cb) { m_raiCb = cb; }
+
+void
+LteUeMac::SetSrConfigCallback (SrConfigCallback cb) { m_srConfigCb = cb; }
+
+void
+LteUeMac::SetSrDedicated (uint32_t srIndex, uint32_t reservedSubcarriers, uint32_t contentionOffset)
+{
+  m_srPreamble = (reservedSubcarriers > 0);
+  m_srIndex = srIndex;
+  m_srReservedSubcarriers = reservedSubcarriers;
+  m_srContentionOffset = contentionOffset;
+}
+
+void
+LteUeMac::SetSrHybridContention (bool en) { m_srHybridContention = en; }
+
+void
 LteUeMac::SetPersistentGrant (bool enable) { m_persistentGrant = enable; }
+
+void
+LteUeMac::SetSrPeriod (uint32_t subframes) { m_srPeriodSubframes = (subframes == 0 ? 1 : subframes); }
+
+void
+LteUeMac::SetDeepSleepFug (bool enable) { m_deepSleepFug = enable; }
+
+void
+LteUeMac::SetCdrx (bool enable, uint32_t cycleSubframes, uint32_t inactivityMs)
+{
+  m_cdrxEnabled = enable;
+  if (cycleSubframes > 0) m_cdrxCycleSubframes = cycleSubframes;
+  m_cdrxInactivityMs = inactivityMs;
+  // cDRX keeps the UE RRC-CONNECTED and radio-sleeps it; it must NOT release via
+  // AS RAI. Leaving RAI on makes every drained packet fire ReleaseOnRai ->
+  // SwitchToResumeNb (eNB park + NAS suspend + re-wake), churning NPDCCH and
+  // defeating the connected-DRX floor. Disable RAI for the cDRX UE.
+  if (enable) m_raiActivation = false;
+}
+
+void
+LteUeMac::SetProactiveFug (bool enable)
+{
+  m_proactiveFug = enable;
+}
+
+void
+LteUeMac::SetRaKeepCrnti (uint16_t crnti) { m_raKeepCrnti = crnti; }
+
+void
+LteUeMac::ContentionResolutionTimeout (void)
+{
+  // mac-ContentionResolutionTimer expired with no Msg4 (no C-RNTI-addressed
+  // PDCCH): contention resolution failed (TS 36.321 5.1.5).
+  if (m_awaitingContentionResolution)
+    {
+      NS_LOG_WARN ("Contention resolution FAILED (no Msg4) for C-RNTI=" << m_rnti);
+      m_awaitingContentionResolution = false;
+      m_crniTempForCr = 0;
+      // In a full model the UE would back off and retry RA; left as a hook.
+    }
+}
+
+// Time (ms) to this UE's NEXT dedicated SR occasion: the next real NPRACH
+// occasion k (k*period + startTime) with k % cycle == phase, where phase =
+// srIndex / N_res and cycle = effSrPeriod/period. Computed identically on the
+// eNB side so the resolved phase matches.
+uint64_t
+LteUeMac::MsToNextDedicatedOccasion (void) const
+{
+  uint32_t now    = Simulator::Now ().GetMilliSeconds ();
+  uint32_t period = NbIotRrcSap::ConvertNprachPeriodicity2int (m_CeLevel);
+  uint32_t start  = NbIotRrcSap::ConvertNprachStartTime2int (m_CeLevel);
+  if (period == 0) period = 1;
+  uint32_t cycle  = (m_srPeriodSubframes > period) ? (m_srPeriodSubframes / period) : 1;
+  uint32_t phase  = (m_srReservedSubcarriers > 0) ? (m_srIndex / m_srReservedSubcarriers) % cycle : 0;
+  // index of the first occasion at/after now
+  uint32_t kMin = (now <= start) ? 0 : ((now - start + period - 1) / period);
+  uint32_t r = kMin % cycle;
+  uint32_t add = (phase + cycle - r) % cycle;
+  uint64_t k = (uint64_t) kMin + add;
+  uint64_t occTime = k * period + start;
+  return (occTime > now) ? (occTime - now) : 0;
+}
+
+void
+LteUeMac::SendDedicatedSrPreamble (void)
+{
+  NS_LOG_FUNCTION (this);
+  if (!m_srPending) { return; }                       // already granted
+  if (m_rnti == 0 || m_suspended) { m_srPending = false; return; }
+  uint64_t total = 0;
+  for (auto & kv : m_ulBsrReceived)
+    total += kv.second.txQueueSize + kv.second.retxQueueSize + kv.second.statusPduSize;
+  if (total == 0) { m_srPending = false; return; }    // buffer drained
+
+  // Transmit a real NPRACH preamble on this UE's reserved subcarrier. The
+  // preamble carries NO identity; the eNB resolves the C-RNTI from the
+  // resource->UE map it holds (registered at connect). Reserved subcarrier =
+  // contentionOffset + (srIndex % N_res). Preamble duration mirrors the RA path.
+  uint32_t reservedSub = m_srContentionOffset + (m_srIndex % m_srReservedSubcarriers);
+  uint8_t  ceOffset = NbIotRrcSap::ConvertNprachSubcarrierOffset2int (m_CeLevel);
+  double ts = 1000.0 / (15000.0 * 2048.0);
+  double preambleGroupTime = NbIotRrcSap::ConvertNprachCpLenght2double (
+        m_radioResourceConfig.nprachConfig) + 5.0 * 8192.0 * ts;
+  double time = NbIotRrcSap::ConvertNumRepetitionsPerPreambleAttempt2int (m_CeLevel)
+                * 4.0 * preambleGroupTime;
+  m_cmacSapUser->NotifyEnergyState (NbiotEnergyModel::PowerState::RRC_CONNECTED_SENDING_NPRACH);
+  Simulator::Schedule (MilliSeconds (time + 1), &LteUeCmacSapUser::NotifyEnergyState,
+                       m_cmacSapUser, NbiotEnergyModel::PowerState::RRC_CONNECTED_IDLE);
+  Simulator::Schedule (MilliSeconds (time), &LteUePhySapProvider::SendNprachPreamble,
+                       m_uePhySapProvider, (uint32_t) reservedSub, (uint32_t) m_rnti, ceOffset);
+  // Retry at the next dedicated occasion if no grant arrives (the DCI N0 handler
+  // clears m_srPending and cancels m_srEvent on success).
+  uint64_t toNext = MsToNextDedicatedOccasion ();
+  if (toNext == 0) toNext = NbIotRrcSap::ConvertNprachPeriodicity2int (m_CeLevel);
+  m_srEvent = Simulator::Schedule (MilliSeconds (toNext), &LteUeMac::SendDedicatedSrPreamble, this);
+}
+
+uint64_t
+LteUeMac::MsToNextBaseOccasion (void) const
+{
+  // Time to the next NPRACH occasion of ANY phase (the contention pool opens
+  // every base period, unlike the per-UE reserved occasion every effSrPeriod).
+  uint32_t now    = Simulator::Now ().GetMilliSeconds ();
+  uint32_t period = NbIotRrcSap::ConvertNprachPeriodicity2int (m_CeLevel);
+  uint32_t start  = NbIotRrcSap::ConvertNprachStartTime2int (m_CeLevel);
+  if (period == 0) period = 1;
+  uint32_t kMin = (now <= start) ? 0 : ((now - start + period - 1) / period);
+  uint64_t occTime = (uint64_t) kMin * period + start;
+  if (occTime <= now) occTime += period;     // strictly the NEXT occasion
+  return occTime - now;
+}
+
+void
+LteUeMac::SendContentionSrPreamble (void)
+{
+  NS_LOG_FUNCTION (this);
+  if (!m_srPending) { return; }                        // already granted
+  if (m_rnti == 0 || m_suspended) { m_srPending = false; return; }
+  if (m_srContentionOffset == 0) { return; }           // no shared pool configured
+  uint64_t total = 0;
+  for (auto & kv : m_ulBsrReceived)
+    total += kv.second.txQueueSize + kv.second.retxQueueSize + kv.second.statusPduSize;
+  if (total == 0) { m_srPending = false; return; }     // buffer drained
+
+  // Opportunistic contention SR: pick a random subcarrier from the shared pool
+  // [0, contentionOffset) and transmit a real NPRACH preamble there. Unlike the
+  // reserved path the eNB cannot map this resource to a UE; on a singleton it
+  // resolves identity as it would from the winner's subsequent NPUSCH C-RNTI
+  // (abstracted here, mirroring the dedicated-SR map). A collision yields no
+  // grant, so the UE retries next occasion or falls back to its reserved slot.
+  uint32_t sub = m_raPreambleUniformVariable->GetInteger (0, m_srContentionOffset - 1);
+  uint8_t  ceOffset = NbIotRrcSap::ConvertNprachSubcarrierOffset2int (m_CeLevel);
+  double ts = 1000.0 / (15000.0 * 2048.0);
+  double preambleGroupTime = NbIotRrcSap::ConvertNprachCpLenght2double (
+        m_radioResourceConfig.nprachConfig) + 5.0 * 8192.0 * ts;
+  double time = NbIotRrcSap::ConvertNumRepetitionsPerPreambleAttempt2int (m_CeLevel)
+                * 4.0 * preambleGroupTime;
+  m_cmacSapUser->NotifyEnergyState (NbiotEnergyModel::PowerState::RRC_CONNECTED_SENDING_NPRACH);
+  Simulator::Schedule (MilliSeconds (time + 1), &LteUeCmacSapUser::NotifyEnergyState,
+                       m_cmacSapUser, NbiotEnergyModel::PowerState::RRC_CONNECTED_IDLE);
+  Simulator::Schedule (MilliSeconds (time), &LteUePhySapProvider::SendNprachPreamble,
+                       m_uePhySapProvider, (uint32_t) sub, (uint32_t) m_rnti, ceOffset);
+  // Retry at the next base occasion until a grant arrives (the DCI N0 handler
+  // clears m_srPending and cancels this event on success).
+  uint64_t toNext = MsToNextBaseOccasion ();
+  m_srContentionEvent = Simulator::Schedule (MilliSeconds (toNext),
+                                             &LteUeMac::SendContentionSrPreamble, this);
+}
+
+
+void
+LteUeMac::SendSchedulingRequest (void)
+{
+  NS_LOG_FUNCTION (this);
+  if (m_rnti == 0 || m_idealBsrCb.IsNull ())
+    {
+      m_srPending = false;
+      return;
+    }
+  // Suspend race guard: if the UE was suspended (PSM/eDRX) since this SR was
+  // scheduled, do NOT fire. The SR's m_idealBsrCb path re-wakes the eNB
+  // (NotifyDataActivity -> WakeFromPersistentGrant), which would resurrect a
+  // just-suspended UE and spin the suspend<->wake loop. Data legitimately
+  // arriving in PSM wakes the UE via the RRC resume path (DoSendData ->
+  // IDLE_WAIT_MIB -> SR-resume), not via this direct SR.
+  if (m_suspended)
+    {
+      m_srPending = false;
+      return;
+    }
+  // Recompute the buffer at the SR instant (it may have grown or drained).
+  uint64_t total = 0, txq = 0, rtxq = 0, statpdu = 0;
+  for (auto & kv : m_ulBsrReceived)
+    {
+      txq     += kv.second.txQueueSize;
+      rtxq    += kv.second.retxQueueSize;
+      statpdu += kv.second.statusPduSize;
+    }
+  total = txq + rtxq + statpdu;
+  NS_LOG_DEBUG ("SR fire RNTI=" << m_rnti << " total=" << total
+                << " txQ=" << txq << " retxQ=" << rtxq << " statusPdu=" << statpdu);
+  if (total == 0)
+    {
+      m_srPending = false; // buffer drained: the SR is no longer needed (cancelled)
+      return;
+    }
+  // sr-ProhibitTimer (TS 36.331 SchedulingRequestConfig-NB): bar further SRs
+  // for m_srProhibitPeriods SR periods after this transmission.
+  uint64_t period = (m_srPeriodSubframes == 0 ? 1 : m_srPeriodSubframes);
+  m_srProhibitUntil = Simulator::Now () + MilliSeconds (m_srProhibitPeriods * period);
+  // The SR on air is a single, contention-free 1-bit NPRACH preamble on the
+  // UE's dedicated SR resource (~5.6 ms Format-0) at NPRACH tx power -- the
+  // real cost the oracle ignored, and faster than a 1-byte BSR (which would
+  // need an NPUSCH). This preamble is the entire SR transmission.
+  const double srMs = 5.6;   // single dedicated (contention-free) NPRACH tone
+  m_cmacSapUser->NotifyEnergyState (NbiotEnergyModel::PowerState::RRC_CONNECTED_SENDING_NPRACH);
+  Simulator::Schedule (MilliSeconds (srMs + 1), &LteUeCmacSapUser::NotifyEnergyState,
+                       m_cmacSapUser, NbiotEnergyModel::PowerState::RRC_CONNECTED_IDLE);
+  // TS 36.321 5.4.4: the SR carries NO buffer size. m_srBootstrapBytes is NOT
+  // sent on air -- it is the eNB-side token that trips the grant gate so the
+  // first, BLIND minimum-TBS grant issues (its +10 B overhead = BSR/header
+  // room). The real buffer arrives only via the BSR tag on that first NPUSCH,
+  // from which the eNB sizes the remaining grants.
+  m_idealBsrCb (m_rnti, m_srBootstrapBytes);
+  // The SR stays pending until cancelled by a grant (TS 36.321 5.4.4). If no
+  // DCI N0 arrives within one prohibit window, re-send the SR (NB-IoT has no
+  // dsr-TransMax cap; it retries on the dedicated NPRACH SR resource).
+  m_srEvent = Simulator::Schedule (MilliSeconds (m_srProhibitPeriods * period),
+                                   &LteUeMac::SendSchedulingRequest, this);
+}
 
 
 void
@@ -427,6 +679,27 @@ LteUeMac::DoTransmitPdu (LteMacSapProvider::TransmitPduParameters params)
     m_nextIsMsg5 = true;
     dprTag.SetDataVolumeValue(dataVolumeIndex);
     params.pdu->AddPacketTag(dprTag);
+    // C-RNTI MAC CE on Msg3 (TS 36.321 5.1.5): a connected UE conveys its existing
+    // C-RNTI so the eNB resolves contention by C-RNTI. The UE switches to its real
+    // C-RNTI to MONITOR for Msg4 (the C-RNTI-addressed PDCCH), but contention
+    // resolution is NOT complete yet -- it is confirmed only on receiving Msg4
+    // (see the DCI handler) within mac-ContentionResolutionTimer.
+    if (m_msg3HasCrntiMacCe && m_raKeepCrnti != 0)
+      {
+        CRntiMacCeTag crntiTag (m_raKeepCrnti);
+        params.pdu->AddPacketTag (crntiTag);
+        NS_LOG_INFO ("Msg3 carries C-RNTI MAC CE=" << m_raKeepCrnti
+                     << "; awaiting Msg4 (Temp C-RNTI=" << m_rnti << ")");
+        m_crniTempForCr = m_rnti;          // keep the Temp C-RNTI until Msg4 confirms
+        m_rnti = m_raKeepCrnti;            // monitor Msg4 on the real C-RNTI
+        m_cmacSapUser->SetTemporaryCellRnti (m_rnti);
+        m_awaitingContentionResolution = true;
+        m_contentionResolutionTimer.Cancel ();
+        m_contentionResolutionTimer = Simulator::Schedule (
+            MilliSeconds (64), &LteUeMac::ContentionResolutionTimeout, this);
+        m_msg3HasCrntiMacCe = false;
+        m_raKeepCrnti = 0;
+      }
   }
   else{
 
@@ -469,21 +742,77 @@ LteUeMac::DoReportBufferStatus (LteMacSapProvider::ReportBufferStatusParameters 
     }
   m_freshUlBsr = true;
 
+  // Dedicated-NPRACH Scheduling Request (replaces the ideal-BSR oracle).
+  // State machine (TS 36.321 5.4.4 + 5.4.5):
+  //  - new data, no active grant session -> transmit an SR (carries no buffer)
+  //    at the next dedicated-SR occasion: contention-free, real tx cost, up to
+  //    one SR period of latency, instead of a zero-delay/zero-cost oracle.
+  //  - once the SR yields a grant (m_grantSessionActive, set in the DCI N0
+  //    handler) the buffer flows via the BSR MAC CE, NOT further SRs.
+  //  - buffer drained -> close the session; the next packet starts a new SR.
   if (m_persistentGrant && m_rnti != 0 && !m_idealBsrCb.IsNull ())
   {
     uint64_t total = 0;
     for (auto & kv : m_ulBsrReceived)
     {
-      total += kv.second.txQueueSize
-        + kv.second.retxQueueSize
-        + kv.second.statusPduSize;
+      total += kv.second.txQueueSize + kv.second.retxQueueSize + kv.second.statusPduSize;
     }
-    if (total > 0)
+    if (total == 0)
     {
-      NS_LOG_DEBUG ("UE MAC DoReportBufferStatus: firing ideal BSR"
-                    << " RNTI=" << m_rnti
-                    << " totalBytes=" << total);
-      m_idealBsrCb (m_rnti, total);
+      // AS RAI (TS 36.321 5.4.5, NB-IoT): a zero-byte BSR has been triggered at
+      // the end of an active grant session and no further UL/DL data is expected
+      // (single-packet-per-epoch). Signal the AS RAI MAC CE so the eNB releases
+      // immediately, instead of waiting for the data-inactivity timer.
+      if (m_grantSessionActive && m_raiActivation && m_rnti != 0 && !m_raiCb.IsNull ())
+      {
+        m_raiCb (m_rnti);
+      }
+      // Buffer drained: grant session over; next packet re-requests via SR.
+      m_grantSessionActive = false;
+    }
+    else if (!m_srPending && !m_grantSessionActive && !m_suspended
+             && Simulator::Now () >= m_srProhibitUntil
+             && !(m_proactiveFug && m_fugBootstrapEpochs >= kProactiveBootstrapEpochs))
+    {
+      // Proactive FUG (4th mode): once the eNB has learned this UE's period it
+      // pushes a predicted grant, so the UE sends NO scheduling request -- the
+      // guard above disables the SR subsystem in steady state. Only the first
+      // kProactiveBootstrapEpochs epochs still fire a reactive SR, to give the
+      // eNB the >=2 arrivals it needs before it can predict.
+      if (m_proactiveFug)
+        m_fugBootstrapEpochs++;
+      // !m_suspended: while RRC-suspended (PSM/eDRX) the UE must NOT fire a
+      // direct SR -- data wakes it via the RRC resume path (DoSendData ->
+      // IDLE_WAIT_MIB -> SR-resume). Firing here would re-wake a just-suspended
+      // UE and spin the suspend<->wake loop.
+      m_srPending = true;
+      if (m_srPreamble)
+        {
+          // Faithful dedicated SR: transmit a real NPRACH preamble on this UE's
+          // reserved subcarrier at its next round-robin occasion. The eNB resolves
+          // identity from its resource->RNTI map (no identity on the air).
+          uint64_t wait = MsToNextDedicatedOccasion ();
+          m_srEvent = Simulator::Schedule (MilliSeconds (wait),
+                                           &LteUeMac::SendDedicatedSrPreamble, this);
+          NS_LOG_DEBUG ("UE MAC: dedicated-SR preamble RNTI=" << m_rnti
+                        << " idx=" << m_srIndex << " in " << wait << " ms");
+          // Hybrid: also start contending on the shared pool at the next base
+          // occasion (the reserved slot above is the guaranteed floor).
+          if (m_srHybridContention && m_srContentionOffset > 0)
+            {
+              m_srContentionEvent = Simulator::Schedule (
+                  MilliSeconds (MsToNextBaseOccasion ()),
+                  &LteUeMac::SendContentionSrPreamble, this);
+            }
+        }
+      else
+        {
+          // Legacy idealBsr SR (non-preamble): fire at the next dedicated turn.
+          uint64_t period = (m_srPeriodSubframes == 0 ? 1 : m_srPeriodSubframes);
+          uint64_t dedicatedWait = period - (Simulator::Now ().GetMilliSeconds () % period);
+          m_srEvent = Simulator::Schedule (MilliSeconds (dedicatedWait),
+                                           &LteUeMac::SendSchedulingRequest, this);
+        }
     }
   }
 }
@@ -738,7 +1067,11 @@ LteUeMac::RecvRaResponseNb (NbIotRrcSap::RarPayload raResponse)
   m_noRaResponseReceivedEvent.Cancel ();
   NS_LOG_INFO ("got RAR for RAPID " << (uint32_t) m_raPreambleId
                                     << ", setting T-C-RNTI = " << raResponse.cellRnti);
-  if (m_persistentGrant && m_rnti != 0){
+  // Drop a stale/orphaned RAR for a still-connected UE -- UNLESS this is an
+  // intentional connected-UE RA that keeps its C-RNTI (m_raKeepCrnti armed), in
+  // which case the RAR's Temporary C-RNTI is used to send Msg3 with the C-RNTI
+  // MAC CE and contention is resolved by C-RNTI at Msg4.
+  if (m_persistentGrant && m_rnti != 0 && m_raKeepCrnti == 0){
     NS_LOG_WARN ("RecvRaResponseNb: dropping stale RAR under persistent grant"
                  << " (live RNTI=" << m_rnti
                  << ", RAR T-C-RNTI=" << raResponse.cellRnti << ")"
@@ -754,6 +1087,14 @@ LteUeMac::RecvRaResponseNb (NbIotRrcSap::RarPayload raResponse)
 
   m_rnti = raResponse.cellRnti;
   m_cmacSapUser->SetTemporaryCellRnti (m_rnti);
+  // C-RNTI MAC CE (TS 36.321 5.1.5): a connected UE doing RA uses the Temporary
+  // C-RNTI only to receive the Msg3 grant, but signals its existing C-RNTI in a
+  // C-RNTI MAC CE on Msg3 -- the eNB then resolves contention by C-RNTI and the
+  // UE keeps its identity (the Temporary C-RNTI is discarded, see DoTransmitPdu).
+  if (m_raKeepCrnti != 0)
+    {
+      m_msg3HasCrntiMacCe = true;
+    }
   // in principle we should wait for contention resolution,
   // but in the current LTE model when two or more identical
   // preambles are sent no one is received, so there is no need
@@ -920,9 +1261,19 @@ LteUeMac::RaResponseTimeoutNb (bool contention)
         }
       NS_LOG_INFO ("RAR timeout, re-send preamble");
       if (m_mac_logging) LogMessage("LteUeMac::RaResponseTimeoutNb,RAR timeout, re-send preamble");
+      // TS 36.321 5.1.4: back off by a uniform random delay in [0, BACKOFF) before
+      // the next preamble, where BACKOFF comes from the last received BI. Spreads
+      // a thundering herd across many NPRACH occasions.
+      uint32_t backoffMs = (m_backoffParameter > 0)
+                               ? m_raPreambleUniformVariable->GetInteger (0, m_backoffParameter)
+                               : 0;
       if (contention)
         {
-          RandomlySelectAndSendRaPreambleNb ();
+          if (backoffMs > 0)
+            Simulator::Schedule (MilliSeconds (backoffMs),
+                                 &LteUeMac::RandomlySelectAndSendRaPreambleNb, this);
+          else
+            RandomlySelectAndSendRaPreambleNb ();
         }
       else
         {
@@ -1021,7 +1372,37 @@ LteUeMac::DoStartRandomAccessProcedureNb (bool edt)
     LogMessage("StartRandomAccessProcedureNb");
   }
 
+  // Backoff carried over from a contention-resolution failure (TS 36.321 5.1.5):
+  // delay the first preamble of this re-RACH by a uniform draw in [0, backoff)
+  // so the colliders that lost the previous round spread out instead of
+  // re-colliding immediately. Cleared after use (one-shot per failure).
+  if (m_pendingReRachBackoffMs > 0)
+    {
+      uint32_t delayMs = m_raPreambleUniformVariable->GetInteger (0, m_pendingReRachBackoffMs);
+      m_pendingReRachBackoffMs = 0;
+      if (delayMs > 0)
+        {
+          Simulator::Schedule (MilliSeconds (delayMs),
+                               &LteUeMac::RandomlySelectAndSendRaPreambleNb, this);
+          return;
+        }
+    }
+
   RandomlySelectAndSendRaPreambleNb ();
+}
+
+void
+LteUeMac::NotifyContentionResolutionFailedNb ()
+{
+  NS_LOG_FUNCTION (this);
+  // Carry the backoff parameter learned this attempt (from the RAR Backoff
+  // Indicator) into the next RA. It survives the MAC Reset that the RRC performs
+  // on T300 expiry, so the re-RACH applies it (see DoStartRandomAccessProcedureNb).
+  m_pendingReRachBackoffMs = m_backoffParameter;
+  if (m_mac_logging)
+  {
+    LogMessage ("NotifyContentionResolutionFailedNb,backoffMs=" + std::to_string (m_backoffParameter));
+  }
 }
 void
 LteUeMac::DoSetRnti (uint16_t rnti)
@@ -1107,6 +1488,21 @@ LteUeMac::DoNotifyConnectionSuccessful ()
   NS_LOG_FUNCTION (this);
   m_uePhySapProvider->NotifyConnectionSuccessful ();
   m_listenToSearchSpaces = true;
+  m_suspended = false;   // resumed/connected: the MAC SR machine is live again
+  // A fresh resume/connection starts NO active grant session. m_grantSessionActive
+  // latches true (it is only cleared by a total==0 BSR, which is unreliable), so a
+  // stale value here would block the SR-schedule branch in DoReportBufferStatus --
+  // leaving a resumed UE with data but no way to request a grant if the resume-path
+  // grant misses. Clearing it makes the dedicated SR a reliable first-grant backstop.
+  m_grantSessionActive = false;
+  // RRC dedicated-SR configuration (TS 36.331 SchedulingRequestConfig-NB): once
+  // connected with a real C-RNTI, register this UE's dedicated SR index at the
+  // eNB so it can resolve the UE's reserved-subcarrier preambles by identity.
+  if (m_srPreamble && !m_srConfigRegistered && m_rnti != 0 && !m_srConfigCb.IsNull ())
+    {
+      m_srConfigCb (m_rnti, m_srIndex);
+      m_srConfigRegistered = true;
+    }
 }
 
 void
@@ -1399,6 +1795,9 @@ LteUeMac::DoReceiveLteControlMessage (Ptr<LteControlMessage> msg)
                              << (uint32_t) m_raRnti);
           if (raRnti == m_raRnti) // RAR corresponds to TX subframe of preamble
             {
+              // Backoff Indicator (TS 36.321 5.1.4): read from the RAR MAC PDU
+              // even if our RAPID isn't matched (a colliding UE still backs off).
+              m_backoffParameter = NbiotBackoffMs (rarMsg->GetBackoffIndicator ());
               for (std::list<NbIotRrcSap::Rar>::const_iterator it = rarMsg->RarListBegin ();
                    it != rarMsg->RarListEnd (); ++it)
                 {
@@ -1440,6 +1839,35 @@ LteUeMac::DoReceiveLteControlMessage (Ptr<LteControlMessage> msg)
     {
       Ptr<UlDciN0NbiotControlMessage> msg2 = DynamicCast<UlDciN0NbiotControlMessage> (msg);
       NbIotRrcSap::DciN0 dci = msg2->GetDci ();
+
+      // Msg4 (TS 36.321 5.1.5): this DCI is addressed to the UE's (real) C-RNTI.
+      // If a C-RNTI MAC CE was sent on Msg3, receiving it completes contention
+      // resolution -- the UE keeps its C-RNTI and discards the Temporary C-RNTI.
+      if (m_awaitingContentionResolution)
+        {
+          NS_LOG_INFO ("Msg4 received: contention resolution SUCCESSFUL, kept C-RNTI=" << m_rnti
+                       << " (discarded Temp C-RNTI=" << m_crniTempForCr << ")");
+          m_awaitingContentionResolution = false;
+          m_crniTempForCr = 0;
+          m_contentionResolutionTimer.Cancel ();
+        }
+
+      // TS 36.321 5.4.4: a pending SR is cancelled, and sr-ProhibitTimer is
+      // stopped, once the UE is granted UL-SCH resources (and will send its
+      // BSR/data). Cancel the pending SR + re-send, and clear the prohibit
+      // window so genuinely new data can request again immediately.
+      m_srPending = false;
+      m_srEvent.Cancel ();
+      m_srContentionEvent.Cancel ();
+      m_srProhibitUntil = Simulator::Now ();
+      // First grant after the SR opens the grant session: from here the real
+      // buffer flows via the BSR MAC CE (on this granted NPUSCH and the
+      // periodic-BSR path), not via further SRs. Stays active until the buffer
+      // drains (see DoReportBufferStatus).
+      m_grantSessionActive = true;
+      // drx-InactivityTimer (TS 36.321 5.7): a grant extends Active Time, so the
+      // cDRX gate keeps monitoring through the rest of this session.
+      m_cdrxInactivityUntil = Simulator::Now () + MilliSeconds (m_cdrxInactivityMs);
 
       m_cmacSapUser->NotifyEnergyState(NbiotEnergyModel::PowerState::RRC_CONNECTED_IDLE);
 
@@ -1850,7 +2278,36 @@ LteUeMac::DoSubframeIndication (uint32_t frameNo, uint32_t subframeNo)
     // TODO Activate Paging Occasion listening
     m_psm = false;
   }
-  if(m_listenToSearchSpaces){
+  // Connected-mode DRX (TS 36.321 5.7 / DRX-Config-NB-r13): a connected UE only
+  // opens NPDCCH search-space occasions during the on-duration of each long DRX
+  // cycle. Outside the on-duration -- and with no active grant session, pending
+  // UL data, or running drx-InactivityTimer -- it rests at the connected idle
+  // floor (RRC_CONNECTED_IDLE) instead of firing an ~80 mW NPDCCH occasion every
+  // search-space period. Uplink is unaffected: data sets the buffer (Active
+  // Time) and the SR path runs independently, so only DL monitoring is gated.
+  bool cdrxSleep = false;
+  if (m_cdrxEnabled && m_listenToSearchSpaces)
+    {
+      uint64_t absSf = 10ull * (m_frameNo - 1) + (m_subframeNo - 1);
+      bool inOnDuration = (absSf % m_cdrxCycleSubframes) < m_cdrxOnDurationSubframes;
+      // Active Time (TS 36.321 5.7): driven by pending UL data and the running
+      // drx-InactivityTimer (re-armed on every grant), NOT the m_grantSessionActive
+      // flag -- that flag is latched on the first DCI and only released by a
+      // total==0 BSR, which for the FUG-off UE may never recur, so it would pin
+      // the UE permanently awake. Buffer + inactivity is the standard mechanism.
+      bool activeTime = m_transmissionScheduled
+                        || GetBufferSizeComplete () > 0
+                        || Simulator::Now () < m_cdrxInactivityUntil;
+      cdrxSleep = !inOnDuration && !activeTime;
+      if (cdrxSleep)
+        {
+          m_inSearchSpace = false;
+          m_subframesInSearchSpace = 0;
+          if (m_cmacSapUser->GetEnergyState () != NbiotEnergyModel::PowerState::RRC_CONNECTED_IDLE)
+            m_cmacSapUser->NotifyEnergyState (NbiotEnergyModel::PowerState::RRC_CONNECTED_IDLE);
+        }
+    }
+  if(m_listenToSearchSpaces && !cdrxSleep){
     // Energy Model Start Receiving on my SearchSpaceBegin
     uint32_t searchSpacePeriodicity = NbIotRrcSap::ConvertNpdcchNumRepetitionsRa2int (m_CeLevel) *
                                       NbIotRrcSap::ConvertNpdcchStartSfCssRa2double (m_CeLevel);
@@ -1884,7 +2341,17 @@ LteUeMac::DoSubframeIndication (uint32_t frameNo, uint32_t subframeNo)
       }
     }
   }
-  if ((Simulator::Now () >= m_bsrLast + m_bsrPeriodicity) && (m_freshUlBsr == true))
+  // CONSISTENT across ALL modes: the UE issues NO idealized BSR control message.
+  // This free MAC-CE-over-control-channel reaches the eNB instantly and triggers
+  // a grant (ReceiveBsrMessage), a second idealized buffer-report path on top of
+  // the removed oracle. With it gone, the FIRST grant of an epoch comes only from
+  // the realistic request mechanism -- the dedicated NPRACH SR (reactive FUG /
+  // cDRX), the eNB predictor (proactive FUG), or Msg3's data-volume report (RA) --
+  // and any remaining buffer within a granted epoch is conveyed by the realistic
+  // BSR tag on the NPUSCH (eNB DoReceivePhyPdu -> ScheduleUlRlcBufferReq). So no
+  // mode gets a free/instant buffer report; the comparison is apples-to-apples.
+  bool bsrReady = false;
+  if ((Simulator::Now () >= m_bsrLast + m_bsrPeriodicity) && (m_freshUlBsr == true) && bsrReady)
     {
       if (m_componentCarrierId == 0)
         {
@@ -1907,11 +2374,30 @@ LteUeMac::AssignStreams (int64_t stream)
 void
 LteUeMac::DoNotifyEdrx(){
   m_edrx = true;
+  // Suspended: stop the MAC SR machine so no stray SR re-wakes the UE.
+  m_suspended = true;
+  m_srPending = false;
+  m_grantSessionActive = false;
+  m_srEvent.Cancel ();
+  m_srContentionEvent.Cancel ();
+  // NOTE: do NOT clear m_ulBsrReceived here. The spurious-SR-on-suspend loop is
+  // already prevented by the m_suspended guard in SendSchedulingRequest/the SR
+  // gate. Clearing the buffer view orphans data that is still in the RLC when the
+  // UE suspends (RLC-UM won't re-report an unchanged queue on resume), causing
+  // packet loss.
+  m_freshUlBsr = false;
 }
 
 void
 LteUeMac::DoNotifyPsm(){
   m_psm = true;
+  m_suspended = true;
+  m_srPending = false;
+  m_grantSessionActive = false;
+  m_srEvent.Cancel ();
+  m_srContentionEvent.Cancel ();
+  // See DoNotifyEdrx: do NOT clear m_ulBsrReceived (orphans RLC-pending data).
+  m_freshUlBsr = false;
 }
 
 NbIotRrcSap::NprachParametersNb::CoverageEnhancementLevel

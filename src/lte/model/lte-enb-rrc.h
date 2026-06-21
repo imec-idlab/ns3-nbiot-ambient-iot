@@ -156,6 +156,7 @@ public:
   void NotifyDataInactivityNb(uint8_t lcid);
 
   void NotifyDataInactivitySchedulerNb();
+  void ReleaseOnRai();
   void NotifyDataActivitySchedulerNb();
   uint64_t AttachSuspendedNb(uint32_t imsi);
 
@@ -1419,6 +1420,7 @@ private:
    * \param lcid LCID
    */
   void DoNotifyDataInactivitySchedulerNb(uint16_t rnti);
+  void DoNotifyReleaseAssistanceNb(uint16_t rnti);
 
   void DoNotifyDataActivitySchedulerNb(uint16_t rnti);
   /**

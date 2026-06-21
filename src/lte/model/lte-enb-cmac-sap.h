@@ -20,6 +20,7 @@
  *         Marco Miozzo <mmiozzo@cttc.es>
  * Modified by:	
  * 			Tim Gebauer <tim.gebauer@tu-dortmund.de> (NB-IoT Extension)
+ * 			Douglas D. Agbeve <douglas.agbeve@uantwerpen.be>
  */
 
 #ifndef LTE_ENB_CMAC_SAP_H
@@ -89,6 +90,11 @@ public:
    * \param rnti 
    */
   virtual void RemoveUeFromScheduler(uint16_t rnti) = 0;
+
+  /**
+   * Park a UE in the scheduler (drop UL scheduling, keep context) on FUG suspend.
+   */
+  virtual void ParkUeInScheduler(uint16_t rnti) = 0;
   /**
    * Logical Channel information to be passed to CmacSapProvider::ConfigureLc
    *
@@ -253,6 +259,12 @@ public:
    * \param success true if the operation was successful, false otherwise
    */
   virtual void NotifyDataInactivitySchedulerNb(uint16_t rnti) = 0;
+  /**
+   * AS RAI (TS 36.321 5.4.5): the UE indicated no further UL/DL data -- release
+   * the UE immediately instead of waiting for the data-inactivity timer.
+   * \param rnti the rnti of the user
+   */
+  virtual void NotifyReleaseAssistanceNb(uint16_t rnti) = 0;
     /**
    * notify the result of the last LC config operation
    *

@@ -12,6 +12,7 @@ def build(bld):
         'model/simple-device-energy-model.cc',
         'model/energy-harvester.cc',
         'model/basic-energy-harvester.cc',
+        'model/solar-energy-harvester.cc',  # diurnal sin^2 solar profile (subclass of BasicEnergyHarvester)
         'model/generic-capacitor.cc',  # super-capacitor energy source
         'model/basic-solar-panel-patterns.cc',  # gen. daily energy harvesting patterns
         'model/poly_predictor.cc',  # gen. daily energy harvesting patterns
@@ -53,6 +54,7 @@ def build(bld):
         'model/simple-device-energy-model.h',
         'model/energy-harvester.h',
         'model/basic-energy-harvester.h',
+        'model/solar-energy-harvester.h',
         'model/generic-capacitor.h',
         'model/basic-solar-panel-patterns.h',
         'model/poly_predictor.h',  # gen. daily energy harvesting patterns

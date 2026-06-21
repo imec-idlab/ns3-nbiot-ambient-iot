@@ -23,6 +23,7 @@
  *          Biljana Bojovic <biljana.bojovic@cttc.es> (Carrier Aggregation)
  *          Tim Gebauer <tim.gebauer@tu-dortmund.de> (NB-IoT Extension)
  *          Pascal Jörke <pascal.joerke@tu-dortmund.de> (NB-IoT Extension)
+ *          Douglas D. Agbeve <douglas.agbeve@uantwerpen.be> (NB-IoT Extension)
  */
 
 #include <ns3/log.h>
@@ -45,6 +46,7 @@
 
 #include "nb-iot-data-volume-and-power-headroom-tag.h"
 #include "nb-iot-buffer-status-report-tag.h"
+#include "nb-iot-crnti-mac-ce-tag.h"
 #include "lte-rlc-am-header.h"
 
 #include <algorithm>
@@ -77,6 +79,7 @@ public:
   virtual void MoveUeToResume(uint16_t rnti,uint64_t resumeId);
   virtual void ResumeUe(uint16_t rnti,uint64_t resumeId);
   virtual void RemoveUeFromScheduler(uint16_t rnti);
+  virtual void ParkUeInScheduler(uint16_t rnti);
   virtual void AddLc (LcInfo lcinfo, LteMacSapUser *msu);
   virtual void ReconfigureLc (LcInfo lcinfo);
   virtual void ReleaseLc (uint16_t rnti, uint8_t lcid);
@@ -121,6 +124,11 @@ void
 EnbMacMemberLteEnbCmacSapProvider::RemoveUeFromScheduler(uint16_t rnti)
 {
   m_mac->DoRemoveUeFromScheduler(rnti);
+}
+void
+EnbMacMemberLteEnbCmacSapProvider::ParkUeInScheduler(uint16_t rnti)
+{
+  m_mac->DoParkUeInScheduler(rnti);
 }
 void
 EnbMacMemberLteEnbCmacSapProvider::ResumeUe(uint16_t rnti, uint64_t resumeId)
@@ -410,7 +418,18 @@ LteEnbMac::GetTypeId (void)
           .AddAttribute ("ComponentCarrierId",
                          "ComponentCarrier Id, needed to reply on the appropriate sap.",
                          UintegerValue (0), MakeUintegerAccessor (&LteEnbMac::m_componentCarrierId),
-                         MakeUintegerChecker<uint8_t> (0, 4));
+                         MakeUintegerChecker<uint8_t> (0, 4))
+          .AddAttribute ("DropPreambleCollision",
+                         "NPRACH preamble-collision model. true (default): a collided preamble "
+                         "is dropped, so all colliding UEs time out their RAR window and re-RACH "
+                         "(no-capture model). false: capture + Msg4 contention resolution "
+                         "(TS 36.321 5.1.4-5.1.5) -- the eNB issues one RAR for the contended "
+                         "rapId, the first (winning) Msg3 is kept and Msg4 echoes its IMSI as the "
+                         "UE Contention Resolution Identity; losers discard Msg4 and re-RACH on "
+                         "T300 with backoff.",
+                         BooleanValue (true),
+                         MakeBooleanAccessor (&LteEnbMac::m_dropPreambleCollision),
+                         MakeBooleanChecker ());
 
   return tid;
 }
@@ -728,15 +747,64 @@ LteEnbMac::CheckIfPreambleWasReceived (NbIotRrcSap::NprachParametersNb ce, bool 
   receivedNprachs = m_receivedNprachPreambleCount[subcarrierOffset];
 
   std::vector<std::pair<int, NbIotRrcSap::Rar>> m_rarQueue; // Mapping Ranti -> Rar
-  NbIotRrcSap::NpdcchMessage rar_dci;
+
+  // Backoff Indicator (TS 36.321 5.1.4): set per-occasion from the contention
+  // level so a thundering herd is told to back off. The index maps to Table 7.2-2
+  // (NB-IoT) on the UE side; capped so the backoff stays well below the traffic
+  // interval. The BI rides every RAR sent this occasion (shared RA-RNTI), so
+  // colliders that get no RAPID match still read it.
+  uint8_t occBackoffIndicator = 0;
+  {
+    uint32_t totalPreambles = 0;
+    for (auto & kv : receivedNprachs) totalPreambles += kv.second;
+    if (totalPreambles > 1)
+      {
+        uint32_t idx = (uint32_t) std::ceil (std::log2 (1.0 + totalPreambles));
+        occBackoffIndicator = (uint8_t) std::min<uint32_t> (6, idx); // cap at idx 6 = 8192 ms
+      }
+  }
 
   if (receivedNprachs.size () > 0)
     {
       //int rnti = m_cmacSapUser->AllocateTemporaryCellRnti ();
 
+      // Occasion index for this NPRACH occasion (used to resolve the dedicated-SR
+      // round-robin phase). k = (occasionStart - startTime) / period, computed
+      // identically on the UE side so phases agree.
+      uint32_t occPeriod = NbIotRrcSap::ConvertNprachPeriodicity2int (ce);
+      uint32_t occStart  = NbIotRrcSap::ConvertNprachStartTime2int (ce);
+      uint32_t occIndex  = (startSubframeNprachOccasion - occStart)
+                           / (occPeriod == 0 ? 1 : occPeriod);
+      uint32_t occPhase  = occIndex % m_srCycle;
+
       for (std::map<uint8_t, uint32_t>::iterator iter = receivedNprachs.begin ();
            iter != receivedNprachs.end (); ++iter)
         {
+          if (iter->second == 1 && m_srReservedSubcarriers > 0
+              && iter->first >= m_srContentionOffset
+              && iter->first < m_srContentionOffset + m_srReservedSubcarriers)
+            {
+              uint32_t slot = occPhase * m_srReservedSubcarriers
+                              + (iter->first - m_srContentionOffset);
+              auto rit = m_dedicatedSrIndexToRnti.find (slot);
+              if (rit != m_dedicatedSrIndexToRnti.end ())
+                {
+                  NotifyIdealUlBuffer (rit->second, 50); // identity from map -> DCI N0
+                }
+              m_receivedNprachPreambleCount[subcarrierOffset].erase (iter->first);
+              continue; // dedicated SR: no RAR
+            }
+          if (m_srHybridContention && iter->second == 1
+              && iter->first < m_srContentionOffset)
+            {
+              uint16_t ranti = m_rapIdRantiMap[subcarrierOffset + iter->first];
+              if (ranti != 0 && m_rlcAttached.find (ranti) != m_rlcAttached.end ())
+                {
+                  NotifyIdealUlBuffer (ranti, 50); // connected UE -> SR grant
+                  m_receivedNprachPreambleCount[subcarrierOffset].erase (iter->first);
+                  continue;
+                }
+            }
           if (iter->second == 1)
             { // sanity check. Actually should be always equal
 
@@ -761,15 +829,6 @@ LteEnbMac::CheckIfPreambleWasReceived (NbIotRrcSap::NprachParametersNb ce, bool 
             }
           else if (iter->second > 1)
             {
-              // Collision
-              // Action depends on how to handle the collisions
-              // 2 possible actions:
-              // a) Preambles interfere with each other, so all UEs lose
-              // b) eNB does cotention resolution magic and one UE surives
-              //NS_BUILD_DEBUG(std::cout << "==================================================" <<  std::endl);
-              //NS_BUILD_DEBUG (std::cout << "Collision" << std::endl);
-              //NS_BUILD_DEBUG(std::cout << "==================================================" <<  std::endl);
-
               if (m_mac_logging)
               {
                 std::string logfile_path = m_logdir+"MAC.log";
@@ -786,21 +845,13 @@ LteEnbMac::CheckIfPreambleWasReceived (NbIotRrcSap::NprachParametersNb ce, bool 
                 }
               else
                 {
-                  m_rapIdCollisionMap[subcarrierOffset + iter->first] = true;
-                  //NS_BUILD_DEBUG (std::cout << "Preamble received of offset " << int (subcarrierOffset) << " at Subframe " << (10 * (m_frameNo - 1) + (m_subframeNo - 1)) << std::endl);
-                  NbIotRrcSap::Rar rar;
+                  NbIotRrcSap::Rar rar = {};
                   rar.cellRnti = m_cmacSapUser->AllocateTemporaryCellRnti ();
                   rar.rapId = subcarrierOffset + iter->first;
                   rar.rarPayload.cellRnti = rar.cellRnti;
-                  rar_dci.isRar = true;
-                  rar_dci.isEdt = edt;
-                  rar_dci.rars.push_back (rar);
-                  rar_dci.ranti = m_rapIdRantiMap[subcarrierOffset + iter->first];
+                  m_rarQueue.push_back (
+                      std::make_pair (m_rapIdRantiMap[subcarrierOffset + iter->first], rar));
                   m_receivedNprachPreambleCount[subcarrierOffset].erase (iter->first);
-                  m_RntiCeMap.insert (
-                      std::pair<uint32_t,
-                                NbIotRrcSap::NprachParametersNb::CoverageEnhancementLevel> (
-                          rar.cellRnti, ce.coverageEnhancementLevel));
                 }
             }
         }
@@ -823,6 +874,7 @@ LteEnbMac::CheckIfPreambleWasReceived (NbIotRrcSap::NprachParametersNb ce, bool 
               rar_dcis.back ().ce = ce.coverageEnhancementLevel;
               rar_dcis.back ().isRar = true;
               rar_dcis.back ().isEdt = edt;
+              rar_dcis.back ().backoffIndicator = occBackoffIndicator; // BI -> herd backs off
               rar_dcis.back ().dciN1.numNpdschSubframesPerRepetition =
                   NbIotRrcSap::DciN1::NumNpdschSubframesPerRepetition::s2;
               rar_dcis.back ().dciN1.numNpdschRepetitions =
@@ -926,6 +978,7 @@ LteEnbMac::DoSubframeIndicationNb (uint32_t frameNo, uint32_t subframeNo)
                                                        m_ce2Parameter},
           m_sib2Nb);
       m_schedulerNb->SetLogDir(m_logdir);
+      m_schedulerNb->SetProactiveMode (m_enbProactiveMode); // proactive FUG (4th mode)
     }
   // Implement NB-IoT Downlink Control Information(DCI) Searchspaces Type2-Common Search Spaces(CSS) All AL2  Liberg et al. p 282
   // Find out if current subframe is start of Type2/UE-specific search space
@@ -952,6 +1005,7 @@ LteEnbMac::DoSubframeIndicationNb (uint32_t frameNo, uint32_t subframeNo)
               msg->AddRar (*rar);
             }
           msg->SetRaRnti (it->ranti);
+          msg->SetBackoffIndicator (it->backoffIndicator); // BI -> all UEs on this RA-RNTI
           m_connectionSuccessful[it->rnti] = false;
           int subframestowait = *(it->dciN1.npdschOpportunity.end () - 1) - currentsubframe;
           Simulator::Schedule (MilliSeconds (subframestowait),
@@ -1004,8 +1058,11 @@ LteEnbMac::DoSubframeIndicationNb (uint32_t frameNo, uint32_t subframeNo)
                       {
                         if (bsr->second.statusPduSize > bytesforallLc)
                           {
-                            NS_FATAL_ERROR (
-                                "Insufficient Tx Opportunity for sending a status message");
+                            NS_LOG_WARN (this << " DL grant " << bytesforallLc
+                                         << "B < status PDU " << bsr->second.statusPduSize
+                                         << "B for RNTI " << it->rnti
+                                         << " -> deferring status to next grant");
+                            continue;
                           }
                       }
 
@@ -1106,12 +1163,6 @@ LteEnbMac::DoSubframeIndicationNb (uint32_t frameNo, uint32_t subframeNo)
                                    &LteEnbPhySapProvider::SendLteControlMessage,
                                    m_enbPhySapProvider, msg);
 
-              // Implement DataInactivity-Timer
-              // Only treat DL as "data activity" when it carries user-plane
-              // traffic (DRB, LCID >= 3).  SRB-only DCI N1s (e.g. the
-              // RrcConnectionRelease queued by SwitchToResumeNb) must NOT
-              // reset the inactivity timer — otherwise PG UEs enter a
-              // spurious suspend/wake loop.
               if(it->rnti != 0){
                 bool hasDrbData = false;
                 for (auto &kv : m_lastDlBSR[it->rnti])
@@ -1282,6 +1333,37 @@ LteEnbMac::ReceiveBsrMessage (MacCeListElement_s bsr)
 }
 
 void
+LteEnbMac::SetProactiveFug (bool enable)
+{
+  m_enbProactiveMode = enable;
+  if (m_schedulerNb)
+    m_schedulerNb->SetProactiveMode (enable);
+}
+
+uint64_t
+LteEnbMac::GetProactiveGrantsIssued () const
+{
+  return m_schedulerNb ? m_schedulerNb->GetProactiveGrantsIssued () : 0;
+}
+
+void
+LteEnbMac::RegisterDedicatedSr (uint16_t rnti, uint32_t srIndex)
+{
+  m_dedicatedSrIndexToRnti[srIndex] = rnti;
+}
+
+void
+LteEnbMac::SetSrTopology (uint32_t reservedSubcarriers, uint32_t contentionOffset, uint32_t cycle)
+{
+  m_srReservedSubcarriers = reservedSubcarriers;
+  m_srContentionOffset    = contentionOffset; // first reserved subcarrier index
+  m_srCycle               = (cycle == 0 ? 1 : cycle);
+}
+
+void
+LteEnbMac::SetSrHybridContention (bool en) { m_srHybridContention = en; }
+
+void
 LteEnbMac::NotifyIdealUlBuffer (uint16_t rnti, uint64_t bytes)
 {
   NS_LOG_FUNCTION (this << rnti << bytes);
@@ -1307,6 +1389,16 @@ LteEnbMac::NotifyIdealUlBuffer (uint16_t rnti, uint64_t bytes)
   else
   {
     NS_LOG_WARN ("NotifyIdealUlBuffer: m_cmacSapUser is null, RRC not notified");
+  }
+}
+
+void
+LteEnbMac::NotifyRai (uint16_t rnti)
+{
+  NS_LOG_FUNCTION (this << rnti);
+  if (m_cmacSapUser)
+  {
+    m_cmacSapUser->NotifyReleaseAssistanceNb (rnti);
   }
 }
 
@@ -1365,6 +1457,29 @@ LteEnbMac::DoReceivePhyPdu (Ptr<Packet> p)
   uint32_t frameSize = p->GetSize ();
   uint32_t serializedSize = p->GetSerializedSize();
   NS_LOG_INFO("LteEnbMac::DoReceivePhyPdu RNTI: " << rnti << ", Id: " << p->GetUid () << ", Size: " << frameSize << " bytes, " << serializedSize << " bytes");
+
+  // Proactive FUG predictor: feed this UL arrival to the scheduler. It is a no-op
+  // unless the UE is in proactive mode, and it filters intra-epoch follow-up PDUs
+  // so the period estimate tracks true packet arrivals (1 subframe == 1 ms).
+  if (m_schedulerNb)
+    m_schedulerNb->NotifyUlArrival (rnti, (uint64_t) Simulator::Now ().GetMilliSeconds ());
+
+  // C-RNTI MAC CE (TS 36.321 5.1.5): if Msg3 carries the UE's existing C-RNTI,
+  // contention is resolved by C-RNTI -- the transmission belongs to that C-RNTI,
+  // not the Temporary C-RNTI used for the preamble. Re-point identity to the real
+  // C-RNTI so the grant (Msg4) is addressed to it; the Temporary C-RNTI is dropped.
+  CRntiMacCeTag crntiTag;
+  if (p->RemovePacketTag (crntiTag))
+    {
+      uint16_t realCrnti = crntiTag.GetCRnti ();
+      NS_LOG_INFO ("Msg3 C-RNTI MAC CE: contention resolution by C-RNTI=" << realCrnti
+                   << " (Temporary C-RNTI=" << rnti << " discarded)");
+      if (realCrnti != 0 && realCrnti != rnti)
+        {
+          if (m_schedulerNb) m_schedulerNb->RemoveUe (rnti); // drop the temp-C-RNTI context
+          rnti = realCrnti;                                   // grants now go to the real C-RNTI
+        }
+    }
 
   DataVolumeAndPowerHeadroomTag dprTag;
   BufferStatusReportTag bsrTag;
@@ -1489,6 +1604,9 @@ LteEnbMac::DoResumeUe(uint16_t rnti, uint64_t resumeId){
 
 void LteEnbMac::DoRemoveUeFromScheduler(uint16_t rnti){
   m_schedulerNb->RemoveUe(rnti);
+}
+void LteEnbMac::DoParkUeInScheduler(uint16_t rnti){
+  m_schedulerNb->ParkUe(rnti);
 }
 void LteEnbMac::DoSetLogDir(std::string logdir){
   m_logdir = logdir;

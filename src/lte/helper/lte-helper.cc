@@ -1108,6 +1108,10 @@ LteHelper::AttachSuspendedNb (Ptr<NetDevice> ueDevice, Ptr<NetDevice> enbDevice)
 
   ueMac->SetIdealBsrCallback (
       MakeCallback (&LteEnbMac::NotifyIdealUlBuffer, enbMac));
+  ueMac->SetRaiCallback (
+      MakeCallback (&LteEnbMac::NotifyRai, enbMac));
+  ueMac->SetSrConfigCallback (
+      MakeCallback (&LteEnbMac::RegisterDedicatedSr, enbMac));
   Simulator::Schedule(MilliSeconds(20), &LteHelper::AttachSuspend, this, ueDevice, enbDevice, resumeId);
 }
 
