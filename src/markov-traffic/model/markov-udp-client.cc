@@ -235,6 +235,7 @@ MarkovUdpClient::SendPacket (void)
   if ((m_socket->Send (p)) >= 0)
   {
     ++m_sent;
+    if (Simulator::Now () >= m_statsStart) ++m_sentWin; // exclude warm-up generation
     NS_LOG_INFO ("TraceDelay TX " << m_size << " bytes to "
       << peerAddressStringStream.str () << " Uid: "
       << p->GetUid () << " Time: "

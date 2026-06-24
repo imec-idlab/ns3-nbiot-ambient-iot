@@ -97,6 +97,22 @@ public:
 
   bool IsPaused() const { return m_paused; }
 
+  /**
+   * @brief Number of packets this client has generated/transmitted. With the
+   *        server's GetReceived() this gives exact app-level loss (sent-received),
+   *        independent of the FlowMonitor 10 s timeout.
+   */
+  uint32_t GetSent() const { return m_sent; }
+
+  /**
+   * @brief Warm-up cutoff: packets generated before this time are excluded from
+   *        the windowed counters (so the first synchronized cold-start RA does
+   *        not bias steady-state loss/delay/throughput). Default 0 = full run.
+   */
+  void SetStatsStartTime (Time t) { m_statsStart = t; }
+  /** @brief Packets generated at/after the stats-start cutoff. */
+  uint32_t GetSentWindow () const { return m_sentWin; }
+
 protected:
   virtual void DoDispose (void);
 
@@ -124,6 +140,8 @@ private:
   void WakeUp (void);
 
   uint32_t m_count; //!< Maximum number of packets the application will send
+  Time     m_statsStart {Seconds (0)}; //!< warm-up cutoff for the windowed sent counter
+  uint32_t m_sentWin {0};              //!< packets generated at/after m_statsStart
   uint32_t m_size; //!< Size of the sent packet (including the SeqTsHeader)
 
   uint32_t m_sent; //!< Counter for sent packets

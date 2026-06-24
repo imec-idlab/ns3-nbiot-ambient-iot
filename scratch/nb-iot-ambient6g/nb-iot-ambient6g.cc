@@ -99,6 +99,7 @@ struct UeEnergyTracker {
     NbiotEnergyModel*     energyModel = nullptr;  // for polled brown-out recovery
     double cutoffJ             = 0.0;
     double harvestedJ          = 0.0;
+    double harvestedAtStart    = 0.0;   // snapshot at the stats-start cutoff (warm-up window)
     Time   uptime              = Seconds(0);
     uint32_t nDepletions       = 0;
     Time   firstDepletionTime  = Time::Max();
@@ -141,6 +142,22 @@ static void PollUeEnergy (UeEnergyTracker* t, Time interval, Time simEnd) {
     if (Simulator::Now() + interval <= simEnd) {
         Simulator::Schedule(interval, &PollUeEnergy, t, interval, simEnd);
     }
+}
+
+// Warm-up reset at the stats-start cutoff: discard everything accumulated during
+// the warm-up so the END-of-sim energy metrics (duty cycle, uptime, depletion,
+// harvested) reflect ONLY the steady-state window [statsStart, simEnd] -- the
+// same window the app-level loss/delay/throughput already use.
+static void StatsReset (UeEnergyTracker* t) {
+    t->harvestedAtStart    = t->harvestedJ;     // windowed harvest = final - this
+    t->uptime              = Seconds(0);
+    t->nDepletions         = 0;
+    t->everDepleted        = false;
+    t->firstDepletionTime  = Time::Max();
+    t->firstRecoveryTime   = Time::Max();
+    // keep wasDepletedLastTick: a UE already browned out at the cutoff must not
+    // re-count as a fresh depletion on the next poll.
+    if (t->energyModel) t->energyModel->ResetAccounting();   // windows the duty cycle
 }
 
 /**
@@ -244,6 +261,17 @@ int main (int argc, char *argv[])
   bool     srPreambleSr {false};         // faithful dedicated SR via real NPRACH preamble
   bool     srHybridContention {false};   // unscheduled UEs also contend on the shared pool (needs srPreambleSr)
   uint32_t srContentionSubcarriers {6};  // offset: reserved SR subcarriers start above this many
+  // Oracle / ideal-BSR upper bound: the eNB knows each UE's buffer the instant
+  // data arrives -- no SR, no RA, no contention, no signalling energy (the UE
+  // still transmits the data on the grant). A best-case reference arm, NOT a
+  // realistic scheme. Implies persistentGrant + connected (no deep sleep) so the
+  // instant-BSR path fires; off by default.
+  bool     oracleBsr {false};
+
+  // Warm-up exclusion: app-level loss/delay/throughput only count packets
+  // GENERATED at/after this time, so the first cold-start RA herd (~first epoch)
+  // does not bias steady-state results. 0 = full run. Energy/depletion stay full-run.
+  double   statsStartSec {0.0};
 
   // Realistic NB-IoT mass-IoT timers (3GPP / GSMA deployment guide).
   // Override on the command line to study sensitivity.
@@ -298,6 +326,15 @@ int main (int argc, char *argv[])
                 "shared pool every base NPRACH occasion; a singleton from a connected UE is granted "
                 "(no RAR). The reserved slot stays the guaranteed floor. Needs srPreambleSr",
                 srHybridContention);
+  cmd.AddValue ("statsStartSec",
+                "Warm-up cutoff (s): app-level loss/delay/throughput exclude packets generated "
+                "before this time, so the first cold-start RA does not bias steady state. "
+                "0 = full run; set ~one epoch past the first packet (e.g. 600)", statsStartSec);
+  cmd.AddValue ("oracleBsr",
+                "Oracle / ideal-BSR upper bound: eNB learns each UE's buffer instantly on data "
+                "arrival (no SR/RA/contention/signalling energy). Implies persistentGrant + "
+                "connected (deepSleepFug=false). Reference arm, not a realistic scheme",
+                oracleBsr);
   cmd.AddValue ("srContentionSubcarriers", "Offset: reserved SR subcarriers start above this many "
                 "(RA/contention pool size)", srContentionSubcarriers);
   cmd.AddValue ("srDedicatedSubcarriers",
@@ -348,6 +385,12 @@ int main (int argc, char *argv[])
   // Proactive FUG (4th mode) is a deep-sleep, persistent-grant mode whose grants
   // come from the eNB predictor instead of an SR. Force the implied settings.
   if (proactiveFug) { persistentGrant = true; deepSleepFug = true; cdrxFug = false; }
+
+  // Oracle / ideal-BSR: the instant-BSR path fires only for a CONNECTED UE
+  // (DoReportBufferStatus, !suspended), so keep the UE connected (no deep sleep)
+  // with a persistent grant. cDRX may stay ON to save DL-monitoring energy while
+  // idle (Idealised FUG = oracle scheduling + cDRX); leave cdrxFug as configured.
+  if (oracleBsr) { persistentGrant = true; deepSleepFug = false; }
 
   if (ns3Debug) log_levels(false, LOG_LEVEL_DEBUG);
   /*
@@ -645,6 +688,7 @@ int main (int argc, char *argv[])
       ueLteDevice->GetMac ()->SetDeepSleepFug (deepSleepFug);         // (Stage B will use this for SR-resume)
       ueLteDevice->GetMac ()->SetCdrx (cdrxFug && !deepSleepFug, cdrxCycleMs, cdrxInactivityMs);
       ueLteDevice->GetMac ()->SetProactiveFug (proactiveFug);         // 4th mode: no SR, await predicted grant
+      ueLteDevice->GetMac ()->SetOracleBsr (oracleBsr);               // upper-bound arm: instant ideal BSR
       if (srPreambleSr && !proactiveFug) {
         ueLteDevice->GetMac ()->SetSrDedicated (i, srDedicatedSubcarriers, srContentionSubcarriers);
         ueLteDevice->GetMac ()->SetSrHybridContention (srHybridContention);
@@ -771,10 +815,24 @@ int main (int argc, char *argv[])
         MakeBoundCallback(&OnHarvestedTrace, &ueTracker[i].harvestedJ));
     Simulator::Schedule(pollInterval, &PollUeEnergy,
                         &ueTracker[i], pollInterval, simDuration);
+    // Warm-up window: at the cutoff, reset the energy/depletion accounting so
+    // end-of-sim duty/uptime/depletion/harvested cover only [statsStart, end].
+    if (statsStartSec > 0.0)
+      Simulator::Schedule(Seconds(statsStartSec), &StatsReset, &ueTracker[i]);
   }
 
   serverApps.Start(startTime);
   serverApps.Stop(simDuration);
+
+  // Warm-up window: exclude packets generated before statsStartSec from the
+  // app-level loss/delay/throughput counters, so the first synchronized
+  // cold-start RA herd does not bias the steady-state metrics.
+  for (uint32_t i = 0; i < serverApps.GetN (); i++)
+    {
+      DynamicCast<UdpServer> (serverApps.Get (i))->SetStatsStartTime (Seconds (statsStartSec));
+      Ptr<MarkovUdpClient> cli = clientApps.Get (i)->GetObject<MarkovUdpClient> ();
+      if (cli) cli->SetStatsStartTime (Seconds (statsStartSec));
+    }
 
   // FlowMonitor: IP-layer delay + packet loss (UE -> remote host)
   FlowMonitorHelper flowHelper;
@@ -792,14 +850,31 @@ int main (int argc, char *argv[])
   perUeOutStream.open (logDir + "rxbytes_per_ue.out", std::ios::out);
   perUeOutStream << "UE_ID\tRxBytes_bits\tThroughput_kbps" << std::endl;
 
+  // App-level loss + delay (exact; no FlowMonitor 10s timeout/cap). Counted over
+  // the steady-state window (packets GENERATED at/after statsStartSec): sent from
+  // the MarkovUdpClient, received + accumulated delay from the UdpServer.
+  uint64_t appSent = 0, appReceived = 0, appRxBytesWin = 0;
+  Time     appDelaySum = Seconds (0);
+  const double statsWindowS = std::max (1.0, simDuration.GetSeconds () - statsStartSec);
   for (uint32_t i = 0; i < serverApps.GetN (); i++)
     {
-      uint64_t ueRxBytes = DynamicCast<UdpServer> (serverApps.Get (i))->GetTotalRx ();
+      Ptr<UdpServer> srv = DynamicCast<UdpServer> (serverApps.Get (i));
+      uint64_t ueRxBytes = srv->GetTotalRx ();        // full-run bytes (per-UE detail file)
       rxBytes += ueRxBytes;
       double ueThroughput = (ueRxBytes * 8) / (simDuration.GetSeconds()) / 1000.0;
       perUeOutStream << (i + 1) << "\t" << (ueRxBytes * 8) << "\t" << ueThroughput << std::endl;
+
+      Ptr<MarkovUdpClient> cli = clientApps.Get (i)->GetObject<MarkovUdpClient> ();
+      if (cli) appSent += cli->GetSentWindow ();
+      appReceived   += srv->GetReceivedWindow ();
+      appDelaySum   += srv->GetDelaySumWindow ();
+      appRxBytesWin += srv->GetTotalRxWindow ();
     }
   perUeOutStream.close ();
+
+  double appLossRatio   = appSent ? double (appSent - appReceived) / appSent : 0.0;
+  double appMeanDelayMs = appReceived ? appDelaySum.GetMilliSeconds () / double (appReceived) : 0.0;
+  double appThroughputKbps = (appRxBytesWin * 8) / statsWindowS / 1000.0; // steady-state throughput
 
   // FlowMonitor: per-flow delay + loss
   // UE -> remote-host flow end-to-end delay from FlowMonitor includes the
@@ -868,23 +943,24 @@ int main (int argc, char *argv[])
       const auto& tr = ueTracker[i];
       double rem  = tr.cap->GetRemainingEnergy();
       double frac = capMaxJ > 0 ? rem / capMaxJ : 0.0;
-      double duty = em.GetDutyCycle();
+      double duty = em.GetDutyCycle();   // windowed by ResetAccounting() at statsStart
 
-      bool dep = tr.everDepleted;
+      bool dep = tr.everDepleted;        // depleted within the window
       if (dep) ++nDepleted;
 
-      double uptimeFrac = (simDuration.GetSeconds() > 0)
-          ? tr.uptime.GetSeconds() / simDuration.GetSeconds() : 0.0;
+      // uptime / harvested over the steady-state window [statsStart, end].
+      double uptimeFrac = tr.uptime.GetSeconds() / statsWindowS;
+      double harvestedWin = tr.harvestedJ - tr.harvestedAtStart;
 
       enOut << (i + 1) << "\t" << rem << "\t" << frac << "\t"
             << dep << "\t"
             << (dep ? tr.firstDepletionTime.GetMilliSeconds() : -1) << "\t"
             << ((tr.firstRecoveryTime == Time::Max()) ? -1
                 : tr.firstRecoveryTime.GetMilliSeconds()) << "\t"
-            << tr.nDepletions << "\t" << tr.harvestedJ << "\t"
+            << tr.nDepletions << "\t" << harvestedWin << "\t"
             << uptimeFrac << "\t" << duty << "\n";
 
-      sumHarvestedJ += tr.harvestedJ;
+      sumHarvestedJ += harvestedWin;
       sumUptimeFrac += uptimeFrac;
       sumDutyCycle  += duty;
       sumNDep       += tr.nDepletions;
@@ -901,12 +977,15 @@ int main (int argc, char *argv[])
   std::ofstream sumOut(logDir + "summary.out");
   sumOut << "numUes\tpersistentGrant\tsendFirst\taggTx\taggRx\taggLost\taggLossRatio\t"
             "aggMeanUEtoENBDelay_ms\tnDepleted\tavgHarvested_J\tavgUptimeFrac\t"
-            "avgDutyCycle\tsumDepletionEvents\tproactiveGrants\n";
+            "avgDutyCycle\tsumDepletionEvents\tproactiveGrants\t"
+            "appSent\tappReceived\tappLossRatio\tappMeanDelay_ms\tappThroughput_kbps\tstatsStartSec\n";
   sumOut << numUes << "\t" << persistentGrant << "\t" << sendFirst << "\t"
          << aggTx << "\t" << aggRx << "\t" << aggLost << "\t" << aggLossRatio
          << "\t" << aggMeanDelay << "\t" << nDepleted << "\t"
          << avgHarvestedJ << "\t" << avgUptimeFrac << "\t"
-         << avgDutyCycle << "\t" << sumNDep << "\t" << proactiveGrants << "\n";
+         << avgDutyCycle << "\t" << sumNDep << "\t" << proactiveGrants << "\t"
+         << appSent << "\t" << appReceived << "\t" << appLossRatio << "\t" << appMeanDelayMs
+         << "\t" << appThroughputKbps << "\t" << statsStartSec << "\n";
   sumOut.close();
 
   Simulator::Destroy ();

@@ -226,6 +226,12 @@ void NbiotEnergyModel::FlushStateTime() {
     }
 }
 
+void NbiotEnergyModel::ResetAccounting() {
+    FlushStateTime();              // account the current interval up to now
+    m_timeSpendInState.clear();    // discard warm-up dwell -> duty over [now, end]
+    m_lastStateChange = Simulator::Now();
+}
+
 double NbiotEnergyModel::GetActiveTimeMs() const {
     double t = 0.0;
     for (const auto& kv : m_timeSpendInState) {

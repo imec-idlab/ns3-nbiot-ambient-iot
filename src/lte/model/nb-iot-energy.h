@@ -128,6 +128,11 @@ public:
     // zero-duration divides on periodic energy sources). Call it before reading
     // GetDutyCycle() at simulation end.
     void   FlushStateTime();
+    // Warm-up exclusion: account the current interval up to now, then discard
+    // all accumulated dwell time so GetDutyCycle() reflects only [now, end].
+    // Does NOT touch the per-state energy log (m_states), so the log/energy-per-bit
+    // can be windowed separately by timestamp. Call once at the stats-start cutoff.
+    void   ResetAccounting();
     double GetActiveTimeMs() const;
     double GetTotalAccountedTimeMs() const;
     double GetDutyCycle() const;

@@ -79,6 +79,27 @@ public:
     uint64_t GetTotalRx() const;
 
   /**
+   * \brief Sum of per-packet end-to-end delays (RX time - SeqTs TX time) over
+   * all received packets. Exact app-level delay: no FlowMonitor timeout/cap.
+   * \return the accumulated delay
+   */
+  Time GetDelaySum (void) const;
+  /**
+   * \return mean per-packet delay = GetDelaySum()/GetReceived() (0 if none)
+   */
+  Time GetMeanDelay (void) const;
+
+  /**
+   * \brief Warm-up cutoff: packets whose SeqTs TX timestamp is before this time
+   * are excluded from the windowed received/delay/bytes counters, so the first
+   * cold-start RA does not bias steady-state metrics. Default 0 = full run.
+   */
+  void SetStatsStartTime (Time t);
+  uint64_t GetReceivedWindow (void) const;   //!< received packets generated at/after the cutoff
+  Time     GetDelaySumWindow (void) const;    //!< delay sum over those packets
+  uint64_t GetTotalRxWindow (void) const;     //!< bytes received over those packets
+
+  /**
    * \brief Set the size of the window used for checking loss. This value should
    *  be a multiple of 8
    * \param size the size of the window used for checking loss. This value should
@@ -107,6 +128,11 @@ private:
   Ptr<Socket> m_socket6; //!< IPv6 Socket
   uint64_t m_received; //!< Number of received packets
   uint64_t m_totalRx;   //!< Total bytes received
+  Time m_delaySum;     //!< Accumulated per-packet delay (RX - SeqTs TX time)
+  Time m_statsStart {Seconds (0)}; //!< warm-up cutoff (on SeqTs TX time)
+  uint64_t m_receivedWin {0};      //!< received packets generated at/after m_statsStart
+  Time     m_delaySumWin {Seconds (0)}; //!< delay sum over windowed packets
+  uint64_t m_totalRxWin {0};       //!< bytes received over windowed packets
   PacketLossCounter m_lossCounter; //!< Lost packet counter
 
   /// Callbacks for tracing the packet Rx events

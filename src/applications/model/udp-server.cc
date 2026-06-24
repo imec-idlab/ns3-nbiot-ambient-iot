@@ -75,6 +75,7 @@ UdpServer::UdpServer ()
   NS_LOG_FUNCTION (this);
   m_received=0;
   m_totalRx=0;
+  m_delaySum=Seconds (0);
 }
 
 UdpServer::~UdpServer ()
@@ -116,6 +117,25 @@ UdpServer::GetTotalRx() const
     NS_LOG_FUNCTION(this);
     return m_totalRx;
 }
+
+Time
+UdpServer::GetDelaySum (void) const
+{
+  NS_LOG_FUNCTION (this);
+  return m_delaySum;
+}
+
+Time
+UdpServer::GetMeanDelay (void) const
+{
+  NS_LOG_FUNCTION (this);
+  return (m_received > 0) ? (m_delaySum / int64_t (m_received)) : Seconds (0);
+}
+
+void     UdpServer::SetStatsStartTime (Time t) { m_statsStart = t; }
+uint64_t UdpServer::GetReceivedWindow (void) const { return m_receivedWin; }
+Time     UdpServer::GetDelaySumWindow (void) const { return m_delaySumWin; }
+uint64_t UdpServer::GetTotalRxWindow (void) const { return m_totalRxWin; }
 
 void
 UdpServer::DoDispose (void)
@@ -189,6 +209,15 @@ UdpServer::HandleRead (Ptr<Socket> socket)
           SeqTsHeader seqTs;
           packet->RemoveHeader (seqTs);
           uint32_t currentSequenceNumber = seqTs.GetSeq ();
+          Time pktDelay = Simulator::Now () - seqTs.GetTs (); // exact app-level delay
+          m_delaySum += pktDelay;
+          if (seqTs.GetTs () >= m_statsStart)                 // exclude warm-up generation
+            {
+              m_receivedWin++;
+              m_delaySumWin += pktDelay;
+              m_totalRxWin  += receivedSize;
+            }
+
           if (InetSocketAddress::IsMatchingType (from))
             {
               NS_LOG_INFO ("TraceDelay: RX " << packet->GetSize () <<

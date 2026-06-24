@@ -159,6 +159,7 @@ public:
   void SetSrDedicated (uint32_t srIndex, uint32_t reservedSubcarriers,
                        uint32_t contentionOffset);
   void SetSrHybridContention (bool en);   ///< also contend on shared subcarriers while waiting for the reserved slot
+  void SetOracleBsr (bool en);            ///< oracle / ideal BSR: eNB learns the buffer instantly (no SR delay/energy)
   /**
    * Enable/disable the persistent-grant ideal-BSR hook.
    **/
@@ -464,6 +465,7 @@ private:
   // occasion, an unscheduled UE also contends on the shared (non-reserved)
   // subcarriers every base NPRACH occasion. Whichever resolves first wins.
   bool m_srHybridContention {false};     ///< opportunistic contention SR enabled
+  bool m_oracleBsr {false};              ///< oracle / ideal BSR: instant zero-cost buffer report to the eNB
   uint64_t MsToNextBaseOccasion (void) const;  ///< time to the next NPRACH occasion (any phase)
   void SendContentionSrPreamble (void);  ///< contend on a random shared subcarrier
   EventId m_srContentionEvent;           ///< pending contention SR transmission event

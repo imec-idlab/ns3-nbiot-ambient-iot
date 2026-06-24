@@ -395,6 +395,9 @@ void
 LteUeMac::SetSrHybridContention (bool en) { m_srHybridContention = en; }
 
 void
+LteUeMac::SetOracleBsr (bool en) { m_oracleBsr = en; }
+
+void
 LteUeMac::SetPersistentGrant (bool enable) { m_persistentGrant = enable; }
 
 void
@@ -769,6 +772,18 @@ LteUeMac::DoReportBufferStatus (LteMacSapProvider::ReportBufferStatusParameters 
       }
       // Buffer drained: grant session over; next packet re-requests via SR.
       m_grantSessionActive = false;
+    }
+    else if (m_oracleBsr && !m_grantSessionActive && !m_suspended)
+    {
+      // Oracle / ideal BSR (upper bound): the eNB learns the buffer the instant
+      // data arrives -- no SR period, no contention, no preamble energy. Fires
+      // the already-wired m_idealBsrCb -> NotifyIdealUlBuffer immediately. The
+      // UE still transmits the data on the granted NPUSCH (that energy is still
+      // charged); only the SIGNALLING overhead is removed. Off by default; this
+      // is a separate comparison arm, NOT folded into the realistic FUG modes.
+      m_grantSessionActive = true;
+      if (!m_idealBsrCb.IsNull ())
+        m_idealBsrCb (m_rnti, total);
     }
     else if (!m_srPending && !m_grantSessionActive && !m_suspended
              && Simulator::Now () >= m_srProhibitUntil
