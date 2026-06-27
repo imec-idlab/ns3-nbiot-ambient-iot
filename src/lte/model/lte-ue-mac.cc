@@ -92,6 +92,7 @@ public:
   virtual void SetRaKeepCrnti(uint16_t crnti);
   virtual void NotifyContentionResolutionFailedNb();
   virtual NbIotRrcSap::NprachParametersNb::CoverageEnhancementLevel GetCoverageEnhancementLevel();
+  virtual uint32_t GetUlBufferSize();
 
 private:
   LteUeMac *m_mac; ///< the UE MAC
@@ -194,6 +195,13 @@ UeMemberLteUeCmacSapProvider::NotifyContentionResolutionFailedNb(){
 
 NbIotRrcSap::NprachParametersNb::CoverageEnhancementLevel UeMemberLteUeCmacSapProvider::GetCoverageEnhancementLevel(){
   return m_mac->DoGetCoverageEnhancementLevel();
+}
+
+uint32_t UeMemberLteUeCmacSapProvider::GetUlBufferSize(){
+  // DATA-only buffer (LCID>2). NB-IoT RLC-UM leaves a small status-PDU residue on
+  // the signalling LCs that never drains; using the full buffer here would keep a
+  // proactive UE awake (RRC suspend guard) forever, never letting it sleep.
+  return (uint32_t) m_mac->GetBufferSize();
 }
 
 /// UeMemberLteMacSapProvider class
@@ -525,6 +533,21 @@ LteUeMac::SendContentionSrPreamble (void)
     total += kv.second.txQueueSize + kv.second.retxQueueSize + kv.second.statusPduSize;
   if (total == 0) { m_srPending = false; return; }     // buffer drained
 
+  // Only UNSCHEDULED UEs contend on the non-scheduled subcarriers. At this UE's
+  // own reserved (dedicated) occasion it IS scheduled -- the eNB serves it on
+  // its reserved subcarrier this round -- so it must NOT also throw a preamble
+  // into the shared contention pool. Doing so would add a scheduled UE to the
+  // contention load and needlessly collide with genuinely waiting UEs. Skip the
+  // transmission this occasion but keep the contention cadence for the gaps
+  // between reserved occasions (the reserved slot stays the guaranteed floor).
+  if (MsToNextDedicatedOccasion () == 0)
+    {
+      m_srContentionEvent = Simulator::Schedule (
+          MilliSeconds (MsToNextBaseOccasion ()),
+          &LteUeMac::SendContentionSrPreamble, this);
+      return;
+    }
+
   // Opportunistic contention SR: pick a random subcarrier from the shared pool
   // [0, contentionOffset) and transmit a real NPRACH preamble there. Unlike the
   // reserved path the eNB cannot map this resource to a UE; on a singleton it
@@ -713,6 +736,30 @@ LteUeMac::DoTransmitPdu (LteMacSapProvider::TransmitPduParameters params)
       params.pdu->AddPacketTag(bsrTag);
     }
     // Normal PDU just add BSR for next Packet
+
+    // Oracle / ideal-BSR: close the grant session once the granted data has
+    // drained the buffer. NB-IoT RLC-UM never re-reports an emptied queue, so
+    // the total==0 reset in DoReportBufferStatus never runs; and a connected
+    // (non-deep-sleep) oracle UE never hits the PSM/eDRX reset either. Without
+    // this, m_grantSessionActive stays true forever and the oracle's
+    // !m_grantSessionActive guard blocks every packet after the first.
+    if (m_oracleBsr && bsr == 0)
+      {
+        m_grantSessionActive = false;
+      }
+
+    // Proactive FUG: a UE with UL data pending stays CONNECTED-monitoring (it
+    // never suspends/resumes), so neither the PSM/eDRX reset nor the resume
+    // reset of m_grantSessionActive ever runs. Once the granted DATA has drained
+    // the buffer, close the grant session here so the NEXT packet can again
+    // trigger the predicted push / fallback SR. NB-IoT RLC-UM leaves a small
+    // status-PDU residue on the signalling LCs that never drains, so test the
+    // DATA-only buffer (GetBufferSize, LCID>2): keying off the full buffer would
+    // leave the session active forever and strand every packet after the first.
+    if (m_proactiveFug && GetBufferSize () == 0)
+      {
+        m_grantSessionActive = false;
+      }
 
     NS_LOG_INFO("LteUeMac::DoTransmitPdu RNTI: " << m_rnti << ", Id: " << params.pdu->GetUid () << ", Size: " << params.pdu->GetSize() << " bytes, " << params.pdu->GetSerializedSize() << " bytes");
 

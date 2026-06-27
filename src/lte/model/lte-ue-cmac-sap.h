@@ -157,6 +157,10 @@ public:
   virtual void NotifyContentionResolutionFailedNb() = 0;
 
   virtual NbIotRrcSap::NprachParametersNb::CoverageEnhancementLevel GetCoverageEnhancementLevel() =0;
+
+  // Current total UL buffer occupancy (bytes) as seen by the MAC. Used by the
+  // RRC proactive-FUG suspend guard to keep the UE awake while data is pending.
+  virtual uint32_t GetUlBufferSize() = 0;
 };
 
 

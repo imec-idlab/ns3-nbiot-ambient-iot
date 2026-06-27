@@ -235,7 +235,8 @@ MarkovUdpClient::SendPacket (void)
   if ((m_socket->Send (p)) >= 0)
   {
     ++m_sent;
-    if (Simulator::Now () >= m_statsStart) ++m_sentWin; // exclude warm-up generation
+    if (Simulator::Now () >= m_statsStart && Simulator::Now () <= m_statsEnd)
+      ++m_sentWin;                                      // exclude warm-up + tail generation
     NS_LOG_INFO ("TraceDelay TX " << m_size << " bytes to "
       << peerAddressStringStream.str () << " Uid: "
       << p->GetUid () << " Time: "
@@ -348,16 +349,12 @@ MarkovUdpClient::Resume()
   m_paused = false;
   if (m_sent < m_count)
     {
-      // Wake-up decision: every recovery from brown-out advances the gating
-      // Markov chain by one step. If the post-recovery state is ACTIVE, send
-      // a packet immediately (modelling an energy-aware app that
-      // opportunistically transmits on each restored-supply event), then
-      // resume the regular Markov cadence.
-      UpdateState ();
-      if (m_state == ACTIVE)
-        {
-          Simulator::ScheduleNow (&MarkovUdpClient::SendPacket, this);
-        }
+      // Re-arm the regular Markov cadence only. Do NOT mint a new packet on
+      // recovery: a packet generated before the brown-out is still buffered in
+      // the RLC and is delivered by the access layer once the radio is back.
+      // Injecting a fresh packet here (new SeqTs, ++m_sent) double-counts the
+      // offered load and inflates the loss ratio for any scheme that depletes,
+      // confounding the cross-scheme comparison.
       m_sendEvent = Simulator::Schedule (GetNextInterval (),
                                          &MarkovUdpClient::Send, this);
     }

@@ -166,6 +166,14 @@ public:
   void SetPersistentGrant(bool enable);
   bool IsPersistentGrant() const;
   /**
+   * Proactive-FUG mode (per-UE). A proactively-pushed DCI0 must NOT force-wake
+   * the eNB-side UeManager from a suspended state: the real UE may be asleep,
+   * and the wake is driven by the UE's actual UL transmission, not by the
+   * speculative push.
+   * */
+  void SetProactiveFug(bool enable);
+  bool IsProactiveFug() const;
+  /**
    * Wake this UeManager from IDLE_SUSPEND_* back to CONNECTED_NORMALLY when
    * the UE sends an ideal BSR on the persistent grant path. Cancels pending
    * suspend timers so the normal data-inactivity cycle can restart.
@@ -705,6 +713,7 @@ private:
   bool m_dataReceived;
   bool m_enablePSM;
   bool m_persistentGrant {false};
+  bool m_proactiveFug {false};   ///< proactive FUG: pushed DCI0 must not force-wake a suspended UeManager
   std::list<EventId> id_suspend;
   std::string m_logdir;
 }; // end of `class UeManager`
@@ -1912,6 +1921,7 @@ private:
   bool m_enablePSM;
 
   bool m_persistentGrant {false};
+  bool m_proactiveFug {false};   ///< default proactive-FUG flag propagated to every new UeManager
 
   void GenerateSystemInformationBlockType1Nb();
   void GenerateSystemInformationBlockType2Nb(std::pair<const uint8_t, ns3::Ptr<ns3::ComponentCarrierBaseStation>> cc);
@@ -1930,6 +1940,11 @@ public:
    * Default persistent-grant flag propagated to every new UeManager.
    **/
   bool IsPersistentGrant() const { return m_persistentGrant; }
+
+  /**
+   * Default proactive-FUG flag propagated to every new UeManager.
+   **/
+  bool IsProactiveFug() const { return m_proactiveFug; }
 
 }; // end of `class LteEnbRrc`
 

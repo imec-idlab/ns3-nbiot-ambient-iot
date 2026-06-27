@@ -263,6 +263,9 @@ UeManager::DoInitialize ()
 
   // Pull NB-IoT timer values from LteEnbRrc into this UeManager.
   m_dataInactivityInterval = m_rrc->m_dataInactivityInterval;
+  // Proactive-FUG flag is cell-wide; propagate it so a speculatively pushed
+  // DCI0 does not force-wake this UeManager from a suspended state.
+  m_proactiveFug = m_rrc->IsProactiveFug();
 
   for (uint8_t i = 0; i < m_rrc->m_numberOfComponentCarriers; i++)
     {
@@ -2001,6 +2004,16 @@ void UeManager::NotifyDataActivitySchedulerNb(){
     // NotifyDataActivity. The UeManager must follow the UE back into
     // CONNECTED_NORMALLY so the data-inactivity timer can rearm and the normal
     // release→eDRX cycle can fire again.
+    // Proactive FUG: the activity notification here is fired by a SPECULATIVE
+    // pushed DCI0 (lte-enb-mac NotifyDataActivitySchedulerNb), not by an observed
+    // UE transmission. The real UE may still be asleep. Force-waking the eNB-side
+    // UeManager (and arming inactivity) on the push orphans the UE's later real
+    // wake. Cancel any inactivity countdown (so an awake UE is not prematurely
+    // re-suspended) but do NOT resurrect a suspended UeManager: its CONNECTED
+    // state is driven by the UE's actual UL transmission.
+    if (m_proactiveFug){
+      return;
+    }
     if (m_persistentGrant &&
         (m_state == IDLE_SUSPEND_EDRX || m_state == IDLE_SUSPEND_PSM || m_state == CONNECTED_TAU)){
       WakeFromPersistentGrant();
@@ -2037,6 +2050,14 @@ void UeManager::SetPersistentGrant(bool enable){
 
 bool UeManager::IsPersistentGrant() const{
   return m_persistentGrant;
+}
+
+void UeManager::SetProactiveFug(bool enable){
+  m_proactiveFug = enable;
+}
+
+bool UeManager::IsProactiveFug() const{
+  return m_proactiveFug;
 }
 
 void UeManager::WakeFromPersistentGrant(){
@@ -2222,6 +2243,13 @@ LteEnbRrc::GetTypeId (void)
                "instead of requiring a resume-via-RACH.",
                BooleanValue (false),
                MakeBooleanAccessor (&LteEnbRrc::m_persistentGrant),
+               MakeBooleanChecker ())
+    .AddAttribute ("ProactiveFug",
+               "Proactive FUG (4th mode): a speculatively pushed DCI0 must not "
+               "force-wake the eNB-side UeManager from a suspended state; the "
+               "wake is driven by the UE's actual UL transmission.",
+               BooleanValue (false),
+               MakeBooleanAccessor (&LteEnbRrc::m_proactiveFug),
                MakeBooleanChecker ())
 
 

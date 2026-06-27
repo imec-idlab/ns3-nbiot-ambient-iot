@@ -151,12 +151,14 @@ static void PollUeEnergy (UeEnergyTracker* t, Time interval, Time simEnd) {
 static void StatsReset (UeEnergyTracker* t) {
     t->harvestedAtStart    = t->harvestedJ;     // windowed harvest = final - this
     t->uptime              = Seconds(0);
-    t->nDepletions         = 0;
-    t->everDepleted        = false;
-    t->firstDepletionTime  = Time::Max();
+    // A UE already browned out at the cutoff must be counted as depleted-in-window
+    // (else a UE that is down across the cutoff and never recovers reports
+    // "never depleted"). Seed the window counters from the current state; keep
+    // wasDepletedLastTick so the next poll does not double-count the same edge.
+    t->everDepleted        = t->wasDepletedLastTick;
+    t->nDepletions         = t->wasDepletedLastTick ? 1u : 0u;
+    t->firstDepletionTime  = t->wasDepletedLastTick ? Simulator::Now() : Time::Max();
     t->firstRecoveryTime   = Time::Max();
-    // keep wasDepletedLastTick: a UE already browned out at the cutoff must not
-    // re-count as a fresh depletion on the next poll.
     if (t->energyModel) t->energyModel->ResetAccounting();   // windows the duty cycle
 }
 
@@ -272,6 +274,10 @@ int main (int argc, char *argv[])
   // GENERATED at/after this time, so the first cold-start RA herd (~first epoch)
   // does not bias steady-state results. 0 = full run. Energy/depletion stay full-run.
   double   statsStartSec {0.0};
+  // Tail exclusion: also drop packets GENERATED after this time -- a last-epoch
+  // packet has too little time to be delivered before sim end and would inflate
+  // loss. 0 => auto = simDuration - one packet epoch. Applied to app metrics.
+  double   statsEndSec {0.0};
 
   // Realistic NB-IoT mass-IoT timers (3GPP / GSMA deployment guide).
   // Override on the command line to study sensitivity.
@@ -330,6 +336,10 @@ int main (int argc, char *argv[])
                 "Warm-up cutoff (s): app-level loss/delay/throughput exclude packets generated "
                 "before this time, so the first cold-start RA does not bias steady state. "
                 "0 = full run; set ~one epoch past the first packet (e.g. 600)", statsStartSec);
+  cmd.AddValue ("statsEndSec",
+                "Tail cutoff (s): exclude packets generated after this from app metrics "
+                "(undeliverable last-epoch packets bias loss). 0 = auto (simDuration - one epoch)",
+                statsEndSec);
   cmd.AddValue ("oracleBsr",
                 "Oracle / ideal-BSR upper bound: eNB learns each UE's buffer instantly on data "
                 "arrival (no SR/RA/contention/signalling energy). Implies persistentGrant + "
@@ -518,10 +528,16 @@ int main (int argc, char *argv[])
     NS_FATAL_ERROR("Invalid propagationLossModel: must be 'friis', 'friis-spectrum', 'fixed', or 'winner'");
   }
 
-  // enable fading
-  lteHelper->SetFadingModel("ns3::TraceFadingLossModel");
-  std::string fadingTracePath = std::string(NS3_ROOT_DIR) + "/src/lte/model/fading-traces/fading_trace_ETU_3kmph.fad";
-  lteHelper->SetFadingModelAttribute("TraceFilename", StringValue(fadingTracePath));
+  // No fast-fading model. The UEs are STATIC (ConstantPositionMobilityModel),
+  // so a 3 km/h ETU fast-fading trace is physically inappropriate for them.
+  // It is also the source of run-to-run non-determinism: TraceFadingLossModel
+  // keys its per-channel fading RNG by a pointer pair (ChannelRealizationId_t)
+  // and assigns RNG streams in pointer/iteration order, so ASLR randomised the
+  // fading-trace offset per link each run -> different SINR -> different RA
+  // outcomes. Channel = Friis path loss + noise (deterministic).
+  // lteHelper->SetFadingModel("ns3::TraceFadingLossModel");
+  // lteHelper->SetFadingModelAttribute("TraceFilename", StringValue(
+  //     std::string(NS3_ROOT_DIR) + "/src/lte/model/fading-traces/fading_trace_ETU_3kmph.fad"));
 
   lteHelper->SetAttribute ("UseIdealRrc", BooleanValue (false));
   lteHelper->SetAttribute ("UsePdschForCqiGeneration", BooleanValue (true));
@@ -566,6 +582,7 @@ int main (int argc, char *argv[])
 
   // Install LTE Devices to the nodes
   Config::SetDefault ("ns3::LteEnbRrc::PersistentGrant", BooleanValue (persistentGrant));
+  Config::SetDefault ("ns3::LteEnbRrc::ProactiveFug", BooleanValue (proactiveFug));
 
   if (ambientIoT) {
       t3324_ms      = aiotT3324Ms;
@@ -683,6 +700,7 @@ int main (int argc, char *argv[])
       ueRrc->SetAttribute ("PSM",  BooleanValue (deepSleepFug));
       ueRrc->SetAttribute ("eDRX", BooleanValue (false));
       ueRrc->SetAttribute ("PersistentGrant", BooleanValue (persistentGrant));
+      ueRrc->SetAttribute ("ProactiveFug", BooleanValue (proactiveFug));
       ueLteDevice->GetMac ()->SetPersistentGrant (persistentGrant);   // mirror to MAC
       ueLteDevice->GetMac ()->SetSrPeriod (effSrPeriodMs);            // round-robin SR cadence: base*ceil(N/pool)
       ueLteDevice->GetMac ()->SetDeepSleepFug (deepSleepFug);         // (Stage B will use this for SR-resume)
@@ -824,14 +842,21 @@ int main (int argc, char *argv[])
   serverApps.Start(startTime);
   serverApps.Stop(simDuration);
 
-  // Warm-up window: exclude packets generated before statsStartSec from the
-  // app-level loss/delay/throughput counters, so the first synchronized
-  // cold-start RA herd does not bias the steady-state metrics.
+  // Steady-state window [statsStartSec, statsEndEff]: exclude the first
+  // synchronized cold-start RA herd (warm-up) AND the last epoch (tail, whose
+  // packets cannot be delivered before sim end) from app loss/delay/throughput.
+  const double statsEndEff = (statsEndSec > 0.0)
+      ? statsEndSec
+      : std::max (statsStartSec + 1.0,
+                  simDuration.GetSeconds () - packetGenInterval.GetSeconds ());
   for (uint32_t i = 0; i < serverApps.GetN (); i++)
     {
-      DynamicCast<UdpServer> (serverApps.Get (i))->SetStatsStartTime (Seconds (statsStartSec));
+      Ptr<UdpServer> srv = DynamicCast<UdpServer> (serverApps.Get (i));
+      srv->SetStatsStartTime (Seconds (statsStartSec));
+      srv->SetStatsEndTime (Seconds (statsEndEff));
       Ptr<MarkovUdpClient> cli = clientApps.Get (i)->GetObject<MarkovUdpClient> ();
-      if (cli) cli->SetStatsStartTime (Seconds (statsStartSec));
+      if (cli) { cli->SetStatsStartTime (Seconds (statsStartSec));
+                 cli->SetStatsEndTime (Seconds (statsEndEff)); }
     }
 
   // FlowMonitor: IP-layer delay + packet loss (UE -> remote host)
@@ -855,7 +880,7 @@ int main (int argc, char *argv[])
   // the MarkovUdpClient, received + accumulated delay from the UdpServer.
   uint64_t appSent = 0, appReceived = 0, appRxBytesWin = 0;
   Time     appDelaySum = Seconds (0);
-  const double statsWindowS = std::max (1.0, simDuration.GetSeconds () - statsStartSec);
+  const double statsWindowS = std::max (1.0, statsEndEff - statsStartSec);
   for (uint32_t i = 0; i < serverApps.GetN (); i++)
     {
       Ptr<UdpServer> srv = DynamicCast<UdpServer> (serverApps.Get (i));

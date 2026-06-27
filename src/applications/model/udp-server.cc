@@ -133,6 +133,7 @@ UdpServer::GetMeanDelay (void) const
 }
 
 void     UdpServer::SetStatsStartTime (Time t) { m_statsStart = t; }
+void     UdpServer::SetStatsEndTime (Time t) { m_statsEnd = t; }
 uint64_t UdpServer::GetReceivedWindow (void) const { return m_receivedWin; }
 Time     UdpServer::GetDelaySumWindow (void) const { return m_delaySumWin; }
 uint64_t UdpServer::GetTotalRxWindow (void) const { return m_totalRxWin; }
@@ -211,8 +212,8 @@ UdpServer::HandleRead (Ptr<Socket> socket)
           uint32_t currentSequenceNumber = seqTs.GetSeq ();
           Time pktDelay = Simulator::Now () - seqTs.GetTs (); // exact app-level delay
           m_delaySum += pktDelay;
-          if (seqTs.GetTs () >= m_statsStart)                 // exclude warm-up generation
-            {
+          if (seqTs.GetTs () >= m_statsStart && seqTs.GetTs () <= m_statsEnd)
+            {                                               // exclude warm-up + tail generation
               m_receivedWin++;
               m_delaySumWin += pktDelay;
               m_totalRxWin  += receivedSize;

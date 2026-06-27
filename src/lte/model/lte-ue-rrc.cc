@@ -310,6 +310,12 @@ LteUeRrc::GetTypeId (void)
                  BooleanValue (false),
                  MakeBooleanAccessor (&LteUeRrc::m_persistentGrant),
                  MakeBooleanChecker ())
+    .AddAttribute ("ProactiveFug",
+                 "Proactive FUG: stay CONNECTED-monitoring on a release while UL data "
+                 "is still pending (catch a pushed DCI0 instead of suspending)",
+                 BooleanValue (false),
+                 MakeBooleanAccessor (&LteUeRrc::m_proactiveFug),
+                 MakeBooleanChecker ())
     .AddTraceSource ("MibReceived",
                      "trace fired upon reception of Master Information Block",
                      MakeTraceSourceAccessor (&LteUeRrc::m_mibReceivedTrace),
@@ -845,7 +851,28 @@ LteUeRrc::DoNotifyRandomAccessSuccessful (bool edt)
             }
             LteRrcSap::RrcConnectionRequest msg;
             msg.ueIdentity = m_imsi;
-            m_cmacSapProvider.at(0)->SetMsg5Buffer(20);
+            // Data-aware DPR (TS 36.321 5.4.6 / 6.1.3.10): report the ACTUAL pending
+            // UL data volume in Msg3's DPR MAC CE so the eNB sizes the post-RA grant
+            // for the user data, not just the ~20 B Msg5 signalling. The flat 20 left
+            // the eNB unaware of the data -> inactivity-release orphan (300 s tail).
+            // Scoped to the contention RA scheme (!persistentGrant): the persistent-
+            // grant schemes (oracle/cDRX/proactive) convey the buffer via their own
+            // mechanisms, and a data-aware DPR double-reports there and corrupts their
+            // grant accounting (observed: idealfug 0% -> 64% loss).
+            if (!m_persistentGrant)
+              {
+                uint32_t pendingData = 0;
+                for (std::vector<Ptr<Packet>>::iterator it = m_packetStored.begin ();
+                     it != m_packetStored.end (); ++it)
+                  {
+                    pendingData += (*it)->GetSize ();
+                  }
+                m_cmacSapProvider.at(0)->SetMsg5Buffer(20 + pendingData);
+              }
+            else
+              {
+                m_cmacSapProvider.at(0)->SetMsg5Buffer(20);
+              }
             m_rrcSapUser->SendRrcConnectionRequest (msg);
             m_connectionTimeout = Simulator::Schedule (m_t300,
                                                       &LteUeRrc::ConnectionTimeout,
@@ -867,8 +894,23 @@ LteUeRrc::DoNotifyRandomAccessSuccessful (bool edt)
             std::vector<Ptr<Packet>>::iterator next_packet = m_packetStored.begin();
             uint32_t msg5size = 14; // tbd
             uint32_t size_left_to_fill = 1500-msg5size; // use actual Resume complete size later
-
-            if (m_cIotOpt && size_left_to_fill > 0 && size_left_to_fill - (*next_packet)->GetSize() > 0){
+            if (!m_persistentGrant)
+              {
+                // Data-aware DPR (TS 36.321 5.4.6) for the contention RA scheme: report
+                // the ACTUAL pending UL data volume so the eNB grants the user data
+                // (routed to RLC below). The flat 14 B (Resume-Complete signalling only)
+                // left the data ungranted within the RRC-inactivity window ->
+                // inactivity-release orphan (300 s tail). Scoped to RA so the persistent-
+                // grant schemes' own buffer-delivery paths are untouched.
+                uint32_t pendingData = 0;
+                for (std::vector<Ptr<Packet>>::iterator it = m_packetStored.begin ();
+                     it != m_packetStored.end (); ++it)
+                  {
+                    pendingData += (*it)->GetSize ();
+                  }
+                m_cmacSapProvider.at(0)->SetMsg5Buffer(msg5size + pendingData);
+              }
+            else if (m_cIotOpt && size_left_to_fill > 0 && size_left_to_fill - (*next_packet)->GetSize() > 0){
               m_cmacSapProvider.at(0)->SetMsg5Buffer(msg5size+(*next_packet)->GetSize());
             }else{
               m_cmacSapProvider.at(0)->SetMsg5Buffer(msg5size);
@@ -932,15 +974,24 @@ LteUeRrc::DoNotifyRandomAccessFailed ()
     {
     case IDLE_RANDOM_ACCESS:
       {
-        //SwitchToState (IDLE_CAMPED_NORMALLY);
-        SwitchToState(IDLE_SUSPEND_PSM);
-        m_asSapUser->NotifyConnectionFailed ();
-        //std::cout << "I'm dead" << std::endl;
-        if(m_logging){
-
-        LogRA(false, m_connectStartTime);
-        }
-
+        // RA gave up (RAR exhausted / preambleTransMax). If a packet is STILL
+        // buffered, re-RACH it within the epoch (TS 36.321 5.1.4) with the
+        // carried-over backoff -- mirrors the ConnectionTimeout (Msg4) path.
+        // Otherwise NB-IoT RLC-UM orphans it in PSM until the next epoch's
+        // connection flushes it (~one inter-arrival interval late), poisoning the
+        // delay tail and hiding the access failure. No buffered data -> park.
+        if (m_logging) { LogRA (false, m_connectStartTime); }
+        if (!m_packetStored.empty ())
+          {
+            m_hasReceivedMibNb = false;
+            m_resumePending = true;
+            SwitchToState (IDLE_WAIT_MIB);
+          }
+        else
+          {
+            SwitchToState (IDLE_SUSPEND_PSM);
+            m_asSapUser->NotifyConnectionFailed ();
+          }
       }
       break;
 
@@ -1433,6 +1484,19 @@ LteUeRrc::DoRecvRrcConnectionSetup (LteRrcSap::RrcConnectionSetup msg)
         m_rrcSapUser->SendRrcConnectionSetupCompleted (msg2);
         m_asSapUser->NotifyConnectionSuccessful ();
         m_cmacSapProvider.at (0)->NotifyConnectionSuccessful ();
+        // Deliver the data buffered while IDLE (contention RA scheme only). The
+        // fresh-connection path previously left m_packetStored untouched, so a UE
+        // that established via RRC ConnectionRequest never pushed its uplink data
+        // into RLC -> inactivity-release orphan (300 s tail). Persistent-grant schemes
+        // drive their own delivery and must not be perturbed here.
+        if (!m_persistentGrant)
+          {
+            while (!m_packetStored.empty ())
+              {
+                SendDataNb (m_packetStored.front (), 1);
+                m_packetStored.erase (m_packetStored.begin ());
+              }
+          }
         //NS_BUILD_DEBUG(std::cout << "CONNECTION COMPLETE" << std::endl);
 
         //m_asSapUser->NotifyMessage4();
@@ -1511,8 +1575,21 @@ LteUeRrc::DoRecvRrcConnectionResumeNb (NbIotRrcSap::RrcConnectionResumeNb msg)
             msg2.dedicatedInfoNas = Create<Packet>(0);
           }
         }else if (m_packetStored.size() > 0){
-          SendDataNb(m_packetStored.front(),1);
-          m_packetStored.erase(next_packet);
+          if (!m_persistentGrant)
+            {
+              // Contention RA: deliver ALL buffered packets to RLC (a UE orphaned in a
+              // prior epoch carries a backlog; the data-aware DPR sized the grant for
+              // the total). Persistent-grant schemes keep the original head-only send.
+              while (!m_packetStored.empty ()) {
+                SendDataNb (m_packetStored.front (), 1);
+                m_packetStored.erase (m_packetStored.begin ());
+              }
+            }
+          else
+            {
+              SendDataNb(m_packetStored.front(),1);
+              m_packetStored.erase(next_packet);
+            }
           msg2.dedicatedInfoNas = Create<Packet>(0);
         }
 
@@ -1700,6 +1777,20 @@ LteUeRrc::DoRecvRrcConnectionReleaseNb (NbIotRrcSap::RrcConnectionReleaseNb msg)
                     << " RNTI=" << m_rnti
                     << " msgResumeId=" << msg.resumeIdentity
                     << " currentResumeId=" << m_resumeId);
+      return;
+    }
+    // Proactive FUG: do NOT suspend while this UE still has UL data buffered.
+    // The awake UE must stay CONNECTED-monitoring until a pushed DCI0 lands and
+    // it transmits; otherwise a wasted push (UE was asleep) would orphan the
+    // packet for a full period (RLC-UM never re-reports).
+    if (m_proactiveFug && m_cmacSapProvider.at (0) != 0
+        && m_cmacSapProvider.at (0)->GetUlBufferSize () > 0) {
+      NS_LOG_DEBUG ("UE IMSI=" << m_imsi
+                    << " DoRecvRrcConnectionReleaseNb: cause=rrc_Suspend"
+                    << " RNTI=" << m_rnti
+                    << " proactiveFug: UL data pending ("
+                    << m_cmacSapProvider.at (0)->GetUlBufferSize ()
+                    << " B) -> stay CONNECTED-monitoring (no suspend)");
       return;
     }
     m_asSapUser->NotifyConnectionSuspended();
@@ -3777,9 +3868,27 @@ LteUeRrc::ConnectionTimeout ()
         if (m_srb0) m_srb0->m_rlc->DoReset();
         if (m_srb1) m_srb1->m_rlc->DoReset();
         m_connectionTimeoutTrace (m_imsi, m_cellId, m_rnti, m_connEstFailCount);
-        //Following call to UE NAS will force the UE to immediately
-        //perform the random access to the same cell again.
-        m_asSapUser->NotifyConnectionFailed ();  // inform upper layer
+        // Contention-resolution loser with data STILL buffered: re-initiate
+        // access for it WITHIN the same epoch (TS 36.321 5.1.4), instead of
+        // orphaning it until the next application packet arrives. NB-IoT RLC-UM
+        // never re-reports an unchanged queue, so a packet not re-RACHed here
+        // would otherwise sit ~one inter-arrival interval (poisoning delay) and
+        // never count as honestly lost. The MIB re-acquisition routes into the
+        // resume path (DoRecvMasterInformationBlockNb): m_rnti==0 -> re-RACH via
+        // StartConnectionNb. The carried-over backoff
+        // (NotifyContentionResolutionFailedNb above) spreads the re-RACH.
+        if (!m_packetStored.empty ())
+          {
+            m_hasReceivedMibNb = false;
+            m_resumePending = true;
+            SwitchToState (IDLE_WAIT_MIB);
+          }
+        else
+          {
+            //Following call to UE NAS will force the UE to immediately
+            //perform the random access to the same cell again.
+            m_asSapUser->NotifyConnectionFailed ();  // inform upper layer
+          }
     }
 }
 

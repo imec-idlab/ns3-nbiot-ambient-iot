@@ -110,7 +110,11 @@ public:
    *        not bias steady-state loss/delay/throughput). Default 0 = full run.
    */
   void SetStatsStartTime (Time t) { m_statsStart = t; }
-  /** @brief Packets generated at/after the stats-start cutoff. */
+  /** @brief End of the steady-state window: packets generated AFTER this are
+   *  excluded from the sent counter (they have too little time to be delivered
+   *  before sim end -> would inflate loss). Default Max = no end cutoff. */
+  void SetStatsEndTime (Time t) { m_statsEnd = t; }
+  /** @brief Packets generated within the [start,end] window. */
   uint32_t GetSentWindow () const { return m_sentWin; }
 
 protected:
@@ -140,8 +144,9 @@ private:
   void WakeUp (void);
 
   uint32_t m_count; //!< Maximum number of packets the application will send
-  Time     m_statsStart {Seconds (0)}; //!< warm-up cutoff for the windowed sent counter
-  uint32_t m_sentWin {0};              //!< packets generated at/after m_statsStart
+  Time     m_statsStart {Seconds (0)};   //!< warm-up cutoff for the windowed sent counter
+  Time     m_statsEnd {Time::Max ()};    //!< tail cutoff; packets generated after are excluded
+  uint32_t m_sentWin {0};                //!< packets generated within [m_statsStart, m_statsEnd]
   uint32_t m_size; //!< Size of the sent packet (including the SeqTsHeader)
 
   uint32_t m_sent; //!< Counter for sent packets

@@ -367,7 +367,31 @@ NbiotScheduler::Schedule (uint64_t frameNo, uint64_t subframeNo)
               toGrant.push_back (ue.rnti);
               ue.proactiveGrantsIssued++;
               m_proactiveGrantsIssued++;
-              do { ue.nextGrantSf += ue.predPeriodSf; } while (nowSf >= ue.nextGrantSf);
+              // The prediction is only approximate: the first push at a predicted
+              // occasion frequently lands a few ms before the packet reaches the
+              // (awake) UE's buffer -> wasted. Instead of waiting a full period
+              // for the next chance, re-push at a short retry cadence for a
+              // bounded window so the awake, data-pending UE catches a grant soon
+              // after its data arrives. A confirmed UL arrival (NotifyUlArrival)
+              // zeroes pushRetriesLeft and re-anchors nextGrantSf one period out.
+              if (ue.pushRetriesLeft == 0)
+                {
+                  ue.pushRetriesLeft = kProactivePushRetries; // open a fresh retry window
+                }
+              if (ue.pushRetriesLeft > 0)
+                {
+                  ue.pushRetriesLeft--;
+                }
+              if (ue.pushRetriesLeft > 0)
+                {
+                  // still inside the retry window: re-push soon
+                  ue.nextGrantSf = nowSf + kProactivePushRetrySf;
+                }
+              else
+                {
+                  // window exhausted (or single shot): fall back to one period out
+                  do { ue.nextGrantSf += ue.predPeriodSf; } while (nowSf >= ue.nextGrantSf);
+                }
             }
         }
       for (uint16_t r : toGrant)
@@ -1335,12 +1359,47 @@ NbiotScheduler::NotifyUlArrival (uint16_t rnti, uint64_t nowSf)
   if (ue.arrivalCount >= 1 && nowSf > ue.lastArrivalSf)
     {
       uint64_t gap = nowSf - ue.lastArrivalSf;
-      ue.predPeriodSf = (ue.predPeriodSf == 0) ? gap : (ue.predPeriodSf + gap) / 2;
+      // Robust period estimation by MINIMUM plausible gap. For periodic ambient
+      // traffic, a *missed* epoch only ever lengthens an inter-arrival (a doubled
+      // or tripled gap), never shortens it -- so the true period is the SMALLEST
+      // genuine inter-arrival observed. Tracking the running minimum is therefore
+      // immune both to missed-epoch outliers (which inflate gaps) and to a single
+      // bad EWMA sample. A cold-start floor rejects sub-epoch artifacts: a UE's
+      // first connection often yields a trailing setup/bootstrap PDU tens of
+      // seconds after the first data PDU (e.g. a ~25 s gap), far below any
+      // realistic ambient epoch; such gaps advance the anchor but are not learned.
+      if (gap >= kProactiveColdStartFloorSf)
+        {
+          if (ue.predPeriodSf == 0 || gap < ue.predPeriodSf)
+            ue.predPeriodSf = gap;     // running minimum = best period estimate
+        }
+      // else: cold-start artifact -- advance anchor only (handled below)
     }
   ue.lastArrivalSf = nowSf;
   ue.arrivalCount++;
+  // A real UL transmission confirms the UE was served: close any open retry
+  // window and predict the next push.
+  ue.pushRetriesLeft = 0;
   if (ue.predPeriodSf > 0)
-    ue.nextGrantSf = nowSf + ue.predPeriodSf; // re-anchor the prediction on this arrival
+    {
+      // FREE-RUNNING anchor. The arrival timestamp is the UE's *transmission*
+      // instant, which is later than the data-buffering instant by the current
+      // grant-wait. Re-basing nextGrant on every arrival (arrival + period) feeds
+      // that grant-wait back into the next prediction, so any delay COMPOUNDS
+      // epoch over epoch (a slowly growing delay). Instead, advance nextGrant by
+      // exactly one period from its previous value (a free-running phase locked to
+      // the true data cadence), and only RE-BASE when the prediction has drifted
+      // far from the observed arrival (initial lock, or a genuine phase change /
+      // missed epoch). A small guard biases the push to land just AFTER the data
+      // is buffered so the first push of the occasion catches it.
+      uint64_t freeRun = ue.nextGrantSf + ue.predPeriodSf;
+      uint64_t expected = nowSf + ue.predPeriodSf + kProactivePushGuardSf;
+      uint64_t halfPeriod = ue.predPeriodSf / 2;
+      bool drifted = (ue.nextGrantSf == 0)
+                     || (freeRun + halfPeriod < expected)   // free-run fell too far behind
+                     || (freeRun > expected + halfPeriod);  // or ran too far ahead
+      ue.nextGrantSf = drifted ? expected : freeRun;
+    }
 }
 
 uint64_t

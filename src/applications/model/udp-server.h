@@ -95,6 +95,10 @@ public:
    * cold-start RA does not bias steady-state metrics. Default 0 = full run.
    */
   void SetStatsStartTime (Time t);
+  /** @brief Tail cutoff: received packets whose generation (SeqTs TX) time is
+   *  AFTER this are excluded from the windowed counters, symmetric with the
+   *  client, so undeliverable last-epoch packets don't bias loss. Max = off. */
+  void SetStatsEndTime (Time t);
   uint64_t GetReceivedWindow (void) const;   //!< received packets generated at/after the cutoff
   Time     GetDelaySumWindow (void) const;    //!< delay sum over those packets
   uint64_t GetTotalRxWindow (void) const;     //!< bytes received over those packets
@@ -130,6 +134,7 @@ private:
   uint64_t m_totalRx;   //!< Total bytes received
   Time m_delaySum;     //!< Accumulated per-packet delay (RX - SeqTs TX time)
   Time m_statsStart {Seconds (0)}; //!< warm-up cutoff (on SeqTs TX time)
+  Time m_statsEnd {Time::Max ()};  //!< tail cutoff (on SeqTs TX time); Max = off
   uint64_t m_receivedWin {0};      //!< received packets generated at/after m_statsStart
   Time     m_delaySumWin {Seconds (0)}; //!< delay sum over windowed packets
   uint64_t m_totalRxWin {0};       //!< bytes received over windowed packets

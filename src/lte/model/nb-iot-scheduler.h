@@ -79,6 +79,14 @@ struct UeConfig{
   uint64_t nextGrantSf  = 0;      ///< absolute subframe of the next proactive grant
   uint32_t arrivalCount = 0;      ///< observed UL arrivals (>=2 needed to estimate a period)
   uint64_t proactiveGrantsIssued = 0; ///< proactive DCI N0 grants pushed (denominator for FP accounting)
+  // Retry cadence: a prediction is only approximate, so the first push at the
+  // predicted occasion often lands a few ms before the packet actually reaches
+  // the (awake, monitoring) UE's buffer -> wasted. Rather than wait a full
+  // period for the next push, keep re-pushing at a short cadence for a bounded
+  // window so the awake UE catches a grant soon after its data arrives. A real
+  // UL arrival (NotifyUlArrival) confirms the grant was caught and re-anchors
+  // the next push one full period ahead.
+  uint32_t pushRetriesLeft = 0;   ///< remaining short-cadence retries for the current occasion
 };
 
 
@@ -162,6 +170,16 @@ protected:
   std::map<uint16_t, UeConfig> m_rntiUeConfigMap;
   bool m_proactiveMode = false;          ///< cell-wide proactive FUG (4th mode)
   uint64_t m_proactiveGrantsIssued = 0;  ///< running total of proactive grants pushed
+  // Proactive-push retry window: total grants attempted per predicted occasion
+  // (1 initial + retries) and the short re-push spacing (subframes == ms). The
+  // window spans kProactivePushRetries * kProactivePushRetrySf ms around the
+  // prediction; sized to comfortably cover the EWMA prediction error so the
+  // awake UE catches a grant within a few seconds of its data arriving, while
+  // staying far below the traffic period so it cannot bleed into the next epoch.
+  static constexpr uint32_t kProactivePushRetries  = 3;    ///< pushes per occasion (1 + 2 retries)
+  static constexpr uint64_t kProactivePushRetrySf  = 400;  ///< retry spacing [subframes/ms] (0.4 s)
+  static constexpr uint64_t kProactivePushGuardSf  = 300;  ///< bias push to land just AFTER predicted arrival (0.3 s)
+  static constexpr uint64_t kProactiveColdStartFloorSf = 60000; ///< sub-60 s "arrivals" before a period is known are cold-start artifacts, not new epochs
   std::map<SearchSpaceConfig, std::vector<NbIotRrcSap::NpdcchMessage>> m_rarQueue;
   bool m_only15KhzSpacing = true;
   uint64_t m_frameNo;

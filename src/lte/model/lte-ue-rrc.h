@@ -1418,6 +1418,7 @@ private:
   bool m_edt;
   bool m_logging {false};
   bool m_persistentGrant {false};   // NB-IoT: skip RACH if UE was previously connected
+  bool m_proactiveFug {false};      // proactive FUG: stay CONNECTED until pending UL data is sent
   std::vector<Ptr<Packet>> m_packetStored;
   NbIotRrcSap::RadioResourceConfigCommonNb m_rc;
 public:
