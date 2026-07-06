@@ -165,12 +165,18 @@ LteUeRrcProtocolReal::DoSendRrcConnectionResumeRequestNb (NbIotRrcSap::RrcConnec
 
   packet->AddHeader (rrcConnectionResumeRequestNbHeader);
 
+  // UP-EDT: append the early uplink data after the header (mirrors the EarlyDataRequest
+  // path). Absent for a normal resume, so the legacy flow is byte-identical.
+  if (msg.dedicatedInfoNas != nullptr && msg.dedicatedInfoNas->GetSize () > 0){
+    packet->AddAtEnd (msg.dedicatedInfoNas);
+  }
+
   LteRlcSapProvider::TransmitPdcpPduParameters transmitPdcpPduParameters;
   transmitPdcpPduParameters.pdcpPdu = packet;
   transmitPdcpPduParameters.rnti = m_rnti;
   transmitPdcpPduParameters.lcid = 0;
 
-  uint64_t imsi = msg.resumeIdentity; 
+  uint64_t imsi = msg.resumeIdentity;
   if (m_logging)
   {
     std::string logfile_path = m_logdir+"RRC.log";
@@ -998,18 +1004,25 @@ LteEnbRrcProtocolReal::DoReceivePdcpPdu (uint16_t rnti, Ptr<Packet> p)
       m_enbRrcSapProvider->RecvRrcConnectionRequest (rnti,rrcConnectionRequestMsg);
       break;
     case 2:
+      {
       p->RemoveHeader(rrcConnectionResumeRequestNbHeader);
       NbIotRrcSap::RrcConnectionResumeRequestNb rrcConnectionResumeRequestNbMsg;
       rrcConnectionResumeRequestNbMsg = rrcConnectionResumeRequestNbHeader.GetMessage();
+      // UP-EDT: whatever remains after the header is early uplink data (empty for a normal
+      // resume). Mirrors the EarlyDataRequest case below.
+      rrcConnectionResumeRequestNbMsg.dedicatedInfoNas = p;
       m_enbRrcSapProvider->RecvRrcConnectionResumeRequestNb (rnti, rrcConnectionResumeRequestNbMsg);
       break;
+      }
     case 3:
+      {
       p->RemoveHeader(rrcEarlyDataRequestNbHeader);
       NbIotRrcSap::RrcEarlyDataRequestNb rrcEarlyDataRequestNbMsg;
       rrcEarlyDataRequestNbMsg = rrcEarlyDataRequestNbHeader.GetMessage();
       rrcEarlyDataRequestNbMsg.dedicatedInfoNas= p;
       m_enbRrcSapProvider->RecvRrcEarlyDataRequestNb (rnti, rrcEarlyDataRequestNbMsg);
       break;
+      }
     }
 }
 void 

@@ -75,7 +75,10 @@ LteRlcAm::LteRlcAm ()
   m_byteWithoutPoll = 0;
 
   // Configurable parameters
-  m_maxRetxThreshold = 5;
+  m_maxRetxThreshold = 32;   // 3GPP TS 36.331 RLC-Config maxRetxThreshold: {t1,t2,t3,t4,t6,t8,t16,t32}.
+                             // Was 5 (not a valid enum value) AND never enforced. t32 = NB-IoT's
+                             // reliability-oriented default; at this count the PDU is DISCARDED (RLF),
+                             // see the max-retx blocks below, instead of retransmitting forever.
   m_pollPdu = 1;
   m_pollByte = 50;
 
@@ -163,17 +166,50 @@ LteRlcAm::DoReset()
   m_statusProhibitTimer.Cancel ();
   m_rbsTimer.Cancel ();
 
+  // Fully restore the entity to its constructor state so it can be REUSED. A capture loser
+  // that re-RACHes into a fresh resume must restart at SN 0; the previous DoReset clear()ed
+  // the transmit buffers WITHOUT resizing them back to the sequence-number window and left
+  // ALL the SN state variables untouched -> the next transmit indexed an empty m_txedBuffer
+  // (std::out_of_range) and the stale receive window (m_vrR) silently dropped the re-resume
+  // Msg4. Resize the windowed buffers and reset the SN state, mirroring the constructor.
   m_txonBuffer.clear ();
   m_txonBufferSize = 0;
   m_txedBuffer.clear ();
+  m_txedBuffer.resize (1024);
   m_txedBufferSize = 0;
   m_retxBuffer.clear ();
+  m_retxBuffer.resize (1024);
   m_retxBufferSize = 0;
   m_rxonBuffer.clear ();
   m_sdusBuffer.clear ();
   m_keepS0 = 0;
   m_controlPduBuffer = 0;
 
+  m_lastRetxQueueSize = 0;
+  m_lastTxQueueSize = 0;
+  m_lastStatusPduSize = 0;
+  m_statusPduRequested = false;
+  m_statusPduBufferSize = 0;
+
+  // State variables. Assign FRESH SequenceNumber10(0) objects rather than "= 0":
+  // operator=(uint16_t) resets only the value and KEEPS the stale m_modulusBase, so a
+  // later SN comparison (operator>/==, which asserts equal modulus bases) would fire on the
+  // mismatched base. A fresh SequenceNumber10(0) has modulusBase 0, matching a just-reset
+  // peer entity. (A brand-new entity works because its SNs start at base 0.)
+  // Transmitting side
+  m_vtA  = SequenceNumber10 (0);
+  m_vtS  = SequenceNumber10 (0);
+  m_pollSn = SequenceNumber10 (0);
+  m_vtMs = m_vtA + m_windowSize;
+  // Receiving side
+  m_vrR  = SequenceNumber10 (0);
+  m_vrX  = SequenceNumber10 (0);
+  m_vrMs = SequenceNumber10 (0);
+  m_vrH  = SequenceNumber10 (0);
+  m_vrMr = m_vrR + m_windowSize;
+  // Counters
+  m_pduWithoutPoll  = 0;
+  m_byteWithoutPoll = 0;
 }
 
 /**
@@ -386,6 +422,12 @@ LteRlcAm::DoNotifyTxOpportunity (LteMacSapUser::TxOpportunityParameters txOpPara
                   NS_LOG_INFO ("Incr RETX_COUNT for SN = " << seqNumberValue);
                   if (m_retxBuffer.at (seqNumberValue).m_retxCount >= m_maxRetxThreshold)
                     {
+                      // maxRetx reached (TS 36.322 5.2.1). NO discard here: this study is CE0-only
+                      // with deterministic SINR, so the eNB never NACKs -- any retx is driven by the
+                      // poll-retransmit timer (slow STATUS/ACK under contention), i.e. a SPURIOUS
+                      // retx of data the eNB already has. Dropping on that would manufacture false
+                      // loss of already-delivered packets. (A faithful RLF-drop belongs in a
+                      // fading / higher-CE study where real decode failures occur.)
                       NS_LOG_INFO ("Max RETX_COUNT for SN = " << seqNumberValue);
                     }
 
@@ -952,6 +994,12 @@ LteRlcAm::DoNotifyTxOpportunityNb (LteMacSapUser::TxOpportunityParameters txOpPa
                   NS_LOG_INFO ("Incr RETX_COUNT for SN = " << seqNumberValue);
                   if (m_retxBuffer.at (seqNumberValue).m_retxCount >= m_maxRetxThreshold)
                     {
+                      // maxRetx reached (TS 36.322 5.2.1). NO discard here: this study is CE0-only
+                      // with deterministic SINR, so the eNB never NACKs -- any retx is driven by the
+                      // poll-retransmit timer (slow STATUS/ACK under contention), i.e. a SPURIOUS
+                      // retx of data the eNB already has. Dropping on that would manufacture false
+                      // loss of already-delivered packets. (A faithful RLF-drop belongs in a
+                      // fading / higher-CE study where real decode failures occur.)
                       NS_LOG_INFO ("Max RETX_COUNT for SN = " << seqNumberValue);
                     }
 

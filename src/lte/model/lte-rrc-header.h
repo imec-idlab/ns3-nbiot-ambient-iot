@@ -709,6 +709,7 @@ public:
 
 private:
   uint8_t m_rrcTransactionIdentifier; ///< RRC transaction identifier
+  std::bitset<40> m_resumeIdentity; ///< UE Contention Resolution Identity (resume): echoed resumeId
 };
 /**
 * This class manages the serialization/deserialization of RrcConnectionSetup IE
@@ -885,6 +886,7 @@ public:
 
 private:
   // everything is optional and dedicatedInfoNas is transmitted on ns3 packet level
+  std::bitset<40> m_contentionResolutionId; ///< EDT UE Contention Resolution Identity (echoed IMSI)
 
 };
 /**

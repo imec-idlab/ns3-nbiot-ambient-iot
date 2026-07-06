@@ -218,6 +218,7 @@ int main (int argc, char *argv[])
    * */
   int packetSize {49};
   Time packetGenInterval {Seconds(300)};       // 5 min - matches deep-ambient KPI
+  bool rlcAm {true};                            // true: RLC-AM (ARQ/retx); false: RLC-UM (fire-and-forget)
   Time startTime { MilliSeconds(10)};
 
   // Energy front-end: super-cap + diurnal solar harvester
@@ -240,6 +241,7 @@ int main (int argc, char *argv[])
 
   bool ciot {false};
   bool edt {false};
+  bool capture {true};
   std::string propagationLoss{"friis"};
   Time channelDelay {MilliSeconds (10)};
   bool persistentGrant {true};
@@ -256,6 +258,7 @@ int main (int argc, char *argv[])
   uint32_t cdrxCycleMs     {10240};  // long DRX cycle (sf10240 = 10.24 s)
   uint32_t cdrxInactivityMs {500};   // drx-InactivityTimer (extends Active Time after a grant)
   bool     proactiveFug {false};
+  bool     fugRoundRobin {false};        // proactive FUG round-robin arm (only applies when proactiveFug)
   uint32_t srDedicatedSubcarriers {4};   // SR subcarriers carved from the 12-tone NPRACH pool
   uint32_t srBaseNprachPeriodMs   {80};  // CE0 NPRACH occasion period (round-robin base); matches
                                          // lte-enb-rrc.cc CE0 ms80. Sensitivity floor ms40 (CE0-only).
@@ -278,13 +281,21 @@ int main (int argc, char *argv[])
   // packet has too little time to be delivered before sim end and would inflate
   // loss. 0 => auto = simDuration - one packet epoch. Applied to app metrics.
   double   statsEndSec {0.0};
+  // Extra seconds to run AFTER generation stops (packets stop being generated at simDuration,
+  // but the sim + server keep running drainSec longer). Lets in-flight packets drain with NO
+  // new packets competing -> isolates tail/late-delivery from genuine starvation loss.
+  double   drainSec {0.0};
 
   // Realistic NB-IoT mass-IoT timers (3GPP / GSMA deployment guide).
   // Override on the command line to study sensitivity.
   uint32_t t3324_ms     {20000};    // Active timer  (20 s)
   uint64_t t3412_ms     {3600000};  // Periodic TAU  (1 h)
   uint32_t edrxCycle_ms {20480};    // eDRX cycle    (20.48 s)
-  uint32_t rrcRelease_ms{5000};     // RRC inactivity release (5 s)
+  uint32_t rrcRelease_ms{100000};   // data-inactivity release (100 s = 3GPP dataInactivityTimer s100).
+                                    // Raised from 5 s: under N=180 contention a UE can take many
+                                    // seconds to win enough grants, so a 5 s timer fired mid-delivery
+                                    // and orphaned the packet. 100 s gives ample delivery margin
+                                    // (trade-off: more connected-mode energy). Flag: --rrcReleaseMs.
 
   // Ambient-IoT mode: when true, override the mass-IoT timers above to a
   // Class-C "active batteryless with brief listening windows" set. Short
@@ -304,6 +315,8 @@ int main (int argc, char *argv[])
   cmd.AddValue ("numUes", "Number of UEs", numUes);
   cmd.AddValue ("ciot", "Cellular IoT Optimization", ciot);
   cmd.AddValue ("edt", "Early Data Transmission", edt);
+  cmd.AddValue ("capture", "NPRACH preamble-collision capture for ALL schemes (one UE wins a "
+                "collision via Msg4 contention resolution) vs drop-all herd model", capture);
   cmd.AddValue ("cellSize", "Cell size in meters", cellSize);
   cmd.AddValue("propagationLoss", "Propagation loss model: friis, fixed, or winner", propagationLoss);
   cmd.AddValue("positioning", "Positioning model for ues: uniform, random, or same", positioning);
@@ -323,6 +336,9 @@ int main (int argc, char *argv[])
   cmd.AddValue ("proactiveFug",
                 "Standalone 4th mode: proactive FUG (eNB predicts each UE's period and pushes "
                 "grants, no SR). Implies persistentGrant + deepSleepFug", proactiveFug);
+  cmd.AddValue ("fugRoundRobin",
+                "Proactive FUG round-robin arm: poll UEs in turn instead of predicting periods "
+                "(only effective with proactiveFug)", fugRoundRobin);
   cmd.AddValue ("srPreambleSr",
                 "Faithful dedicated SR: UE transmits a real NPRACH preamble on its reserved "
                 "subcarrier; eNB resolves identity from its resource->RNTI map (TS 36.331 "
@@ -340,6 +356,9 @@ int main (int argc, char *argv[])
                 "Tail cutoff (s): exclude packets generated after this from app metrics "
                 "(undeliverable last-epoch packets bias loss). 0 = auto (simDuration - one epoch)",
                 statsEndSec);
+  cmd.AddValue ("drainSec",
+                "extra seconds to run after generation stops (drain in-flight packets, "
+                "no new generation); isolates tail from genuine starvation loss", drainSec);
   cmd.AddValue ("oracleBsr",
                 "Oracle / ideal-BSR upper bound: eNB learns each UE's buffer instantly on data "
                 "arrival (no SR/RA/contention/signalling energy). Implies persistentGrant + "
@@ -379,6 +398,9 @@ int main (int argc, char *argv[])
   cmd.AddValue ("packetGenIntervalSec",
                 "Markov tick (= mean inter-arrival in s)",
                 packetGenInterval);
+  cmd.AddValue ("rlcAm",
+                "true: RLC-AM (ARQ/retx, reliable, higher latency); false: RLC-UM (fire-and-forget)",
+                rlcAm);
   cmd.AddValue ("t3324Ms",     "T3324 active timer in ms (3GPP-typical 20000)", t3324_ms);
   cmd.AddValue ("t3412Ms",     "T3412 periodic TAU timer in ms (typical 3600000)", t3412_ms);
   cmd.AddValue ("eDrxCycleMs", "eDRX cycle in ms (NB-IoT: 2560*2^k; typical 20480)", edrxCycle_ms);
@@ -528,17 +550,6 @@ int main (int argc, char *argv[])
     NS_FATAL_ERROR("Invalid propagationLossModel: must be 'friis', 'friis-spectrum', 'fixed', or 'winner'");
   }
 
-  // No fast-fading model. The UEs are STATIC (ConstantPositionMobilityModel),
-  // so a 3 km/h ETU fast-fading trace is physically inappropriate for them.
-  // It is also the source of run-to-run non-determinism: TraceFadingLossModel
-  // keys its per-channel fading RNG by a pointer pair (ChannelRealizationId_t)
-  // and assigns RNG streams in pointer/iteration order, so ASLR randomised the
-  // fading-trace offset per link each run -> different SINR -> different RA
-  // outcomes. Channel = Friis path loss + noise (deterministic).
-  // lteHelper->SetFadingModel("ns3::TraceFadingLossModel");
-  // lteHelper->SetFadingModelAttribute("TraceFilename", StringValue(
-  //     std::string(NS3_ROOT_DIR) + "/src/lte/model/fading-traces/fading_trace_ETU_3kmph.fad"));
-
   lteHelper->SetAttribute ("UseIdealRrc", BooleanValue (false));
   lteHelper->SetAttribute ("UsePdschForCqiGeneration", BooleanValue (true));
   //disable Uplink Power Control
@@ -583,6 +594,12 @@ int main (int argc, char *argv[])
   // Install LTE Devices to the nodes
   Config::SetDefault ("ns3::LteEnbRrc::PersistentGrant", BooleanValue (persistentGrant));
   Config::SetDefault ("ns3::LteEnbRrc::ProactiveFug", BooleanValue (proactiveFug));
+  // Connected-DRX FUG (idealfug): keep the UE RRC_CONNECTED between packets so it
+  // MAC-cDRX-sleeps (monitors NPDCCH once per ~10.24 s cycle) instead of being
+  // released to eDRX->PSM and re-RACHing. Only for the connected cDRX arm:
+  // persistentGrant + cDRX + NOT deep-sleep (deepSleepFug releases to PSM by design).
+  Config::SetDefault ("ns3::LteEnbRrc::CdrxFug",
+                      BooleanValue (persistentGrant && cdrxFug && !deepSleepFug));
 
   if (ambientIoT) {
       t3324_ms      = aiotT3324Ms;
@@ -595,7 +612,15 @@ int main (int argc, char *argv[])
   Config::SetDefault ("ns3::LteEnbRrc::T3324",              IntegerValue ((int32_t) t3324_ms));
   Config::SetDefault ("ns3::LteEnbRrc::T3412",              IntegerValue ((int64_t) t3412_ms));
   Config::SetDefault ("ns3::LteEnbRrc::TeDRXC",             IntegerValue ((int32_t) edrxCycle_ms));
-  Config::SetDefault ("ns3::LteEnbRrc::RrcReleaseInterval", UintegerValue ((uint16_t) rrcRelease_ms));
+  Config::SetDefault ("ns3::LteEnbRrc::RrcReleaseInterval", UintegerValue (rrcRelease_ms));
+  // Resume-complete timeout: if a resume is accepted (CONNECTION_RESUME) but the UE never
+  // confirms (capture desync -- shared Temp C-RNTI, Msg4 lost), the eNB re-parks the
+  // context after this time so the UE's re-RACH resumes cleanly. Must be < UE T300 (2 s,
+  // 3GPP max) so it fires BEFORE the UE retries; a legitimate resume completes in <0.4 s,
+  // so 1 s is a safe margin that never re-parks a real in-flight resume.
+  Config::SetDefault ("ns3::LteEnbRrc::ConnectionResumeTimeoutDuration", TimeValue (MilliSeconds (1000)));
+  Config::SetDefault ("ns3::LteEnbRrc::EpsBearerToRlcMapping",
+                      StringValue (rlcAm ? "RlcAmAlways" : "RlcUmAlways"));
   NetDeviceContainer enbLteDevs = lteHelper->InstallEnbDevice (enbNodes);
   NetDeviceContainer ueLteDevs = lteHelper->InstallUeDevice (ueNodes);
 
@@ -603,6 +628,13 @@ int main (int argc, char *argv[])
   // predicts each UE's period and pushes grants instead of waiting for an SR.
   Ptr<LteEnbNetDevice> enbDev = enbLteDevs.Get (0)->GetObject<LteEnbNetDevice> ();
   enbDev->GetMac ()->SetProactiveFug (proactiveFug);
+  // EDT is a CELL feature (3GPP Rel-15): the eNB must advertise/process the EDT preamble
+  // partition and issue edt-TBS Msg3 grants. Enable it cell-side to match the per-UE
+  // --edt config below; otherwise the UE requests EDT but the eNB never grants it.
+  enbDev->GetMac ()->SetEdt (edt);
+  // fug round-robin arm: GATED on proactiveFug so it can only affect the fug scheme
+  // (the RR branch is inside the scheduler's m_proactiveMode block anyway).
+  enbDev->GetMac ()->SetProactiveRoundRobin (proactiveFug && fugRoundRobin);
 
 
   // Attach a Ipv4 to UEs
@@ -654,10 +686,23 @@ int main (int argc, char *argv[])
             << " roundRobinPeriods=" << srRoundRobinPeriods
             << " => effSrPeriod=" << effSrPeriodMs << "ms" << std::endl;
 
+  // Capture for ALL schemes: a collided NPRACH preamble is WON by one UE (Msg4 contention
+  // resolution) instead of dropping the whole herd. Critical for EDT, where a dropped preamble
+  // also drops the Msg3 data -> at high density the drop-all model starves data. (hybridsr's
+  // own block below also forces capture; this generalises it to every arm.)
+  enbDev->GetMac ()->SetAttribute ("DropPreambleCollision", BooleanValue (!capture));
+
   if (srPreambleSr && !proactiveFug) {
     enbDev->GetMac ()->SetSrTopology (srDedicatedSubcarriers, srContentionSubcarriers,
                                       srRoundRobinPeriods);
     enbDev->GetMac ()->SetSrHybridContention (srHybridContention);
+    if (srHybridContention) {
+      // Faithful hybrid contention needs CAPTURE: a colliding contention preamble
+      // is won by one UE via Msg4 C-RNTI contention resolution (TS 36.321 5.1.5),
+      // not dropped. Drives the existing capture path off the canonical knob. The
+      // RA scheme keeps the default drop-all herd model (DropPreambleCollision=true).
+      enbDev->GetMac ()->SetAttribute ("DropPreambleCollision", BooleanValue (false));
+    }
   }
 
   // Set up the data transmission for the Pre-Run
@@ -840,7 +885,7 @@ int main (int argc, char *argv[])
   }
 
   serverApps.Start(startTime);
-  serverApps.Stop(simDuration);
+  serverApps.Stop(simDuration + Seconds (drainSec));  // keep receiving through the drain window
 
   // Steady-state window [statsStartSec, statsEndEff]: exclude the first
   // synchronized cold-start RA herd (warm-up) AND the last epoch (tail, whose
@@ -863,9 +908,57 @@ int main (int argc, char *argv[])
   FlowMonitorHelper flowHelper;
   Ptr<FlowMonitor>  flowMon = flowHelper.InstallAll();
 
-  ProgressBar pg ((simDuration));
-  Simulator::Stop (simDuration); // Run
+  // Generation stops at simDuration (clientApps SetStopTime above); the sim + server run
+  // drainSec longer so already-generated packets can still be delivered/counted (they are
+  // windowed on GENERATION time, so no new packets enter the metric during the drain).
+  Time simEnd = simDuration + Seconds (drainSec);
+  ProgressBar pg ((simEnd));
+  Simulator::Stop (simEnd); // Run
   Simulator::Run ();
+
+  // In-flight / backlog at sim end: sum each UE's pending UL buffer (MAC). Since no packet is
+  // ever discarded (RLC-AM retransmits forever; no context-reset/stale-resume drops), this
+  // backlog IS the set of packets still stuck (undelivered) at sim end -- a direct measure of
+  // starvation vs. drained. Compare with (appSent - appReceived).
+  {
+    static const char* stName[] = {"IDLE_START","IDLE_CELL_SEARCH","IDLE_WAIT_MIB_SIB1",
+      "IDLE_WAIT_MIB","IDLE_WAIT_SIB1","IDLE_CAMPED_NORMALLY","IDLE_WAIT_SIB2",
+      "IDLE_RANDOM_ACCESS","IDLE_CONNECTING","CONNECTED_NORMALLY","CONNECTED_HANDOVER",
+      "CONNECTED_PHY_PROBLEM","CONNECTED_REESTABLISHING","IDLE_SUSPEND_EDRX","IDLE_SUSPEND_PSM",
+      "CONNECTED_TAU","IDLE_EARLY_DATA_TRANSMISSION"};
+    uint64_t backlogBytes = 0; uint32_t uesWithBacklog = 0;
+    uint64_t txTot = 0, retxTot = 0, statusTot = 0;   // never-sent / sent-unACKed / signalling residue
+    std::map<int,uint32_t> stateHist;   // RRC state of each backlogged UE
+    for (uint32_t i = 0; i < ueLteDevs.GetN (); i++)
+      {
+        Ptr<LteUeNetDevice> ued = ueLteDevs.Get (i)->GetObject<LteUeNetDevice> ();
+        if (!ued) continue;
+        uint64_t b = ued->GetMac ()->GetPendingUlBytes ();
+        if (b > 0)
+          {
+            backlogBytes += b; uesWithBacklog++;
+            stateHist[(int) ued->GetRrc ()->GetState ()]++;
+            uint64_t tx, retx, status;
+            ued->GetMac ()->GetPendingUlBreakdown (tx, retx, status);
+            txTot += tx; retxTot += retx; statusTot += status;
+          }
+      }
+    std::cout << "[BACKLOG@END] t=" << Simulator::Now ().GetSeconds ()
+              << " uesWithPendingUL=" << uesWithBacklog
+              << " totalPendingBytes=" << backlogBytes << std::endl;
+    // tx = never transmitted (genuine orphan); retx = sent but unACKed (likely delivered =
+    // phantom); status = signalling residue (not a real packet).
+    std::cout << "[BACKLOG-BREAKDOWN] txQueue(never-sent)=" << txTot
+              << " retxQueue(sent-unACKed)=" << retxTot
+              << " statusPdu(residue)=" << statusTot << std::endl;
+    // Histogram of the backlogged UEs' RRC state. SUSPEND_* / CAMPED == orphan awaiting a
+    // next-packet trigger (would flush in continuous traffic). RANDOM_ACCESS / CONNECTING /
+    // WAIT_MIB / EARLY_DATA == actively trying to access but stuck == genuine starvation.
+    for (auto &kv : stateHist)
+      std::cout << "[BACKLOG-STATE] "
+                << ((kv.first >= 0 && kv.first < 17) ? stName[kv.first] : "?")
+                << " count=" << kv.second << std::endl;
+  }
 
    // Statistics
   uint64_t rxBytes = 0;
@@ -974,7 +1067,12 @@ int main (int argc, char *argv[])
       if (dep) ++nDepleted;
 
       // uptime / harvested over the steady-state window [statsStart, end].
-      double uptimeFrac = tr.uptime.GetSeconds() / statsWindowS;
+      // NB: the uptime poller runs to simEnd, so normalise by the FULL polling
+      // window (simDuration - statsStart), NOT statsWindowS -- the latter chops the
+      // last packetGenInterval (a loss-counting guard the app metrics need) and would
+      // push uptimeFrac above 1 for never-depleting UEs.
+      double uptimeWindowS = std::max (1.0, simDuration.GetSeconds () - statsStartSec);
+      double uptimeFrac = tr.uptime.GetSeconds () / uptimeWindowS;
       double harvestedWin = tr.harvestedJ - tr.harvestedAtStart;
 
       enOut << (i + 1) << "\t" << rem << "\t" << frac << "\t"

@@ -415,6 +415,11 @@ public:
 
 }; // end of class EutranMeasurementMapping
 
+/// Global toggle for NB-IoT diagnostic traces. Enable at runtime with
+/// --NbIotDebugTrace=1 (auto-registered GlobalValue -> CommandLine). All diagnostics
+/// are compiled in but gated by this, so turning them on/off never needs a source edit.
+bool& NbIotDebugTrace ();
+
 }; // namespace ns3
 
 

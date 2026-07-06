@@ -774,6 +774,13 @@ private:
    */
   void ApplyRadioResourceConfigDedicated (LteRrcSap::RadioResourceConfigDedicated rrcd);
   /**
+   * Re-register the established SRB1 + DRB logical channels in the MAC from the retained
+   * bearer configs. Called on the resume path to restore LCs wiped by a RESUME-LOST
+   * MAC Reset() (capture-loser recovery), so the resume Msg4 / data is not dropped as
+   * "unknown lcid". Idempotent for UEs whose LCs are still present.
+   */
+  void ReAddLcsToMac (void);
+  /**
    * Apply radio resource config dedicated secondary carrier.
    * \param nonCec LteRrcSap::NonCriticalExtensionConfiguration
    */
@@ -1408,6 +1415,14 @@ private:
   bool m_enablePSM;
   bool m_enableEDRX;
   bool m_useEdtPreamble;
+  // True once the UE has completed a full RRC Connection Setup (DRB + AS context stored).
+  // UP-EDT / resume-with-data may only be used AFTER this; the first-ever access must be a
+  // full setup. Gating EDT on this also keeps idealfug's 1st packet on the DRB path.
+  bool m_hasFullContext {false};
+  bool m_lcsWipedByReset {false}; ///< RESUME-LOST called MAC Reset() (wiped LCs) -> resume must re-add SRB1/DRBs
+  // UP-EDT in progress: this resume carried the uplink data in Msg3, so the resume-complete
+  // (Msg4 handler) must NOT re-deliver it in Msg5/over the DRB -- just drain it.
+  bool m_edtResume {false};
 
   EventId m_eDrxTimeout;
 

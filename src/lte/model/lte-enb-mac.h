@@ -401,7 +401,13 @@ public:
   // GetProactiveGrantsIssued returns the running count of proactive grants
   // pushed (denominator for false-positive accounting).
   void SetProactiveFug (bool enable);
+  // fug round-robin arm (only effective when proactive FUG is enabled): poll UEs in
+  // turn instead of predicting per-UE periods.
+  void SetProactiveRoundRobin (bool enable);
   uint64_t GetProactiveGrantsIssued () const;
+  /// Enable Early Data Transmission on the cell (process EDT preamble partition, issue
+  /// edt-TBS Msg3 grants). Must match the UE's EDT config for EDT to engage (3GPP Rel-15).
+  void SetEdt (bool edt);
 
   // Dedicated SR on the real NPRACH (TS 36.331 SchedulingRequestConfig-NB). The
   // eNB holds the resource->UE mapping: a UE configured with dedicated SR index
@@ -566,6 +572,7 @@ private:
 
   NbiotScheduler* m_schedulerNb = nullptr;
   bool m_enbProactiveMode = false;       ///< proactive FUG; applied to the scheduler on creation
+  bool m_enbProactiveRoundRobin = false; ///< fug RR arm; applied to the scheduler on creation
   // Dedicated-SR resource->UE map (the eNB-held identity, set via RRC config).
   std::map<uint32_t, uint16_t> m_dedicatedSrIndexToRnti; ///< srIndex -> C-RNTI
   uint32_t m_srReservedSubcarriers = 0;  ///< N_res reserved for dedicated SR (0 = disabled)

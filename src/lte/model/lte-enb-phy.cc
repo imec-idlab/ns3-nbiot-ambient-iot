@@ -41,6 +41,7 @@
 #include "lte-enb-mac.h"
 #include <ns3/lte-common.h>
 #include <ns3/lte-vendor-specific-parameters.h>
+#include <ns3/lte-radio-bearer-tag.h>
 
 // WILD HACK for the inizialization of direct eNB-UE ctrl messaging
 #include <ns3/node-list.h>
@@ -442,6 +443,10 @@ void
 LteEnbPhy::PhyPduReceived (Ptr<Packet> p)
 {
   NS_LOG_FUNCTION (this);
+  if (NbIotDebugTrace ())
+    { LteRadioBearerTag tag; if (p->PeekPacketTag (tag) && tag.GetLcid () > 2)
+        std::cout << "[ENB-DATA-RX] t=" << Simulator::Now ().GetSeconds ()
+                  << " rnti=" << tag.GetRnti () << " size=" << p->GetSize () << std::endl; }
   m_enbPhySapUser->ReceivePhyPdu (p);
 }
 

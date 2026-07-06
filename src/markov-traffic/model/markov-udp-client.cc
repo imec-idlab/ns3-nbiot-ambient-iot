@@ -204,6 +204,15 @@ MarkovUdpClient::StartApplication (void)
 
   m_socket->SetRecvCallback (MakeNullCallback<void, Ptr<Socket> > ());
   m_socket->SetAllowBroadcast (true);
+  // Front-load the first packet into the start jitter window. The app StartTime is
+  // already jittered within [10, 510] ms per UE (scenario), and the first Send()
+  // fires at that instant (offset 0.0 below). Seeding the Markov state to ACTIVE
+  // makes that first Send() transmit immediately, instead of the state machine
+  // starting INACTIVE and slipping the first packet a full inactive interval
+  // (~300 s) later. This makes the one-time RRC cold-start happen up front so the
+  // remainder of the run is steady state (contention-free under FUG). Subsequent
+  // packets follow the normal sendFirst=false decide-then-send cadence.
+  m_state = ACTIVE;
   m_sendEvent = Simulator::Schedule (Seconds (0.0), &MarkovUdpClient::Send, this);
 }
 

@@ -27,6 +27,7 @@
  */
 
 #include "lte-ue-rrc.h"
+#include "lte-common.h"
 
 #include <ns3/fatal-error.h>
 #include <ns3/log.h>
@@ -177,7 +178,10 @@ LteUeRrc::LteUeRrc ()
     m_noOfSyncIndications (0),
     m_leaveConnectedMode (false),
     m_previousCellId (0),
-    m_connEstFailCountLimit (0),
+    m_connEstFailCountLimit (4),  // TS 36.331 connEstFailCount max (n1..n4). Was 0 -> ConnectionTimeout
+                                  // gave up on the FIRST T300 expiry (m_connEstFailCount>=0), so a
+                                  // resume/capture loser could never retry within the epoch. SIB2
+                                  // still overrides this for UEs that process it.
     m_connEstFailCount (0),
     m_useEdtPreamble(false),
     m_t3412(Days(5)),
@@ -259,9 +263,9 @@ LteUeRrc::GetTypeId (void)
                    "Timer for the RRC Connection Establishment procedure "
                    "(i.e., the procedure is deemed as failed if it takes longer than this). "
                    "Standard values: 100ms, 200ms, 300ms, 400ms, 600ms, 1000ms, 1500ms, 2000ms",
-                   TimeValue (MilliSeconds (30000)), //see 3GPP 36.331 UE-TimersAndConstants & RLF-TimersAndConstants
+                   TimeValue (MilliSeconds (2000)), // 3GPP 36.331 UE-TimersAndConstants max standard value
                    MakeTimeAccessor (&LteUeRrc::m_t300),
-                   MakeTimeChecker (MilliSeconds (2500), MilliSeconds (60000)))
+                   MakeTimeChecker (MilliSeconds (100), MilliSeconds (60000)))
     .AddAttribute ("T310",
                    "Timer for detecting the Radio link failure "
                    "(i.e., the radio link is deemed as failed if this timer expires). "
@@ -624,6 +628,39 @@ LteUeRrc::DoInitialize (void)
 }
 
 void
+LteUeRrc::ReAddLcsToMac (void)
+{
+  // Re-register the established SRB1 + DRB logical channels DIRECTLY in the MAC from the
+  // retained bearer configs. RESUME-LOST called MAC Reset() (DoReset wipes the MAC's
+  // m_lcInfoMap) but NOT the CCM's map -- the two are left out of sync. So we add straight
+  // to the MAC (m_cmacSapProvider->AddLc, which overwrites m_lcInfoMap[lcid]) using each
+  // bearer's own RLC MAC-SAP-user; we must NOT go via the CCM (its entry still exists and
+  // its AddLc asserts "LCID already exist"). Single-CC NB-IoT, so the RLC's SAP user is the
+  // correct DL-reception target for that LCID. Without this, the resume Msg4 (lcid 1) is
+  // dropped as "unknown lcid" and the loser can never complete its resume.
+  if (m_srb1 != 0)
+    {
+      LteUeCmacSapProvider::LogicalChannelConfig lcConfig;
+      lcConfig.priority = m_srb1->m_logicalChannelConfig.priority;
+      lcConfig.prioritizedBitRateKbps = m_srb1->m_logicalChannelConfig.prioritizedBitRateKbps;
+      lcConfig.bucketSizeDurationMs = m_srb1->m_logicalChannelConfig.bucketSizeDurationMs;
+      lcConfig.logicalChannelGroup = m_srb1->m_logicalChannelConfig.logicalChannelGroup;
+      m_cmacSapProvider.at (0)->AddLc (1, lcConfig, m_srb1->m_rlc->GetLteMacSapUser ());
+    }
+  for (std::map<uint8_t, Ptr<LteDataRadioBearerInfo> >::iterator it = m_drbMap.begin ();
+       it != m_drbMap.end (); ++it)
+    {
+      LteUeCmacSapProvider::LogicalChannelConfig lcConfig;
+      lcConfig.priority = it->second->m_logicalChannelConfig.priority;
+      lcConfig.prioritizedBitRateKbps = it->second->m_logicalChannelConfig.prioritizedBitRateKbps;
+      lcConfig.bucketSizeDurationMs = it->second->m_logicalChannelConfig.bucketSizeDurationMs;
+      lcConfig.logicalChannelGroup = it->second->m_logicalChannelConfig.logicalChannelGroup;
+      m_cmacSapProvider.at (0)->AddLc (it->second->m_logicalChannelIdentity, lcConfig,
+                                       it->second->m_rlc->GetLteMacSapUser ());
+    }
+}
+
+void
 LteUeRrc::InitializeSap (void)
 {
   if (m_numberOfComponentCarriers < MIN_NO_CC || m_numberOfComponentCarriers > MAX_NO_CC)
@@ -697,14 +734,21 @@ LteUeRrc::DoSendData (Ptr<Packet> packet, uint8_t bid)
     LogDataTransmission(packet->GetSize());
   }
   uint32_t msg3offset = 5;
-  if(m_edt){
-    if(m_edt && (packet->GetSize() + msg3offset)*8 < 1000){ // 1000 Bit is max TBS, MAC checks later if transmission is possible
-      m_useEdtPreamble = true; // used for IDLE_MIB_STATE Machine
-    }
-    else{
-      m_useEdtPreamble = false;
-    }
+  // UP-EDT (TS 36.331 5.3.3): Early-Data / resume-with-data reuses a PREVIOUSLY stored AS
+  // context. The first-ever access has none, so it MUST be a full RRC Connection Setup
+  // (which establishes the DRB and stores the context); only afterwards may small packets
+  // ride EDT. Gating on m_hasFullContext also protects idealfug: its 1st packet takes the
+  // full path (DRB), so the connected FUG data path never faces a missing bearer.
+  if(m_edt && m_hasFullContext && (packet->GetSize() + msg3offset)*8 < 1000){ // 1000 Bit = max EDT TBS
+    m_useEdtPreamble = true; // used for IDLE_MIB_STATE Machine
   }
+  else{
+    m_useEdtPreamble = false;
+  }
+  if (NbIotDebugTrace ())
+    std::cout << "[EDT-DECIDE] t=" << Simulator::Now ().GetSeconds () << " imsi=" << m_imsi
+              << " m_edt=" << m_edt << " hasCtx=" << m_hasFullContext
+              << " state=" << ToString (m_state) << " useEdt=" << m_useEdtPreamble << std::endl;
 
   if (m_state == CONNECTED_NORMALLY){
     NS_LOG_DEBUG ("UE IMSI=" << m_imsi << " DoSendData: already CONNECTED_NORMALLY, sending directly");
@@ -750,6 +794,10 @@ LteUeRrc::DoSendData (Ptr<Packet> packet, uint8_t bid)
 
 void LteUeRrc::SendDataNb(Ptr<Packet> packet, uint8_t bid){
   uint8_t drbid = Bid2Drbid (bid);
+  if (NbIotDebugTrace ())
+    std::cout << "[UE-SENDDATA] t=" << Simulator::Now ().GetSeconds () << " imsi=" << m_imsi
+              << " rnti=" << m_rnti << " state=" << ToString (m_state)
+              << " size=" << packet->GetSize () << " (data -> DRB RLC)" << std::endl;
   if (drbid != 0)
     {
       std::map<uint8_t, Ptr<LteDataRadioBearerInfo> >::iterator it =   m_drbMap.find (drbid);
@@ -831,7 +879,8 @@ LteUeRrc::DoNotifyRandomAccessSuccessful (bool edt)
       {
         // we just received a RAR with a T-C-RNTI and an UL grant
         // send RRC connection request as message 3 of the random access procedure
-        if(edt){
+        if(edt && m_resumeId == 0){
+          // CP-EDT (TS 36.331): 
           SwitchToState(IDLE_EARLY_DATA_TRANSMISSION);
           NbIotRrcSap::RrcEarlyDataRequestNb msg;
           msg.sTmsiNb.mTmsi = m_imsi;
@@ -846,19 +895,9 @@ LteUeRrc::DoNotifyRandomAccessSuccessful (bool edt)
         }else{
           SwitchToState (IDLE_CONNECTING);
           if (m_resumeId == 0){ // Complete Connection Setup
-            if(m_useEdtPreamble){
-              // Send EDT
-            }
             LteRrcSap::RrcConnectionRequest msg;
             msg.ueIdentity = m_imsi;
-            // Data-aware DPR (TS 36.321 5.4.6 / 6.1.3.10): report the ACTUAL pending
-            // UL data volume in Msg3's DPR MAC CE so the eNB sizes the post-RA grant
-            // for the user data, not just the ~20 B Msg5 signalling. The flat 20 left
-            // the eNB unaware of the data -> inactivity-release orphan (300 s tail).
-            // Scoped to the contention RA scheme (!persistentGrant): the persistent-
-            // grant schemes (oracle/cDRX/proactive) convey the buffer via their own
-            // mechanisms, and a data-aware DPR double-reports there and corrupts their
-            // grant accounting (observed: idealfug 0% -> 64% loss).
+            // Data-aware DPR (TS 36.321 5.4.6 / 6.1.3.10):
             if (!m_persistentGrant)
               {
                 uint32_t pendingData = 0;
@@ -890,18 +929,26 @@ LteUeRrc::DoNotifyRandomAccessSuccessful (bool edt)
               it->second->m_pdcp->SetRnti(m_rnti);
               it->second->m_rlc->SetRnti(m_rnti);
             }
+            // Re-register SRB1/DRB logical channels in the MAC. 
+            //
+            if (m_lcsWipedByReset)
+              {
+                ReAddLcsToMac();
+                m_lcsWipedByReset = false;
+              }
 
             std::vector<Ptr<Packet>>::iterator next_packet = m_packetStored.begin();
             uint32_t msg5size = 14; // tbd
             uint32_t size_left_to_fill = 1500-msg5size; // use actual Resume complete size later
-            if (!m_persistentGrant)
+            if (edt)
               {
-                // Data-aware DPR (TS 36.321 5.4.6) for the contention RA scheme: report
-                // the ACTUAL pending UL data volume so the eNB grants the user data
-                // (routed to RLC below). The flat 14 B (Resume-Complete signalling only)
-                // left the data ungranted within the RRC-inactivity window ->
-                // inactivity-release orphan (300 s tail). Scoped to RA so the persistent-
-                // grant schemes' own buffer-delivery paths are untouched.
+                // UP-EDT: the user data rides Msg3 (below), so Msg5 carries only the
+                // Resume-Complete signalling -- do NOT also grant Msg5 for the data.
+                m_cmacSapProvider.at(0)->SetMsg5Buffer(msg5size);
+              }
+            else if (!m_persistentGrant)
+              {
+                // Data-aware DPR (TS 36.321 5.4.6) for the contention RA scheme: 
                 uint32_t pendingData = 0;
                 for (std::vector<Ptr<Packet>>::iterator it = m_packetStored.begin ();
                      it != m_packetStored.end (); ++it)
@@ -918,7 +965,20 @@ LteUeRrc::DoNotifyRandomAccessSuccessful (bool edt)
 
             NbIotRrcSap::RrcConnectionResumeRequestNb msg;
             msg.resumeIdentity = m_resumeId;
+            msg.establishmentCauseNb = NbIotRrcSap::RrcConnectionResumeRequestNb::EstablishmentCauseNb::moData;
+
+            m_edtResume = false;
+            if (edt && !m_packetStored.empty ())
+              {
+                msg.dedicatedInfoNas = *next_packet;
+                m_edtResume = true; // Msg4 handler must not re-deliver this in Msg5
+              }
+
             m_rrcSapUser->SendRrcConnectionResumeRequestNb(msg);
+
+            m_connectionTimeout = Simulator::Schedule (m_t300,
+                                                       &LteUeRrc::ConnectionTimeout,
+                                                       this);
           }
         }
       }
@@ -1264,11 +1324,7 @@ LteUeRrc::DoRecvMasterInformationBlockNb (uint16_t cellId,
       if(m_resumePending){
         if (m_persistentGrant && m_rnti != 0) {
           // FUG (Model 1): the MIB re-acquisition above is the REAL PSM-exit
-          // re-sync (DL timing/SFN). Now resume CONTENTION-FREE via the
-          // dedicated SR using the retained RNTI/context (the eNB preserved it
-          // on suspend) -- NOT contention RA. Go connected and re-inject the
-          // stored data; the MAC then fires the SR -> DCI N0 -> transmit. This
-          // avoids the RA collisions that collapse a synchronized wake-up.
+          // re-sync (DL timing/SFN). 
           m_resumePending = false;
           SwitchToState (CONNECTED_NORMALLY);
           m_cmacSapProvider.at(0)->NotifyConnectionSuccessful();
@@ -1478,17 +1534,19 @@ LteUeRrc::DoRecvRrcConnectionSetup (LteRrcSap::RrcConnectionSetup msg)
         m_connEstFailCount = 0;
         m_connectionTimeout.Cancel ();
         SwitchToState (CONNECTED_NORMALLY);
+        m_hasFullContext = true; // full RRC Connection Setup done: DRB + AS context now stored,
+                                 // so subsequent small packets may use EDT-resume (UP-EDT).
+        if (NbIotDebugTrace ())
+          std::cout << "[FULL-SETUP] t=" << Simulator::Now ().GetSeconds () << " imsi=" << m_imsi
+                    << " -> hasFullContext=1" << std::endl;
         m_leaveConnectedMode = false;
         LteRrcSap::RrcConnectionSetupCompleted msg2;
         msg2.rrcTransactionIdentifier = msg.rrcTransactionIdentifier;
         m_rrcSapUser->SendRrcConnectionSetupCompleted (msg2);
         m_asSapUser->NotifyConnectionSuccessful ();
         m_cmacSapProvider.at (0)->NotifyConnectionSuccessful ();
-        // Deliver the data buffered while IDLE (contention RA scheme only). The
-        // fresh-connection path previously left m_packetStored untouched, so a UE
-        // that established via RRC ConnectionRequest never pushed its uplink data
-        // into RLC -> inactivity-release orphan (300 s tail). Persistent-grant schemes
-        // drive their own delivery and must not be perturbed here.
+        // Deliver the data buffered while IDLE (contention RA scheme only). 
+        //
         if (!m_persistentGrant)
           {
             while (!m_packetStored.empty ())
@@ -1519,23 +1577,51 @@ LteUeRrc::DoRecvRrcEarlyDataCompleteNb(NbIotRrcSap::RrcEarlyDataCompleteNb msg){
   switch(m_state){
     case IDLE_EARLY_DATA_TRANSMISSION:
       {
+        // Contention resolution (EDT, TS 36.321 5.1.5): if this completion echoes an IMSI
+        // that isn't ours, another UE won the shared Temp C-RNTI and OUR data was never
+        // forwarded upstream. Do NOT accept it: leave T300 running and the packet buffered
+        // so ConnectionTimeout re-RACHes and retransmits it. Without this, losers falsely
+        // suspend and (with the drain fix) erase undelivered data -> silent loss.
+        if (msg.contentionResolutionId != 0 && msg.contentionResolutionId != m_imsi)
+          {
+            NS_LOG_INFO ("EDT contention: IMSI " << m_imsi << " lost (completion belongs to IMSI "
+                         << msg.contentionResolutionId << ") -- ignoring, T300 will re-RACH");
+            return;
+          }
         // Forward received message
         m_connEstFailCount = 0;
         m_connectionTimeout.Cancel ();
-        // Return to Resume
-        m_asSapUser->NotifyConnectionSuspended();
-        //m_asSapUser->NotifyConnectionSuspended();
         if(m_enableEDRX){
+          m_asSapUser->NotifyConnectionSuspended();
           SwitchToState(IDLE_SUSPEND_EDRX);
           // Start EDRX TIMER
         }
         else if(m_enablePSM){
+          m_asSapUser->NotifyConnectionSuspended();
           //Start PSM Timer
           SwitchToState(IDLE_SUSPEND_PSM);
-
+        }
+        else {
+          // Neither eDRX nor PSM configured: suspend to a context-preserving idle. We must
+          // NOT go CONNECTED_NORMALLY here -- EDT set up no DRB, so the connected data path
+          // would dereference a missing bearer and abort. (idealfug never reaches this branch
+          // anymore: its 1st packet takes the full-setup path, gated by m_hasFullContext.)
+          m_asSapUser->NotifyConnectionSuspended();
+          SwitchToState(IDLE_SUSPEND_EDRX);
         }
         if (msg.dedicatedInfoNas->GetSize() > 0){
           m_asSapUser->RecvData (msg.dedicatedInfoNas);
+        }
+
+        // EDT delivered the FRONT uplink packet upstream at the eNB (RecvRrcEarlyData
+        // RequestNb -> m_forwardUpCallback). Drain it now that delivery is confirmed, so
+        // the NEXT EDT sends the NEXT packet. Without this the front packet is re-sent
+        // every epoch and all subsequent packets are stuck behind it -> the server sees a
+        // fixed quantum (one packet per UE) while clients keep generating. Mirrors the
+        // resume path (m_packetStored.erase at Msg5). Erase-on-completion (not at send) so
+        // a failed EDT still retries the packet instead of dropping it.
+        if (!m_packetStored.empty ()){
+          m_packetStored.erase (m_packetStored.begin ());
         }
 
       }
@@ -1549,6 +1635,55 @@ void
 LteUeRrc::DoRecvRrcConnectionResumeNb (NbIotRrcSap::RrcConnectionResumeNb msg)
 {
   NS_LOG_FUNCTION (this << " RNTI " << m_rnti);
+  if (NbIotDebugTrace ())
+    std::cout << "[RESUME-MSG4] imsi=" << m_imsi << " rnti=" << m_rnti
+              << " msgResumeId=" << msg.resumeIdentity << " myResumeId=" << m_resumeId << std::endl;
+  // Contention resolution (resume, TS 36.321 5.1.5): if Msg4 echoes a resumeId that is not
+  // ours, another UE won the shared (captured) Temporary C-RNTI. 
+  if (msg.resumeIdentity != 0 && msg.resumeIdentity != m_resumeId)
+    {
+      NS_LOG_INFO ("Resume Msg4 contention: IMSI " << m_imsi << " resumeId " << m_resumeId
+                   << " lost (Msg4 belongs to resumeId " << msg.resumeIdentity
+                   << ") -- discarding, re-RACHing with backoff");
+      if (NbIotDebugTrace ())
+        std::cout << "[RESUME-LOST] t=" << Simulator::Now ().GetSeconds () << " imsi=" << m_imsi
+                  << " -> clean re-RACH" << std::endl;
+      m_connectionTimeout.Cancel ();
+      for (uint16_t i = 0; i < m_numberOfComponentCarriers; i++)
+        {
+          m_cmacSapProvider.at (i)->NotifyContentionResolutionFailedNb (); // carries the backoff
+        }
+      for (uint16_t i = 0; i < m_numberOfComponentCarriers; i++)
+        {
+          m_cmacSapProvider.at (i)->Reset (); // reset the MAC RA state (keeps the carried backoff)
+        }
+      // Reset() wiped every non-CCCH logical channel from the MAC. Flag it so the resume
+      // path re-registers SRB1/DRBs (ReAddLcsToMac); otherwise the resume Msg4 (lcid 1) is
+      // dropped as "unknown lcid" and this loser can never complete its resume.
+      m_lcsWipedByReset = true;
+      m_rnti = 0;                          // discard the lost Temp C-RNTI -> clean contention re-RACH
+      if (m_srb0) m_srb0->m_rlc->SetRnti (0);
+      if (m_srb0) m_srb0->m_rlc->DoReset ();
+      // Also reset SRB1 + DRB RLC entities. 
+      //
+      if (m_srb1) m_srb1->m_rlc->DoReset ();
+      for (std::map<uint8_t, Ptr<LteDataRadioBearerInfo> >::iterator it = m_drbMap.begin ();
+           it != m_drbMap.end (); ++it)
+        {
+          it->second->m_rlc->DoReset ();
+        }
+      if (!m_packetStored.empty ())
+        {
+          m_hasReceivedMibNb = false;
+          m_resumePending = true;
+          SwitchToState (IDLE_WAIT_MIB);   // re-acquire MIB -> resume path -> re-RACH (m_rnti==0)
+        }
+      else
+        {
+          SwitchToState (IDLE_SUSPEND_PSM); // nothing buffered -> park until next arrival
+        }
+      return;
+    }
   switch (m_state)
     {
     case IDLE_CONNECTING:
@@ -1557,6 +1692,11 @@ LteUeRrc::DoRecvRrcConnectionResumeNb (NbIotRrcSap::RrcConnectionResumeNb msg)
         m_connEstFailCount = 0;
         m_connectionTimeout.Cancel ();
         SwitchToState (CONNECTED_NORMALLY);
+
+        if (NbIotDebugTrace () && !m_hasFullContext)
+          std::cout << "[FULL-RESUME] t=" << Simulator::Now ().GetSeconds () << " imsi=" << m_imsi
+                    << " -> hasFullContext=1" << std::endl;
+        m_hasFullContext = true;
         m_leaveConnectedMode = false;
         NbIotRrcSap::RrcConnectionResumeCompleteNb msg2;
         // we use DPR from 36.321 6.1.3.10
@@ -1565,7 +1705,18 @@ LteUeRrc::DoRecvRrcConnectionResumeNb (NbIotRrcSap::RrcConnectionResumeNb msg)
         std::vector<Ptr<Packet>>::iterator next_packet = m_packetStored.begin();
         msg2.rrcTransactionIdentifier = msg.rrcTransactionIdentifier;
 
-        if(m_cIotOpt){
+        if(m_edtResume){
+          // UP-EDT: the FRONT packet already rode Msg3 and the eNB delivered it -- drain it.
+          if (!m_packetStored.empty ()){
+            m_packetStored.erase (m_packetStored.begin ());
+          }
+          while (!m_packetStored.empty ()){
+            SendDataNb (m_packetStored.front (), 1);
+            m_packetStored.erase (m_packetStored.begin ());
+          }
+          msg2.dedicatedInfoNas = Create<Packet>(0);
+          m_edtResume = false;
+        }else if(m_cIotOpt){
           if (m_packetStored.size() > 0 && size_left_to_fill > 0 && size_left_to_fill - (*next_packet)->GetSize() > 0){
             msg2.dedicatedInfoNas = m_packetStored.front();
             m_packetStored.erase(next_packet);
@@ -1577,9 +1728,6 @@ LteUeRrc::DoRecvRrcConnectionResumeNb (NbIotRrcSap::RrcConnectionResumeNb msg)
         }else if (m_packetStored.size() > 0){
           if (!m_persistentGrant)
             {
-              // Contention RA: deliver ALL buffered packets to RLC (a UE orphaned in a
-              // prior epoch carries a backlog; the data-aware DPR sized the grant for
-              // the total). Persistent-grant schemes keep the original head-only send.
               while (!m_packetStored.empty ()) {
                 SendDataNb (m_packetStored.front (), 1);
                 m_packetStored.erase (m_packetStored.begin ());
@@ -1605,6 +1753,13 @@ LteUeRrc::DoRecvRrcConnectionResumeNb (NbIotRrcSap::RrcConnectionResumeNb msg)
         NS_ABORT_MSG_IF (m_noOfSyncIndications > 0, "Sync indications should be zero "
                          "when a new RRC connection is established. Current value = " << (uint16_t) m_noOfSyncIndications);
       }
+      break;
+
+    case CONNECTED_NORMALLY:
+
+      if (NbIotDebugTrace ())
+        std::cout << "[RESUME-DUP] t=" << Simulator::Now ().GetSeconds () << " imsi=" << m_imsi
+                  << " ignoring duplicate resume Msg4 in CONNECTED_NORMALLY" << std::endl;
       break;
 
     default:
@@ -1780,9 +1935,6 @@ LteUeRrc::DoRecvRrcConnectionReleaseNb (NbIotRrcSap::RrcConnectionReleaseNb msg)
       return;
     }
     // Proactive FUG: do NOT suspend while this UE still has UL data buffered.
-    // The awake UE must stay CONNECTED-monitoring until a pushed DCI0 lands and
-    // it transmits; otherwise a wasted push (UE was asleep) would orphan the
-    // packet for a full period (RLC-UM never re-reports).
     if (m_proactiveFug && m_cmacSapProvider.at (0) != 0
         && m_cmacSapProvider.at (0)->GetUlBufferSize () > 0) {
       NS_LOG_DEBUG ("UE IMSI=" << m_imsi
@@ -1793,6 +1945,15 @@ LteUeRrc::DoRecvRrcConnectionReleaseNb (NbIotRrcSap::RrcConnectionReleaseNb msg)
                     << " B) -> stay CONNECTED-monitoring (no suspend)");
       return;
     }
+
+    if (NbIotDebugTrace () && m_cmacSapProvider.at (0) != 0)
+      {
+        uint32_t ulBuf = m_cmacSapProvider.at (0)->GetUlBufferSize ();
+        std::cout << "[UE-SUSPEND] t=" << Simulator::Now ().GetSeconds () << " imsi=" << m_imsi
+                  << " rnti=" << m_rnti << " ulBufAtSuspend=" << ulBuf
+                  << (ulBuf > 0 ? " <<< STRANDING (suspended with UL data pending)" : "")
+                  << std::endl;
+      }
     m_asSapUser->NotifyConnectionSuspended();
     if (msg.resumeIdentity != 0){
       m_resumeId = msg.resumeIdentity;
@@ -1923,14 +2084,7 @@ LteUeRrc::EvaluateCellForSelectionNb ()
       m_cphySapProvider.at(0)->SetDlBandwidth (m_dlBandwidth);
       m_initialCellSelectionEndOkTrace (m_imsi, cellId);
       // Once the UE is connected, m_connectionPending is
-      // set to false. So, when RLF occurs and UE performs
-      // cell selection upon leaving RRC_CONNECTED state,
-      // the following call to DoConnect will make the
-      // m_connectionPending to be true again. Thus,
-      // upon calling SwitchToState (IDLE_CAMPED_NORMALLY)
-      // UE state is instantly change to IDLE_WAIT_SIB2.
-      // This will make the UE to read the SIB2 message
-      // and start random access.
+      // set to false. 
       if (!m_connectionPending)
         {
           NS_LOG_DEBUG ("Calling DoConnect in state = " << ToString (m_state));
@@ -2004,14 +2158,7 @@ LteUeRrc::EvaluateCellForSelection ()
       m_cphySapProvider.at(0)->SetDlBandwidth (m_dlBandwidth);
       m_initialCellSelectionEndOkTrace (m_imsi, cellId);
       // Once the UE is connected, m_connectionPending is
-      // set to false. So, when RLF occurs and UE performs
-      // cell selection upon leaving RRC_CONNECTED state,
-      // the following call to DoConnect will make the
-      // m_connectionPending to be true again. Thus,
-      // upon calling SwitchToState (IDLE_CAMPED_NORMALLY)
-      // UE state is instantly change to IDLE_WAIT_SIB2.
-      // This will make the UE to read the SIB2 message
-      // and start random access.
+      // set to false. 
       if (!m_connectionPending)
         {
           NS_LOG_DEBUG ("Calling DoConnect in state = " << ToString (m_state));
@@ -3789,6 +3936,12 @@ void
 LteUeRrc::LeaveConnectedMode ()
 {
   NS_LOG_FUNCTION (this << m_imsi);
+  // Loss-diagnostic: a full context teardown (clears m_drbMap below -> destroys the RLC-AM
+  // tx/retx buffers). Any packet still buffered here is dropped outright (RLC-AM otherwise
+  // retransmits forever, so this reset is the real end-to-end loss point).
+  if (NbIotDebugTrace () && !m_packetStored.empty ())
+    std::cout << "[UE-CTX-RESET] t=" << Simulator::Now ().GetSeconds () << " imsi=" << m_imsi
+              << " rnti=" << m_rnti << " packetsStored=" << m_packetStored.size () << std::endl;
   m_leaveConnectedMode = true;
   m_storedMeasValues.clear ();
   ResetRlfParams ();
@@ -3860,6 +4013,11 @@ LteUeRrc::ConnectionTimeout ()
           {
             m_cmacSapProvider.at(i)->Reset (); // reset the MAC
           }
+        // Reset() wiped the MAC's non-CCCH logical channels. Like RESUME-LOST, flag it so
+        // the next resume re-registers SRB1/DRBs (ReAddLcsToMac); a T300-timed-out capture
+        // loser re-RACHes from here, and without the re-add its retry's Msg4 (lcid 1) is
+        // again dropped as "unknown lcid".
+        m_lcsWipedByReset = true;
         m_hasReceivedSib2 = false;         // invalidate the previously received SIB2
         SwitchToState (IDLE_CAMPED_NORMALLY);
         // srb1 only exists once ApplyRadioResourceConfigDedicated has run (Msg4
@@ -3867,6 +4025,22 @@ LteUeRrc::ConnectionTimeout ()
         // Msg4 and times out here before srb1 is built -- guard the deref.
         if (m_srb0) m_srb0->m_rlc->DoReset();
         if (m_srb1) m_srb1->m_rlc->DoReset();
+        // Also reset the DRB RLCs, matching the eNB re-park (which resets SRB1+DRB). The data
+        // sits in m_packetStored (RRC) until RESUME-COMPLETE re-enqueues it, so resetting the
+        // (empty) DRB RLC loses no data -- it only realigns the sequence numbers so the eNB
+        // accepts the re-sent DRB data (else UE-TX + ENB-DATA-RX but no ENB-FWD-UP -> dropped).
+        for (std::map<uint8_t, Ptr<LteDataRadioBearerInfo> >::iterator it = m_drbMap.begin ();
+             it != m_drbMap.end (); ++it)
+          {
+            it->second->m_rlc->DoReset ();
+          }
+        // Discard any adopted (lost) Temp C-RNTI. The re-init below ASSUMES m_rnti==0 (see the
+        // comment) so it re-RACHes via StartConnectionNb -- but a capture loser still holds the
+        // Temp C-RNTI, which would send a persistent-grant UE into the contention-FREE resume
+        // (keys off m_rnti!=0) on a C-RNTI it doesn't own. Zero it, mirroring the resume-Msg4-lost
+        // handler. (RA arm is unaffected: !persistentGrant always re-RACHes.)
+        m_rnti = 0;
+        if (m_srb0) m_srb0->m_rlc->SetRnti (0);
         m_connectionTimeoutTrace (m_imsi, m_cellId, m_rnti, m_connEstFailCount);
         // Contention-resolution loser with data STILL buffered: re-initiate
         // access for it WITHIN the same epoch (TS 36.321 5.1.4), instead of

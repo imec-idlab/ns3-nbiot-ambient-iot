@@ -27,6 +27,7 @@
  */
 
 #include "lte-enb-rrc.h"
+#include "lte-common.h"
 
 #include <ns3/fatal-error.h>
 #include <ns3/log.h>
@@ -266,6 +267,9 @@ UeManager::DoInitialize ()
   // Proactive-FUG flag is cell-wide; propagate it so a speculatively pushed
   // DCI0 does not force-wake this UeManager from a suspended state.
   m_proactiveFug = m_rrc->IsProactiveFug();
+  // Connected-DRX FUG flag is cell-wide; propagate it so the data-inactivity
+  // release is suppressed and the UE stays RRC_CONNECTED (MAC-cDRX sleep).
+  m_cdrxFug = m_rrc->IsCdrxFug();
 
   for (uint8_t i = 0; i < m_rrc->m_numberOfComponentCarriers; i++)
     {
@@ -917,6 +921,11 @@ UeManager::SendData (uint8_t bid, Ptr<Packet> p)
         // For now, we assume that the meesage will definitely fit into dedicated nas => TBS < 680
         NbIotRrcSap::RrcEarlyDataCompleteNb msg;
         msg.dedicatedInfoNas = p;
+        // Contention resolution (EDT, TS 36.321 5.1.5): echo the winner's IMSI. Several UEs
+        // can share a captured Temp C-RNTI and all send data in Msg3; only the one whose
+        // IMSI matches accepts this completion, the others re-RACH (their data was NOT
+        // forwarded). m_imsi here is the winner (set in RecvRrcEarlyDataRequestNb).
+        msg.contentionResolutionId = m_imsi;
 
         m_rrc->m_rrcSapUser->SendRrcEarlyDataCompleteNb (m_rnti, msg);
 
@@ -1143,6 +1152,10 @@ void
 UeManager::RecvRrcConnectionResumeRequestNb (NbIotRrcSap::RrcConnectionResumeRequestNb msg)
 {
   NS_LOG_FUNCTION (this);
+  if (NbIotDebugTrace ())
+    std::cout << "[ENB-RESUME-REQ] t=" << Simulator::Now ().GetSeconds () << " rnti=" << m_rnti
+              << " imsi=" << m_imsi << " state=" << ToString (m_state)
+              << " reqResumeId=" << msg.resumeIdentity << std::endl;
   //NS_BUILD_DEBUG(std::cout << "\n"<< m_rnti << "GOT THROUGH" << std::endl);
   switch (m_state)
     {
@@ -1155,6 +1168,11 @@ UeManager::RecvRrcConnectionResumeRequestNb (NbIotRrcSap::RrcConnectionResumeReq
           {
               NbIotRrcSap::RrcConnectionResumeNb msg2;
               msg2.rrcTransactionIdentifier = GetNewRrcTransactionIdentifier ();
+              // Contention resolution (resume, TS 36.321 5.1.5): echo THIS (winning) Msg3's
+              // resumeId. Several UEs can share a captured Temp C-RNTI; the reject guard in
+              // DoRecvRrcConnectionResumeRequestNb ensures only this first resumer is served,
+              // and only the UE whose resumeId matches accepts Msg4 -- the others re-RACH.
+              msg2.resumeIdentity = msg.resumeIdentity;
               m_srb0->m_rlc->SetRnti(m_rnti);
               m_srb1->m_pdcp->SetRnti(m_rnti);
               m_srb1->m_rlc->SetRnti(m_rnti);
@@ -1162,6 +1180,40 @@ UeManager::RecvRrcConnectionResumeRequestNb (NbIotRrcSap::RrcConnectionResumeReq
                 it->second->m_pdcp->SetRnti(m_rnti);
                 it->second->m_rlc->SetRnti(m_rnti);
               }
+              // UP-EDT: the UE folded its early uplink data into this resume Msg3. The eNB has
+              // it now, so deliver it upstream immediately (the UE will NOT repeat it in Msg5).
+              // Empty for a normal (non-EDT) resume -> legacy flow untouched.
+              if (msg.dedicatedInfoNas != nullptr && msg.dedicatedInfoNas->GetSize () > 0
+                  && m_rrc->m_edtDataForwarded.find (msg.resumeIdentity) == m_rrc->m_edtDataForwarded.end ())
+                {
+                  // Forward the folded UP-EDT data upstream ONCE per resumeId. A capture loser
+                  // whose resume stalled re-RACHes and re-sends the SAME data folded into the
+                  // retried Msg3; without this dedupe the eNB delivers it again -> the server
+                  // counts it twice (recv>sent, corrupting the loss metric). resumeId is unique
+                  // per packet (a new one is allocated at each release), so this dedupes per
+                  // packet, not per UE. Cleared on resume-complete and on id reallocation.
+                  m_rrc->m_edtDataForwarded.insert (msg.resumeIdentity);
+                  if (NbIotDebugTrace ())
+                    {
+                      uint8_t b0 = 0; msg.dedicatedInfoNas->CopyData (&b0, 1);
+                      std::cout << "[ENB-UPEDT-DATA] rnti=" << m_rnti << " imsi=" << m_imsi
+                                << " size=" << msg.dedicatedInfoNas->GetSize ()
+                                << " firstByteHi=" << (uint32_t)(b0 >> 4) << std::endl;
+                    }
+                  EpsBearerTag tag;
+                  tag.SetRnti (m_rnti);
+                  tag.SetBid (Lcid2Bid (3));
+                  msg.dedicatedInfoNas->AddPacketTag (tag);
+                  m_rrc->LogDataReception (m_imsi, msg.dedicatedInfoNas->GetSize ());
+                  m_rrc->m_forwardUpCallback (msg.dedicatedInfoNas);
+                }
+              else if (msg.dedicatedInfoNas != nullptr && msg.dedicatedInfoNas->GetSize () > 0
+                       && NbIotDebugTrace ())
+                {
+                  std::cout << "[ENB-UPEDT-DUP] rnti=" << m_rnti << " imsi=" << m_imsi
+                            << " resumeId=" << msg.resumeIdentity
+                            << " already forwarded -> dropping duplicate EDT data" << std::endl;
+                }
               //m_rrc->m_rrcSapUser->ResumeUe(m_rnti, m_resumeId);
               m_rrc->m_rrcSapUser->SendRrcConnectionResumeNb (m_rnti, msg2);
               RecordDataRadioBearersToBeStarted ();
@@ -1214,6 +1266,10 @@ void
 UeManager::RecvRrcEarlyDataRequestNb (NbIotRrcSap::RrcEarlyDataRequestNb msg)
 {
   NS_LOG_FUNCTION (this);
+  if (NbIotDebugTrace ())
+    std::cout << "[ENB-EDT-REQ] t=" << Simulator::Now ().GetSeconds () << " rnti=" << m_rnti
+              << " imsi=" << m_imsi << " state=" << ToString (m_state)
+              << " sTmsi=" << msg.sTmsiNb.mTmsi << std::endl;
   //NS_BUILD_DEBUG(std::cout << "\n"<< m_rnti << "GOT THROUGH" << std::endl);
   switch (m_state)
     {
@@ -1240,6 +1296,17 @@ UeManager::RecvRrcEarlyDataRequestNb (NbIotRrcSap::RrcEarlyDataRequestNb msg)
                 m_rrc->m_forwardUpCallback (msg.dedicatedInfoNas);
               }
 
+              // Reply Msg4 (RRCEarlyDataComplete) NOW to acknowledge Msg3 and release the UE
+              // to idle. 3GPP TS 36.321 5.1: the eNB sends Msg4 in response to Msg3; it does
+              // NOT wait for downlink data. For MO-data (UL-only) there is no DL response, so
+              // without this the UE never receives Msg4 -> T300 timeout -> redundant re-RACH
+              // (observed as the spurious non-EDT retry). Echo the winner IMSI so colliding
+              // losers detect the mismatch and re-RACH (contention resolution). (The existing
+              // DL-data path still delivers a later MT DL packet via its own completion.)
+              NbIotRrcSap::RrcEarlyDataCompleteNb edcMsg;
+              edcMsg.dedicatedInfoNas = Create<Packet> (0);
+              edcMsg.contentionResolutionId = m_imsi;
+              m_rrc->m_rrcSapUser->SendRrcEarlyDataCompleteNb (m_rnti, edcMsg);
             }
         else if (m_rrc->m_admitRrcConnectionRequest)
             {
@@ -1324,11 +1391,27 @@ void
 UeManager::RecvRrcConnectionResumeCompletedNb (NbIotRrcSap::RrcConnectionResumeCompleteNb msg)
 {
   NS_LOG_FUNCTION (this);
+  if (NbIotDebugTrace ())
+    std::cout << "[ENB-RESUME-COMPLETE] t=" << Simulator::Now ().GetSeconds () << " rnti=" << m_rnti
+              << " imsi=" << m_imsi << " state=" << ToString (m_state) << std::endl;
   switch (m_state)
     {
     case CONNECTION_RESUME:
+      {
       NS_LOG_DEBUG ("UeManager::RecvRrcConnectionResumeCompletedNb"
                     << " IMSI=" << m_imsi << " RNTI=" << m_rnti);
+      // Resume CONFIRMED -> now consume the single-use resumeId token. ResumeUe no longer
+      // erases it eagerly (deferred-erase), so a capture loser whose Msg4 didn't land kept
+      // a valid token to re-RACH on. Erase here so a genuinely completed resume can't be
+      // replayed and the id can be reallocated.
+      m_rrc->m_ueResumedMap.erase (m_resumeId);
+      // Was this a UP-EDT delivery? m_edtDataForwarded is keyed on resumeId (unique per UE-per-
+      // packet), and ONLY the Msg4 contention WINNER reaches resume-complete (losers hit
+      // RESUME-LOST and never get here). So this check is contention-correct by construction:
+      // it is true iff THIS winner's folded Msg3 data was forwarded upstream. Captured BEFORE
+      // the erase below; used at the end to arm the single-shot EDT release for the winner only.
+      bool wasEdtDelivery = (m_rrc->m_edtDataForwarded.count (m_resumeId) > 0);
+      m_rrc->m_edtDataForwarded.erase (m_resumeId); // resume done -> clear EDT-forwarded flag for this id
       m_rrc->m_cmacSapProvider.at(0)->NotifyConnectionSuccessful(m_rnti);
       m_connectionResumeTimeout.Cancel ();
       m_rrc->SendSavedPackets(m_imsi, m_rnti);
@@ -1358,7 +1441,21 @@ UeManager::RecvRrcConnectionResumeCompletedNb (NbIotRrcSap::RrcConnectionResumeC
                         << " -> CONNECTED_NORMALLY, PG armed=" << m_persistentGrant);
         }
       m_rrc->m_connectionEstablishedTrace (m_imsi, m_rrc->ComponentCarrierToCellId (m_componentCarrierId), m_rnti);
+      // UP-EDT single-shot release (winner only -- see wasEdtDelivery above): the folded Msg3 data
+      // was already forwarded upstream, so there is no post-resume DRB data flow to schedule the
+      // data-inactivity release the normal way. Arm it explicitly now (state is CONNECTED_NORMALLY
+      // here) so this EDT winner is released after the usual inactivity timeout instead of lingering
+      // CONNECTED (and stranding its next packet as an ungrantable connected-send). Not for cdrxFug
+      // (idealfug stays connected by design). Losers never reach this case, so they never arm it.
+      if (wasEdtDelivery && !m_cdrxFug)
+        {
+          if (NbIotDebugTrace ())
+            std::cout << "[ENB-EDT-ARM-RELEASE] t=" << Simulator::Now ().GetSeconds () << " rnti=" << m_rnti
+                      << " imsi=" << m_imsi << " (arming inactivity release after UP-EDT)" << std::endl;
+          NotifyDataInactivitySchedulerNb ();
+        }
       break;
+      }
 
     default:
       NS_FATAL_ERROR ("method unexpected in state " << ToString (m_state));
@@ -1582,6 +1679,10 @@ UeManager::DoReceivePdcpSdu (LtePdcpSapUser::ReceivePdcpSduParameters params)
       tag.SetBid (Lcid2Bid (params.lcid));
       params.pdcpSdu->AddPacketTag (tag);
       m_rrc->LogDataReception(m_imsi, params.pdcpSdu->GetSize());
+      if (NbIotDebugTrace ())
+        std::cout << "[ENB-FWD-UP] t=" << Simulator::Now ().GetSeconds () << " rnti=" << m_rnti
+                  << " imsi=" << m_imsi << " lcid=" << (uint32_t) params.lcid
+                  << " size=" << params.pdcpSdu->GetSize () << " (DRB data -> server)" << std::endl;
       m_rrc->m_forwardUpCallback (params.pdcpSdu);
     }
 }
@@ -1971,6 +2072,18 @@ void UeManager::NotifyDataInactivityNb(uint8_t lcid){
 void UeManager::NotifyDataInactivitySchedulerNb(){
   NS_LOG_DEBUG ("UeManager::NotifyDataInactivitySchedulerNb"
                 << " RNTI=" << m_rnti << " state=" << ToString (m_state));
+  // Connected-DRX FUG (idealfug): do NOT arm the data-inactivity release. The UE
+  // stays RRC_CONNECTED and only MAC-cDRX-sleeps (NPDCCH monitored once per DRX
+  // cycle, ~10.24 s). Releasing it here would drop it to eDRX->PSM and force a
+  // re-RACH (contention) on the next packet -- the opposite of an ideal FUG. The
+  // oracle pushes the next grant onto the still-connected UE, contention-free.
+  if (m_cdrxFug){
+    if (NbIotDebugTrace ())
+      std::cout << "[ENB-CDRX-KEEPALIVE] t=" << Simulator::Now ().GetSeconds ()
+                << " rnti=" << m_rnti << " imsi=" << m_imsi
+                << " (connected-DRX: no inactivity release)" << std::endl;
+    return;
+  }
   if (m_state == CONNECTED_NORMALLY){
     if(!m_dataInactivityTimeout.IsExpired()){
       m_dataInactivityTimeout.Cancel();
@@ -1986,6 +2099,11 @@ void UeManager::ReleaseOnRai(){
   // immediately, skipping the data-inactivity timer. This is what makes the
   // FUG suspend prompt and deterministic for single-packet ambient traffic.
   NS_LOG_DEBUG ("UeManager::ReleaseOnRai RNTI=" << m_rnti << " state=" << ToString (m_state));
+  // Connected-DRX FUG (idealfug) never releases to idle -- see
+  // NotifyDataInactivitySchedulerNb. A RAI must not tear the connected context down.
+  if (m_cdrxFug){
+    return;
+  }
   if (m_state == CONNECTED_NORMALLY){
     if(!m_dataInactivityTimeout.IsExpired()){
       m_dataInactivityTimeout.Cancel();
@@ -2023,6 +2141,13 @@ void UeManager::SwitchToResumeNb(){
   NS_LOG_DEBUG ("UeManager::SwitchToResumeNb RNTI=" << m_rnti
                 << " IMSI=" << m_imsi
                 << " PG=" << m_persistentGrant);
+  // Loss-diagnostic: eNB data-inactivity release. Reallocates the resumeId, so if the UE
+  // later resumes with its OLD resumeId (e.g. a contention loser delayed past this 5 s timer)
+  // the eNB won't recognise it -> resume rejected -> the UE's buffered packet is orphaned.
+  if (NbIotDebugTrace ())
+    std::cout << "[ENB-INACTIVITY-RELEASE] t=" << Simulator::Now ().GetSeconds () << " rnti=" << m_rnti
+              << " imsi=" << m_imsi << " oldResumeId=" << m_resumeId
+              << " state=" << ToString (m_state) << std::endl;
   NbIotRrcSap::RrcConnectionReleaseNb msg;
   msg.rrcTransactionIdentifier = GetNewRrcTransactionIdentifier ();
   msg.releaseCauseNb = NbIotRrcSap::RrcConnectionReleaseNb::ReleaseCauseNb::rrc_Suspend;
@@ -2044,6 +2169,39 @@ void UeManager::SwitchToResumeNb(){
   Simulator::Schedule(MilliSeconds(1000), &LteEnbRrc::MoveUeToResumed, m_rrc, m_rnti, m_resumeId);
 }
 
+void UeManager::RePark(){
+  if (NbIotDebugTrace ())
+    std::cout << "[ENB-RESUME-REPARK] t=" << Simulator::Now ().GetSeconds () << " rnti=" << m_rnti
+              << " imsi=" << m_imsi << " resumeId=" << m_resumeId
+              << " (resume timed out -> re-parked for clean re-RACH)" << std::endl;
+  // Re-park via the CANONICAL park path (the same one a normal release uses). It re-stores
+  // this context under its resumeId across ALL layers -- RRC (m_ueResumedMap), MAC
+  // (m_resumeRlcAttached), CCM (m_resume*), S1 -- then tears the stale temp RNTI down
+  // (RemoveUeNb). This matters because every one of those resume caches is SINGLE-USE
+  // (consumed by the failed first DoResumeUe); re-storing only some leaves the retry with a
+  // half-restored context (SRB not re-attached -> Msg4 undeliverable -> the UE loops). The
+  // manager object survives the RNTI teardown via the m_ueResumedMap reference.
+  // Reset this side's SRB1 RLC-AM first, so its sequence numbers restart at 0 to MATCH the
+  // UE (which reset its own SRB1 RLC on RESUME-LOST). This is the RA case (persistentGrant
+  // off): the UE already delivered an earlier packet, so the eNB's SRB1 RLC SN is ADVANCED;
+  // without resetting it here, the eNB's re-resume Msg4 (SN=k) falls outside the UE's reset
+  // receive window (VR(R)=0) and is silently dropped -> the UE never confirms -> re-park loop
+  // -> 4x T300 -> give-up -> orphaned packet. (Safe now that LteRlcAm::DoReset fully restores
+  // the entity -- it previously crashed here on an unresized txed buffer.)
+  if (m_srb1) m_srb1->m_rlc->DoReset ();
+  // Reset the DRB RLCs too. The UE resets its SRB1 AND DRB RLCs on RESUME-LOST; if the eNB
+  // resets only SRB1, the resume completes but the UE's DRB DATA (sent with SN 0) is outside
+  // the eNB DRB RLC-AM's still-advanced window -> silently dropped BEFORE the S1 forward-up
+  // (observed: UE-TX + ENB-DATA-RX present but no ENB-FWD-UP -> the packet dies in the eNB).
+  for (std::map<uint8_t, Ptr<LteDataRadioBearerInfo> >::iterator it = m_drbMap.begin ();
+       it != m_drbMap.end (); ++it)
+    {
+      it->second->m_rlc->DoReset ();
+    }
+  m_rrc->MoveUeToResumed (m_rnti, m_resumeId);
+  SwitchToState (IDLE_SUSPEND_PSM);
+}
+
 void UeManager::SetPersistentGrant(bool enable){
   m_persistentGrant = enable;
 }
@@ -2058,6 +2216,14 @@ void UeManager::SetProactiveFug(bool enable){
 
 bool UeManager::IsProactiveFug() const{
   return m_proactiveFug;
+}
+
+void UeManager::SetCdrxFug(bool enable){
+  m_cdrxFug = enable;
+}
+
+bool UeManager::IsCdrxFug() const{
+  return m_cdrxFug;
 }
 
 void UeManager::WakeFromPersistentGrant(){
@@ -2231,7 +2397,7 @@ LteEnbRrc::GetTypeId (void)
               "release behaviour of some NB-IoT deployments.",
               UintegerValue (5000),  // 5 s, vs. legacy 50000
               MakeUintegerAccessor (&LteEnbRrc::m_dataInactivityInterval),
-              MakeUintegerChecker<uint16_t> (0, 60000) )
+              MakeUintegerChecker<uint32_t> (0, 600000) )  // up to 10 min (was uint16_t: 100 s truncated to 34.5 s)
     .AddAttribute ("EnablePSM",
                "If true, PSM will be enabled.",
                BooleanValue (true),
@@ -2250,6 +2416,14 @@ LteEnbRrc::GetTypeId (void)
                "wake is driven by the UE's actual UL transmission.",
                BooleanValue (false),
                MakeBooleanAccessor (&LteEnbRrc::m_proactiveFug),
+               MakeBooleanChecker ())
+    .AddAttribute ("CdrxFug",
+               "Connected-DRX FUG (idealfug): the UE stays RRC_CONNECTED between "
+               "sparse packets and only MAC-cDRX-sleeps, so the eNB must NOT run "
+               "the data-inactivity release for it -- otherwise it drops to "
+               "eDRX->PSM and must re-RACH (contend) on the next packet.",
+               BooleanValue (false),
+               MakeBooleanAccessor (&LteEnbRrc::m_cdrxFug),
                MakeBooleanChecker ())
 
 
@@ -2952,18 +3126,23 @@ void
 LteEnbRrc::ConnectionResumeTimeout (uint16_t rnti)
 {
   NS_LOG_FUNCTION (this << rnti);
-  // By the time this fires the UE may already have resumed (moved to
-  // m_ueResumedMap) or, under capture/contention resolution, lost the shared
-  // Temporary C-RNTI and been removed -- GetUeManagerbyRnti then returns null.
-  // The body is a no-op anyway, so just bail out safely.
+  // By the time this fires the UE may already have CONFIRMED the resume (this timer was
+  // cancelled in RecvRrcConnectionResumeCompletedNb and the state left CONNECTION_RESUME),
+  // or the temp context may have been removed -- GetUeManagerbyRnti then returns null.
+  // In either case there is nothing to re-park, so bail out. Only a context still stuck
+  // in CONNECTION_RESUME reaches the re-park below.
   Ptr<UeManager> ueManager = GetUeManagerbyRnti (rnti);
   if (ueManager == nullptr || ueManager->GetState () != UeManager::CONNECTION_RESUME)
     {
       return;
     }
-  //m_rrcTimeoutTrace (ueManager->GetImsi (), rnti,
-  //                   ComponentCarrierToCellId (ueManager->GetComponentCarrierId ()), "ConnectionResumeTimeout");
-  //RemoveUe (rnti);
+  // The resume was accepted (CONNECTION_RESUME) but the UE never sent Resume-Complete:
+  // under capture it lost the shared Temp C-RNTI and its Msg4 never landed. Re-PARK this
+  // context to a clean IDLE_SUSPEND (keeping its still-valid resumeId, thanks to the
+  // deferred-erase) so the UE's re-RACH resumes normally, instead of leaving a stranded
+  // half-resumed context that would trap the UE (STALE=ABSENT) or force a fragile
+  // cross-RNTI move. Timeout must be < UE T300 so this fires before the UE retries.
+  ueManager->RePark ();
 }
 void
 LteEnbRrc::ConnectionRejectedTimeout (uint16_t rnti)
@@ -3033,9 +3212,51 @@ void
 LteEnbRrc::DoRecvRrcConnectionResumeRequestNb (uint16_t rnti, NbIotRrcSap::RrcConnectionResumeRequestNb msg)
 {
   NS_LOG_FUNCTION (this << rnti);
-  if(DoCheckIfResumeIdExists(msg.resumeIdentity) && m_admitRrcConnectionResumeRequest){
-    ResumeUe(rnti, msg.resumeIdentity);
-  }
+  // Contention resolution under capture (TS 36.321 5.1.5). Several UEs can adopt the
+  // SAME Temporary C-RNTI from one captured RAR and all resume on it. Only the FIRST
+  // resumer may claim this RNTI: once it is bound, the UeManager at this RNTI has left
+  // INITIAL_RANDOM_ACCESS (the fresh-temp state). A later resume request arriving on an
+  // already-claimed RNTI is a loser -- ignore it so it receives no Resume-Msg4, times
+  // out, and re-RACHes with backoff onto a fresh C-RNTI. Without this guard, ResumeUe
+  // rebinds the same RNTI to several UEs and they all transmit as one C-RNTI -> the
+  // eNB reassembles multiple UEs' PDUs as one RNTI (RLC corruption / loss).
+  if (HasUeManager (rnti)
+      && GetUeManagerbyRnti (rnti)->GetState () != UeManager::INITIAL_RANDOM_ACCESS)
+    {
+      NS_LOG_INFO ("Resume contention: RNTI " << rnti
+                   << " already claimed by a resumed UE; ignoring duplicate (loser re-RACHes)");
+      if (NbIotDebugTrace ())
+        {
+          bool hasEdt = (msg.dedicatedInfoNas != nullptr && msg.dedicatedInfoNas->GetSize () > 0);
+          std::cout << "[ENB-CONTENTION-LOSER] t=" << Simulator::Now ().GetSeconds () << " rnti=" << rnti
+                    << " reqResumeId=" << msg.resumeIdentity
+                    << " carriedMsg3Data=" << (hasEdt ? "YES" : "no")
+                    << " -> REJECTED before forward (data NOT sent upstream)" << std::endl;
+        }
+      return;
+    }
+  // If the resumeId is unknown/consumed or resume isn't admitted, ResumeUe does NOT run, so the
+  // UeManager stays in INITIAL_RANDOM_ACCESS. In that case we must NOT call the handler below --
+  // its switch has no INITIAL_RANDOM_ACCESS case and would NS_FATAL ("method unexpected in
+  // state"). This bites under CAPTURE: colliders share a Temp C-RNTI, and a loser's resume
+  // (unknown/already-consumed resumeId) reaches here in INITIAL_RANDOM_ACCESS. Return instead:
+  // no Msg4 is sent, the UE times out (T300) and re-RACHes with backoff.
+  if (!(DoCheckIfResumeIdExists (msg.resumeIdentity) && m_admitRrcConnectionResumeRequest))
+    {
+      if (NbIotDebugTrace ())
+        {
+          auto sit = m_ueResumedMap.find (msg.resumeIdentity);
+          const char *why = (sit == m_ueResumedMap.end ()) ? "ABSENT(erased/never-issued)"
+                            : (sit->second == nullptr)      ? "NULL-PLACEHOLDER(parked,persistentGrant)"
+                                                            : "present-but-not-admitted";
+          std::cout << "[ENB-STALE-RESUMEID] t=" << Simulator::Now ().GetSeconds () << " rnti=" << rnti
+                    << " reqResumeId=" << msg.resumeIdentity
+                    << " reason=" << why
+                    << " (no resume, UE re-RACHes)" << std::endl;
+        }
+      return;
+    }
+  ResumeUe (rnti, msg.resumeIdentity);
   GetUeManagerbyRnti (rnti)->RecvRrcConnectionResumeRequestNb (msg);
 }
 
@@ -3043,22 +3264,34 @@ void
 LteEnbRrc::DoRecvRrcEarlyDataRequestNb (uint16_t rnti, NbIotRrcSap::RrcEarlyDataRequestNb msg)
 {
     //NS_LOG_FUNCTION (this << rnti);
-    //EpsBearerTag tag;
-    //tag.SetRnti (65535);
-    //tag.SetBid (1);
-    //msg.dedicatedInfoNas->AddPacketTag (tag);
-    //m_forwardUpCallback (msg.dedicatedInfoNas);
+    // Contention resolution under capture (TS 36.321 5.1.5), EDT twin of the resume-request
+    // guard in DoRecvRrcConnectionResumeRequestNb. Several UEs can adopt the SAME captured
+    // Temp C-RNTI and mix EDT with full-resume on it -> ONE shared UeManager. Only the FIRST
+    // claimant may drive it; once bound it has left INITIAL_RANDOM_ACCESS. An EDT request
+    // arriving on an already-claimed RNTI is a loser: ignore it (no Msg4 -> T300 -> re-RACH
+    // with backoff onto a fresh C-RNTI). Without this, the EDT request lands on a UeManager
+    // already in CONNECTION_RESUME/CONNECTED_NORMALLY and drives an illegal state transition
+    // -> NS_FATAL_ERROR "method unexpected in state" (enb-rrc RecvRrc*Nb default cases).
+    if (HasUeManager (rnti)
+        && GetUeManagerbyRnti (rnti)->GetState () != UeManager::INITIAL_RANDOM_ACCESS)
+      {
+        NS_LOG_INFO ("EDT contention: RNTI " << rnti
+                     << " already claimed by another UE; ignoring EDT request (loser re-RACHes)");
+        return;
+      }
     GetUeManagerbyRnti (rnti)->RecvRrcEarlyDataRequestNb (msg);
 
 }
 
 bool
 LteEnbRrc::DoCheckIfResumeIdExists(uint64_t resumeId){
-
-  if (m_ueResumedMap.find(resumeId) != m_ueResumedMap.end()){
-    return true;
-  }
-  return false;
+  // Must check the VALUE, not just the key. DoAllocateTemporaryResumeId reserves the id with a
+  // null placeholder (m_ueResumedMap[id]=0) and only MoveUeToResumed populates the real
+  // UeManager -- and for persistent-grant UEs MoveUeToResumed is never scheduled (SwitchToResumeNb
+  // parks the context and returns), so the placeholder stays null. Treating a null-context id as
+  // "resumable" makes ResumeUe dereference a null UeManager -> crash. Require a live context.
+  auto it = m_ueResumedMap.find (resumeId);
+  return (it != m_ueResumedMap.end () && it->second != nullptr);
 }
 
 void
@@ -3550,6 +3783,7 @@ LteEnbRrc::DoAllocateTemporaryResumeId()
   for(resumeId = 1; resumeId < maxresumeId; resumeId++){
     if ((resumeId != 0) && (m_ueResumedMap.find(resumeId) == m_ueResumedMap.end())){
       m_ueResumedMap[resumeId] = 0;
+      m_edtDataForwarded.erase (resumeId); // fresh id: clear any stale EDT-forwarded flag
       break;
     }
   }
@@ -3590,8 +3824,12 @@ LteEnbRrc::ResumeUe(uint16_t rnti, uint64_t resumeId){
   m_rrcSapUser->ResumeUe(rnti,resumeId);
   m_ccmRrcSapProvider->ResumeUe(rnti, resumeId);
   m_s1SapProvider->ResumeUe(rnti, resumeId);
-
-  m_ueResumedMap.erase(resumeId);
+  // Token NOT erased here: keep the resumeId valid until the resume is CONFIRMED
+  // (RecvRrcConnectionResumeCompletedNb). A capture loser whose Msg4 didn't land keeps a
+  // valid token; when its resume attempt times out the eNB RE-PARKS this context to a
+  // clean IDLE_SUSPEND (ConnectionResumeTimeout -> UeManager::RePark), so the UE's re-RACH
+  // resumes fresh instead of hitting STALE=ABSENT. Single-use consumption happens on
+  // confirm, so the parked context here is always freshly IDLE_SUSPEND, never mid-resume.
 }
 void
 LteEnbRrc::RemoveUe (uint16_t rnti)
@@ -4046,7 +4284,13 @@ void LteEnbRrc::GenerateSystemInformationBlockType2Nb(std::pair<const uint8_t, n
   ce0v14.coverageEnhancementLevel = NbIotRrcSap::NprachParametersNb::CoverageEnhancementLevel::zero;
   ce0v14.nprachPeriodicity = NbIotRrcSap::NprachParametersNb::NprachPeriodicity::ms80; // match ce0 (80 ms; floor ms40)
   ce0v14.nprachStartTime = NbIotRrcSap::NprachParametersNb::NprachStartTime::ms64;     // must be < periodicity
-  ce0v14.nprachSubcarrierOffset = NbIotRrcSap::NprachParametersNb::NprachSubcarrierOffset::n36;
+  // Dedicated EDT preamble partition (3GPP Rel-15, TS 36.321: edt-PRACH-ParametersCE as a
+  // SEPARATE resource -> distinct nprach-SubcarrierOffset). Must NOT overlap the legacy
+  // partition: the eNB distinguishes preambles only by subcarrier offset and runs the
+  // legacy check first, so a shared offset means the legacy check consumes the EDT preamble
+  // -> isEdt=false -> no edt-TBS grant -> EDT never engages. Legacy occupies n12/n24/n36
+  // (CE2/CE1/CE0); n0 is the only free group, so EDT-CE0 goes there. CE0-only deployment.
+  ce0v14.nprachSubcarrierOffset = NbIotRrcSap::NprachParametersNb::NprachSubcarrierOffset::n0;
   ce0v14.nprachNumSubcarriers = NbIotRrcSap::NprachParametersNb::NprachNumSubcarriers::n12;
   ce0v14.nprachSubcarrierMsg3RangeStart = NbIotRrcSap::NprachParametersNb::NprachSubcarrierMsg3RangeStart::twoThird;
   ce0v14.npdcchNumRepetitionsRA = NbIotRrcSap::NprachParametersNb::NpdcchNumRepetitionsRA::r8;

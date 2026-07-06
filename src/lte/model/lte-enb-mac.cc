@@ -745,6 +745,9 @@ LteEnbMac::CheckIfPreambleWasReceived (NbIotRrcSap::NprachParametersNb ce, bool 
   uint32_t sub_frame = (10 * (m_frameNo - 1) + (m_subframeNo - 1));
 
   receivedNprachs = m_receivedNprachPreambleCount[subcarrierOffset];
+  if (NbIotDebugTrace () && !receivedNprachs.empty ())
+    std::cout << "[ENB-PREAMBLE] t=" << Simulator::Now ().GetSeconds () << " subOffset=" << (uint32_t) subcarrierOffset
+              << " edtCheck=" << edt << " nPreambles=" << receivedNprachs.size () << std::endl;
 
   std::vector<std::pair<int, NbIotRrcSap::Rar>> m_rarQueue; // Mapping Ranti -> Rar
 
@@ -794,17 +797,11 @@ LteEnbMac::CheckIfPreambleWasReceived (NbIotRrcSap::NprachParametersNb ce, bool 
               m_receivedNprachPreambleCount[subcarrierOffset].erase (iter->first);
               continue; // dedicated SR: no RAR
             }
-          if (m_srHybridContention && iter->second == 1
-              && iter->first < m_srContentionOffset)
-            {
-              uint16_t ranti = m_rapIdRantiMap[subcarrierOffset + iter->first];
-              if (ranti != 0 && m_rlcAttached.find (ranti) != m_rlcAttached.end ())
-                {
-                  NotifyIdealUlBuffer (ranti, 50); // connected UE -> SR grant
-                  m_receivedNprachPreambleCount[subcarrierOffset].erase (iter->first);
-                  continue;
-                }
-            }
+          // Faithful hybrid contention (TS 36.321 5.1.5): a contention-pool preamble
+          // is NOT resolved by an abstracted C-RNTI shortcut. It falls through to the
+          // RAR path below -> Temp C-RNTI -> the UE sends Msg3 with a C-RNTI MAC CE ->
+          // contention resolved by C-RNTI at Msg4. Collisions are CAPTURED (one wins,
+          // see the collision branch) rather than dropped.
           if (iter->second == 1)
             { // sanity check. Actually should be always equal
 
@@ -867,6 +864,8 @@ LteEnbMac::CheckIfPreambleWasReceived (NbIotRrcSap::NprachParametersNb ce, bool 
             {
               // Create new DCI to be scheduled
               rar_dcis.push_back (NbIotRrcSap::NpdcchMessage ());
+              // Reset the MAC-PDU size budget for THIS DCI.
+              size_mac_pdu = 8; // E/T/R/R/BI header (TS 36.321 6.1.5-2)
               rar_dcis.back ().ranti = m_rarQueue.front ().first;
               rar_dcis.back ().npdcchFormat = NbIotRrcSap::NpdcchMessage::NpdcchFormat::format1;
               rar_dcis.back ().dciType = NbIotRrcSap::NpdcchMessage::DciType::n1;
@@ -874,6 +873,9 @@ LteEnbMac::CheckIfPreambleWasReceived (NbIotRrcSap::NprachParametersNb ce, bool 
               rar_dcis.back ().ce = ce.coverageEnhancementLevel;
               rar_dcis.back ().isRar = true;
               rar_dcis.back ().isEdt = edt;
+              if (NbIotDebugTrace ())
+                std::cout << "[ENB-RAR] t=" << Simulator::Now ().GetSeconds () << " isEdt=" << edt
+                          << " enbMedt=" << m_edt << std::endl;
               rar_dcis.back ().backoffIndicator = occBackoffIndicator; // BI -> herd backs off
               rar_dcis.back ().dciN1.numNpdschSubframesPerRepetition =
                   NbIotRrcSap::DciN1::NumNpdschSubframesPerRepetition::s2;
@@ -979,6 +981,7 @@ LteEnbMac::DoSubframeIndicationNb (uint32_t frameNo, uint32_t subframeNo)
           m_sib2Nb);
       m_schedulerNb->SetLogDir(m_logdir);
       m_schedulerNb->SetProactiveMode (m_enbProactiveMode); // proactive FUG (4th mode)
+      m_schedulerNb->SetProactiveRoundRobin (m_enbProactiveRoundRobin); // fug RR arm
     }
   // Implement NB-IoT Downlink Control Information(DCI) Searchspaces Type2-Common Search Spaces(CSS) All AL2  Liberg et al. p 282
   // Find out if current subframe is start of Type2/UE-specific search space
@@ -1039,6 +1042,22 @@ LteEnbMac::DoSubframeIndicationNb (uint32_t frameNo, uint32_t subframeNo)
                   for(std::vector<uint8_t>::iterator lcit = activeLcs.begin(); lcit != activeLcs.end(); ++lcit){
                     std::map<uint8_t, LteMacSapProvider::ReportBufferStatusParameters>::iterator bsr = m_lastDlBSR[it->rnti].find((*lcit));
                     std::map<uint8_t, LteMacSapUser *>::iterator lcidIt = rntiIt->second.find (bsr->second.lcid);
+                    // Skip a logical channel that has a cached buffer report but no ATTACHED
+                    // RLC user for this RNTI: the two maps (m_lastDlBSR / m_rlcAttached) can
+                    // momentarily disagree while a context is re-bound to a new RNTI (capture
+                    // re-resume). Dereferencing the end() iterator below would segfault; the
+                    // data stays queued and is granted on a later subframe once attached.
+                    if (lcidIt == rntiIt->second.end ())
+                      {
+                        if (NbIotDebugTrace ())
+                          std::cout << "[DL-GUARD-SKIP] t=" << Simulator::Now ().GetSeconds ()
+                                    << " rnti=" << it->rnti << " lcid=" << (uint32_t) bsr->second.lcid
+                                    << " (BSR present but RLC not attached -> DL not scheduled)" << std::endl;
+                        continue;
+                      }
+                    if (NbIotDebugTrace () && bsr->second.lcid <= 2)
+                      std::cout << "[ENB-DL-TX] t=" << Simulator::Now ().GetSeconds ()
+                                << " rnti=" << it->rnti << " lcid=" << (uint32_t) bsr->second.lcid << std::endl;
                     if ((bsr->second.statusPduSize > 0) &&
                             (bytesforallLc >= bsr->second.statusPduSize))
                       {
@@ -1125,15 +1144,15 @@ LteEnbMac::DoSubframeIndicationNb (uint32_t frameNo, uint32_t subframeNo)
                             (*lcidIt).second->NotifyTxOpportunityNb(txOpParams,subframestowait);
 
                           }
-                          }
-                        else
-                          {
+                      }
+                    else
+                    {
                             if ((bsr->second.retxQueueSize > 0) ||
                                 (bsr->second.txQueueSize > 0))
                               {
                                 //NS_BUILD_DEBUG(std::cout << "Not enough space" << std::endl);
                               }
-                          }
+                    }
                   }
                   std::vector<uint8_t> remaining;
                   for (itBsr = m_lastDlBSR[it->rnti].begin (); itBsr != m_lastDlBSR[it->rnti].end (); itBsr++)
@@ -1340,6 +1359,27 @@ LteEnbMac::SetProactiveFug (bool enable)
     m_schedulerNb->SetProactiveMode (enable);
 }
 
+void
+LteEnbMac::SetProactiveRoundRobin (bool enable)
+{
+  // fug round-robin arm: only meaningful when proactive FUG is on (SetProactiveFug);
+  // the scheduler ignores it otherwise (RR branch is inside m_proactiveMode). Store
+  // it so it survives lazy scheduler creation (applied alongside SetProactiveMode).
+  m_enbProactiveRoundRobin = enable;
+  if (m_schedulerNb)
+    m_schedulerNb->SetProactiveRoundRobin (enable);
+}
+
+void
+LteEnbMac::SetEdt (bool edt)
+{
+  // Turn this cell into an EDT-configured cell: gates the per-subframe EDT preamble
+  // partition checks (CheckIfPreambleWasReceived(m_ce*ParameterEdt, true)) and the
+  // edt-TBS Msg3 grant. Was never wired (the enable line was commented out), so EDT
+  // stayed off cell-side even when the UE requested it. Mirror the UE's --edt config.
+  m_edt = edt;
+}
+
 uint64_t
 LteEnbMac::GetProactiveGrantsIssued () const
 {
@@ -1469,8 +1509,10 @@ LteEnbMac::DoReceivePhyPdu (Ptr<Packet> p)
   // not the Temporary C-RNTI used for the preamble. Re-point identity to the real
   // C-RNTI so the grant (Msg4) is addressed to it; the Temporary C-RNTI is dropped.
   CRntiMacCeTag crntiTag;
+  bool hadCrntiMacCe = false;
   if (p->RemovePacketTag (crntiTag))
     {
+      hadCrntiMacCe = true;
       uint16_t realCrnti = crntiTag.GetCRnti ();
       NS_LOG_INFO ("Msg3 C-RNTI MAC CE: contention resolution by C-RNTI=" << realCrnti
                    << " (Temporary C-RNTI=" << rnti << " discarded)");
@@ -1487,6 +1529,16 @@ LteEnbMac::DoReceivePhyPdu (Ptr<Packet> p)
   if(p->RemovePacketTag(dprTag)){ // it's MSG3
     buffersize = DataVolumeDPR::DVId2BufferSize(dprTag.GetDataVolumeValue());
     m_ueStoredBSR[rnti] = buffersize;
+    // Faithful contention RA: Msg3 carried a C-RNTI MAC CE that resolved this to the
+    // UE's existing C-RNTI. Grant the reported UL volume NOW, unconditionally -- the
+    // Msg4/DL-HARQ grant path (which serves m_ueStoredBSR) only fires for not-yet-
+    // connected UEs, and a deep-sleep UE is suspended (not "connectionSuccessful"),
+    // so neither path would otherwise fire and the data is never served. This DCI N0
+    // also serves as contention resolution (TS 36.321 5.1.5: PDCCH to the C-RNTI).
+    if (hadCrntiMacCe && m_schedulerNb)
+      {
+        m_schedulerNb->ScheduleUlRlcBufferReq (rnti, buffersize);
+      }
 
   }else if (p->RemovePacketTag(bsrTag)){
   buffersize = BufferSizeLevelBsr::BsrId2BufferSize(bsrTag.GetBufferStatusReportIndex());
@@ -1497,6 +1549,17 @@ LteEnbMac::DoReceivePhyPdu (Ptr<Packet> p)
   m_schedulerNb->ScheduleUlRlcBufferReq(rnti,buffersize);
 
   }
+
+  // Faithful contention Msg3 (TS 36.321 5.1.5): a contention-pool preamble's Msg3 is a
+  // CONTROL PDU -- it carried the C-RNTI MAC CE (identity) and the DPR (buffer), both
+  // consumed above, and NO uplink data SDU (the data rides the POST-resolution grant).
+  // Consume it at the MAC; do NOT deliver it to the data-bearer RLC/PDCP. Its residual
+  // control bytes are not a PDCP data PDU, so under heavy collision they corrupt RLC-AM
+  // reassembly -> bad PDCP D/C bit (assert) and unbounded reassembly (bad_alloc). The
+  // cold-start RA Msg3 (CCCH SDU, no C-RNTI MAC CE) is unaffected and still flows up.
+  if (hadCrntiMacCe)
+    return;
+
   std::map<uint16_t, std::map<uint8_t, LteMacSapUser *>>::iterator rntiIt =
       m_rlcAttached.find (rnti);
   NS_ASSERT_MSG (rntiIt != m_rlcAttached.end (), "could not find RNTI" << rnti);
@@ -1621,6 +1684,11 @@ LteEnbMac::DoRemoveUe (uint16_t rnti)
   m_cschedSapProvider->CschedUeReleaseReq (params);
   m_rlcAttached.erase (rnti);
   m_miDlHarqProcessesPackets.erase (rnti);
+  // Also drop this RNTI's cached UL/DL buffer-status entries. DoSubframeIndicationNb
+  // iterates m_lastDlBSR[rnti] and dereferences the matching m_rlcAttached LC user; if
+  // the RNTI is removed (e.g. a capture re-resume rebinds its context to a fresh RNTI)
+  // without clearing this map, the stale entry points at a freed RLC -> segfault.
+  m_lastDlBSR.erase (rnti);
 
   // Cancel pending NotifyDataInactivitySchedulerNb event for this RNTI.
   // The scheduler's m_noDataIndicators[rnti] holds a Simulator::Schedule

@@ -4633,7 +4633,7 @@ RrcConnectionResumeRequestNbHeader::PreSerialize () const
   SerializeEnum (5,m_resumeCause);
 
   // Serialize spare : BIT STRING (SIZE (1))
-  SerializeBitstring (std::bitset<3> ());
+  SerializeBitstring (std::bitset<1> ());
 
   // Finish serialization
   FinalizeSerialization ();
@@ -4669,8 +4669,8 @@ RrcConnectionResumeRequestNbHeader::Deserialize (Buffer::Iterator bIterator)
   // Deserialize m-TMSI
   bIterator = DeserializeBitstring (&m_shortResumeMacI,bIterator);
 
-  // Deserialize resumeCause 
-  bIterator = DeserializeEnum (8,&selectedOption,bIterator);
+  // Deserialize resumeCause (5-value enum -- must match PreSerialize's SerializeEnum(5))
+  bIterator = DeserializeEnum (5,&selectedOption,bIterator);
 
   // Deserialize spare
   bIterator = DeserializeBitstring (&dummy,bIterator);
@@ -4880,6 +4880,12 @@ RrcConnectionResumeNbHeader::PreSerialize () const
   // Serialize rrc-TransactionIdentifier ::=INTEGER (0..3)
   SerializeInteger (m_rrcTransactionIdentifier,0,3);
 
+  // Serialize UE Contention Resolution Identity (resumeId echo) ::= BIT STRING (SIZE (40)).
+  // Placed HERE (right after the matched rrc-TransactionIdentifier) because the c1 CHOICE
+  // below has a pre-existing serialize(2)/deserialize(8) option-count mismatch that
+  // misaligns everything after it; this byte-aligned spot round-trips correctly.
+  SerializeBitstring (m_resumeIdentity);
+
   // Serialize criticalExtensions choice:
   // 2 options, selected: 0 (option: c1)
   SerializeChoice (2,0,false);
@@ -4918,6 +4924,10 @@ RrcConnectionResumeNbHeader::Deserialize (Buffer::Iterator bIterator)
   bIterator = DeserializeInteger (&n,0,3,bIterator);
   m_rrcTransactionIdentifier = n;
 
+  // Deserialize UE Contention Resolution Identity (resumeId echo) BIT STRING(40), placed
+  // before the (mismatched) c1 CHOICE so it stays byte-aligned. See PreSerialize.
+  bIterator = DeserializeBitstring (&m_resumeIdentity,bIterator);
+
   // Deserialize criticalExtensions choice
   int criticalExtensionChoice;
   bIterator = DeserializeChoice (2,false,&criticalExtensionChoice,bIterator);
@@ -4942,8 +4952,6 @@ RrcConnectionResumeNbHeader::Deserialize (Buffer::Iterator bIterator)
           // Deserialize rrcConnectionResume-r13
           // 1 optional fields, no extension marker.
           bIterator = DeserializeSequence (&bitset1,false,bIterator);
-
-          
         }
     }
   return GetSerializedSize ();
@@ -4954,6 +4962,7 @@ void
 RrcConnectionResumeNbHeader::SetMessage (NbIotRrcSap::RrcConnectionResumeNb msg)
 {
   m_rrcTransactionIdentifier= msg.rrcTransactionIdentifier;
+  m_resumeIdentity = std::bitset<40> ((uint64_t) msg.resumeIdentity);
   m_isDataSerialized = false;
 }
 
@@ -4962,6 +4971,7 @@ RrcConnectionResumeNbHeader::GetMessage () const
 {
   NbIotRrcSap::RrcConnectionResumeNb msg;
   msg.rrcTransactionIdentifier= (uint8_t) m_rrcTransactionIdentifier;
+  msg.resumeIdentity = (uint32_t) m_resumeIdentity.to_ulong ();
   return msg;
 }
 
@@ -5522,6 +5532,10 @@ RrcEarlyDataCompleteNbHeader::PreSerialize () const
   // 2 options, selected 0 (c1)
   SerializeChoice (2,0,false);
 
+  // Serialize EDT UE Contention Resolution Identity (echoed IMSI) BIT STRING(40). Choice
+  // above is matched (2/2), so this byte-aligned append round-trips cleanly.
+  SerializeBitstring (m_contentionResolutionId);
+
   // Finish serialization
   FinalizeSerialization ();
 }
@@ -5538,6 +5552,9 @@ RrcEarlyDataCompleteNbHeader::Deserialize (Buffer::Iterator bIterator)
   int n;
 
   bIterator = DeserializeChoice (2,false,&n,bIterator);
+
+  // Deserialize EDT UE Contention Resolution Identity (echoed IMSI) BIT STRING(40).
+  bIterator = DeserializeBitstring (&m_contentionResolutionId,bIterator);
 
   if (n == 1)
     {
@@ -5563,6 +5580,7 @@ RrcEarlyDataCompleteNbHeader::Print (std::ostream &os) const
 void
 RrcEarlyDataCompleteNbHeader::SetMessage (NbIotRrcSap::RrcEarlyDataCompleteNb msg)
 {
+  m_contentionResolutionId = std::bitset<40> ((uint64_t) msg.contentionResolutionId);
   m_isDataSerialized = false;
 }
 
@@ -5571,6 +5589,7 @@ NbIotRrcSap::RrcEarlyDataCompleteNb
 RrcEarlyDataCompleteNbHeader::GetMessage () const
 {
   NbIotRrcSap::RrcEarlyDataCompleteNb msg;
+  msg.contentionResolutionId = (uint64_t) m_contentionResolutionId.to_ulong ();
   return msg;
 }
 //////////////////// RrcConnectionReconfigurationCompleteHeader class ////////////////////////

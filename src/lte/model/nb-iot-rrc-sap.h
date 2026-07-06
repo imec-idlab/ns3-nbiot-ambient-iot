@@ -912,6 +912,10 @@ class NbIotRrcSap{
                 delayTolerantAccess,
                // mtEdt // Not Release 13
             } establishmentCauseNb;
+            // UP-EDT (TS 36.331): early uplink data carried IN the resume Msg3 (appended after
+            // the header on send, split off on receive -- NOT header-serialized). nullptr/size 0
+            // for a normal (non-EDT) resume, which keeps the legacy 5-message flow untouched.
+            Ptr<Packet> dedicatedInfoNas {nullptr};
 
         };
         struct NpdcchConfigDedicatedNb{
@@ -952,7 +956,10 @@ class NbIotRrcSap{
         };
         struct RrcConnectionResumeNb{
             uint8_t rrcTransactionIdentifier;
-            // rest is optional 
+            uint32_t resumeIdentity {0}; // UE Contention Resolution Identity (resume): echoes
+                                         // the winning Msg3's resumeId so losers that shared a
+                                         // captured Temp C-RNTI detect the mismatch and re-RACH
+            // rest is optional
             //critical extensions possible
         };
 
@@ -984,6 +991,9 @@ class NbIotRrcSap{
         struct RrcEarlyDataCompleteNb{
 
             Ptr<Packet> dedicatedInfoNas;
+            uint64_t contentionResolutionId {0}; // UE Contention Resolution Identity (EDT):
+                                                 // echoed winner IMSI so colliding losers on a
+                                                 // shared Temp C-RNTI detect the mismatch and re-RACH
 
         };
             

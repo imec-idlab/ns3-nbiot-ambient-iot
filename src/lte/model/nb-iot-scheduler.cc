@@ -357,7 +357,37 @@ NbiotScheduler::Schedule (uint64_t frameNo, uint64_t subframeNo)
     {
       uint64_t nowSf = 10 * (frameNo - 1) + (subframeNo - 1);
       std::vector<uint16_t> toGrant;
-      for (auto & kv : m_rntiUeConfigMap)
+      if (m_proactiveRoundRobin)
+        {
+          // ROUND-ROBIN arm (fug-rr): poll UEs in turn, no prediction, no SR. Paced
+          // by the NPUSCH itself -- advance to the next UE only once the previously
+          // polled UE has actually been GRANTED (its rlcUlBuffer drained when the DCI
+          // N0 was allocated below). So the cell polls exactly as fast as the single
+          // narrowband can serve grants, with at most one poll outstanding -- no magic
+          // interval. Bounded delay (= one cycle), no 300 s prediction-miss tail; the
+          // cost is grants spent on UEs that have no data this round.
+          auto cur = m_rntiUeConfigMap.find (m_rrCursor);
+          bool prevServed = (m_rrCursor == 0) || (cur == m_rntiUeConfigMap.end ())
+                            || (cur->second.rlcUlBuffer == 0);
+          if (prevServed)
+            {
+              uint16_t next = 0;
+              for (auto & kv : m_rntiUeConfigMap)
+                if (kv.second.proactive && kv.first > m_rrCursor) { next = kv.first; break; }
+              if (next == 0) // wrap to the first proactive UE
+                for (auto & kv : m_rntiUeConfigMap)
+                  if (kv.second.proactive) { next = kv.first; break; }
+              if (next != 0)
+                {
+                  toGrant.push_back (next);
+                  m_rrCursor = next;
+                  m_proactiveGrantsIssued++;
+                  m_rntiUeConfigMap[next].proactiveGrantsIssued++;
+                }
+            }
+        }
+      else
+       for (auto & kv : m_rntiUeConfigMap)
         {
           UeConfig & ue = kv.second;
           if (!ue.proactive || ue.predPeriodSf == 0)
@@ -938,6 +968,11 @@ NbiotScheduler::GetDlSubframeRangeWithoutSystemResources (uint64_t overallSubfra
   while (numSubframes > 0)
     {
       size_t currentindex = overallSubframeNo + i;
+      // Bound the scan to the grid (see the UL twin): without this guard a saturated
+      // grid makes the loop run off the end of m_downlink -> unbounded push_back ->
+      // std::bad_alloc. Return empty so allocation fails gracefully for this occasion.
+      if (currentindex >= m_downlink.size ())
+        return std::vector<uint64_t> ();
       if ((m_downlink[currentindex] == 0))
         {
           subframeIndexes.push_back (currentindex);
@@ -958,6 +993,14 @@ NbiotScheduler::GetUlSubframeRangeWithoutSystemResources (uint64_t overallSubfra
   while (numSubframes > 0)
     {
       size_t currentindex = overallSubframeNo + i;
+      // Bound the scan to the grid. When the uplink grid is saturated (heavy
+      // contention at high density), there may be no run of free subframes before
+      // the grid ends; without this guard the loop walks off the end of the vector
+      // (out-of-bounds operator[] reads garbage), push_backs unboundedly and
+      // exhausts memory (std::bad_alloc). Return empty -> allocation fails for this
+      // occasion and the caller defers the UE, as it already does for "no resources".
+      if (currentindex >= m_uplink[carrier].size ())
+        return std::vector<uint64_t> ();
       if ((m_uplink[carrier][currentindex] != -1))
         {
           subframeIndexes.push_back (currentindex);
@@ -1337,6 +1380,12 @@ NbiotScheduler::SetProactiveMode (bool enable)
 }
 
 void
+NbiotScheduler::SetProactiveRoundRobin (bool enable)
+{
+  m_proactiveRoundRobin = enable;
+}
+
+void
 NbiotScheduler::NotifyUlArrival (uint16_t rnti, uint64_t nowSf)
 {
   // Feed the per-UE traffic predictor an observed UL arrival. EWMA (alpha=0.5)
@@ -1356,6 +1405,11 @@ NbiotScheduler::NotifyUlArrival (uint16_t rnti, uint64_t nowSf)
   const uint64_t MIN_EPOCH_GAP_SF = 2000; // 2 s
   if (ue.arrivalCount >= 1 && (nowSf - ue.lastArrivalSf) < MIN_EPOCH_GAP_SF)
     return;
+  // promptCatch: this arrival is ~one clean period after the last (a normal,
+  // on-time catch) -> safe to re-anchor the phase on it. A missed-epoch catch
+  // (gap ~2x period) must NOT re-anchor, or the phase locks onto the late catch
+  // and the UE stays a full epoch behind forever (a cascading tail).
+  bool promptCatch = false;
   if (ue.arrivalCount >= 1 && nowSf > ue.lastArrivalSf)
     {
       uint64_t gap = nowSf - ue.lastArrivalSf;
@@ -1370,8 +1424,35 @@ NbiotScheduler::NotifyUlArrival (uint16_t rnti, uint64_t nowSf)
       // realistic ambient epoch; such gaps advance the anchor but are not learned.
       if (gap >= kProactiveColdStartFloorSf)
         {
-          if (ue.predPeriodSf == 0 || gap < ue.predPeriodSf)
-            ue.predPeriodSf = gap;     // running minimum = best period estimate
+          if (ue.predPeriodSf == 0)
+            {
+              ue.predPeriodSf = gap;   // initial estimate
+              promptCatch = true;
+            }
+          else if (gap <= ue.predPeriodSf * 3 / 5)
+            {
+              // Gap SIGNIFICANTLY shorter than the estimate (<= 0.6x). The estimate was
+              // too LONG -- the classic case is locking on a missed first epoch (Markov
+              // skipped it), so the initial gap was ~2x the true period; the real period
+              // then shows up at ~0.5x and the old EWMA band [0.6,1.6]x rejected it,
+              // wedging the push cadence at 2x forever (delivered every other packet,
+              // ~half-period late). Running-minimum recovery: re-lock to this shorter
+              // genuine period -- a missed epoch only ever LENGTHENS a gap, never shortens
+              // it, so a much-shorter gap is real. The 0.6x threshold sits far above the
+              // ~1 s retry-jitter (which is why the old raw running-MINIMUM ratcheted
+              // downward), so this shortens on a true sub-harmonic but not on jitter.
+              ue.predPeriodSf = gap;
+              promptCatch = true;
+            }
+          else if (gap < ue.predPeriodSf * 8 / 5)
+            {
+              promptCatch = true;
+              // Robust EWMA (alpha = 1/4) over gaps within (0.6, 1.6)x the estimate: an
+              // on-time (or slightly late/early) catch. Missed-epoch outliers (>= 1.6x)
+              // are ignored (they would inflate the period).
+              ue.predPeriodSf = (ue.predPeriodSf * 3 + gap) / 4;
+            }
+          // else (gap >= 1.6x): missed-epoch outlier -- ignore for period estimation
         }
       // else: cold-start artifact -- advance anchor only (handled below)
     }
@@ -1382,23 +1463,30 @@ NbiotScheduler::NotifyUlArrival (uint16_t rnti, uint64_t nowSf)
   ue.pushRetriesLeft = 0;
   if (ue.predPeriodSf > 0)
     {
-      // FREE-RUNNING anchor. The arrival timestamp is the UE's *transmission*
-      // instant, which is later than the data-buffering instant by the current
-      // grant-wait. Re-basing nextGrant on every arrival (arrival + period) feeds
-      // that grant-wait back into the next prediction, so any delay COMPOUNDS
-      // epoch over epoch (a slowly growing delay). Instead, advance nextGrant by
-      // exactly one period from its previous value (a free-running phase locked to
-      // the true data cadence), and only RE-BASE when the prediction has drifted
-      // far from the observed arrival (initial lock, or a genuine phase change /
-      // missed epoch). A small guard biases the push to land just AFTER the data
-      // is buffered so the first push of the occasion catches it.
-      uint64_t freeRun = ue.nextGrantSf + ue.predPeriodSf;
-      uint64_t expected = nowSf + ue.predPeriodSf + kProactivePushGuardSf;
-      uint64_t halfPeriod = ue.predPeriodSf / 2;
-      bool drifted = (ue.nextGrantSf == 0)
-                     || (freeRun + halfPeriod < expected)   // free-run fell too far behind
-                     || (freeRun > expected + halfPeriod);  // or ran too far ahead
-      ue.nextGrantSf = drifted ? expected : freeRun;
+      // PHASE-LOCKED anchor (replaces the free-running anchor, which let the period
+      // estimate absorb the grant-wait and drift unboundedly -- EWMA late/compounding,
+      // min-gap early/missing). Re-base the next occasion directly on THIS arrival
+      // (nowSf) + one period, biased a fixed lead EARLIER. Why this does NOT compound
+      // like a naive re-base: nowSf is the *catch*, which is at most one retry window
+      // (kProactivePushRetries x kProactivePushRetrySf) after the occasion's first
+      // push -- a BOUNDED reference, never the multi-epoch grant-wait. The early lead
+      // makes the data land just inside the next retry window and be caught on an
+      // early retry, so the catch latency settles to a small CONSTANT (~lead) instead
+      // of feeding back. Net: the push phase relocks to the true data cadence every
+      // epoch, so neither the phase nor the period can drift.
+      if (promptCatch || ue.nextGrantSf == 0)
+        {
+          uint64_t next = nowSf + ue.predPeriodSf;   // clean catch -> phase-lock re-anchor
+          ue.nextGrantSf = (next > kProactivePhaseLeadSf) ? (next - kProactivePhaseLeadSf) : next;
+        }
+      else
+        {
+          // Missed-epoch catch: do NOT re-anchor onto the late arrival (that would
+          // drag the phase a full epoch behind and cascade). Free-run from the prior
+          // prediction so the UE re-locks on the next on-time epoch.
+          ue.nextGrantSf += ue.predPeriodSf;
+          while (nowSf >= ue.nextGrantSf) ue.nextGrantSf += ue.predPeriodSf;
+        }
     }
 }
 

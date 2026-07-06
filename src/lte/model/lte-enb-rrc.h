@@ -174,6 +174,22 @@ public:
   void SetProactiveFug(bool enable);
   bool IsProactiveFug() const;
   /**
+   * Connected-DRX FUG mode (per-UE, idealfug). In connected DRX the UE stays
+   * RRC_CONNECTED between sparse packets and only MAC-cDRX-sleeps; it is NEVER
+   * released to idle. So the eNB must NOT run the data-inactivity release for
+   * these UEs -- otherwise they drop to eDRX->PSM and must re-RACH (contend) on
+   * the next packet, defeating the whole point of an ideal (contention-free) FUG.
+   * */
+  void SetCdrxFug(bool enable);
+  bool IsCdrxFug() const;
+  /**
+   * Re-park a context whose resume was accepted (CONNECTION_RESUME) but never confirmed
+   * by the UE (capture desync -- shared Temp C-RNTI, Msg4 lost). Tears down this RNTI's
+   * MAC/scheduler/active-map state and returns to IDLE_SUSPEND with the resumeId still
+   * valid, so the UE's re-RACH resumes cleanly. Called from ConnectionResumeTimeout.
+   */
+  void RePark();
+  /**
    * Wake this UeManager from IDLE_SUSPEND_* back to CONNECTED_NORMALLY when
    * the UE sends an ideal BSR on the persistent grant path. Cancels pending
    * suspend timers so the normal data-inactivity cycle can restart.
@@ -708,12 +724,13 @@ private:
   bool m_energyModel;
   Time m_t3412;
   Time m_t3324;
-  uint16_t m_dataInactivityInterval;
+  uint32_t m_dataInactivityInterval;
   Time m_eDrxCycle;
   bool m_dataReceived;
   bool m_enablePSM;
   bool m_persistentGrant {false};
   bool m_proactiveFug {false};   ///< proactive FUG: pushed DCI0 must not force-wake a suspended UeManager
+  bool m_cdrxFug {false};        ///< connected-DRX FUG: never release to idle on data-inactivity (stay CONNECTED)
   std::list<EventId> id_suspend;
   std::string m_logdir;
 }; // end of `class UeManager`
@@ -1732,6 +1749,7 @@ private:
    */
 
   std::map<uint16_t, Ptr<UeManager> > m_ueResumedMap;
+  std::set<uint64_t> m_edtDataForwarded; ///< resumeIds whose folded UP-EDT data was already forwarded upstream (dedupe capture-loser retries)
 
   /**
    * List of measurement configuration which are active in every UE attached to
@@ -1916,12 +1934,13 @@ private:
 
   int32_t m_eDrxCycle;
 
-  uint16_t m_dataInactivityInterval;
+  uint32_t m_dataInactivityInterval;
 
   bool m_enablePSM;
 
   bool m_persistentGrant {false};
   bool m_proactiveFug {false};   ///< default proactive-FUG flag propagated to every new UeManager
+  bool m_cdrxFug {false};        ///< default connected-DRX FUG flag propagated to every new UeManager
 
   void GenerateSystemInformationBlockType1Nb();
   void GenerateSystemInformationBlockType2Nb(std::pair<const uint8_t, ns3::Ptr<ns3::ComponentCarrierBaseStation>> cc);
@@ -1945,6 +1964,11 @@ public:
    * Default proactive-FUG flag propagated to every new UeManager.
    **/
   bool IsProactiveFug() const { return m_proactiveFug; }
+
+  /**
+   * Default connected-DRX FUG flag propagated to every new UeManager.
+   **/
+  bool IsCdrxFug() const { return m_cdrxFug; }
 
 }; // end of `class LteEnbRrc`
 

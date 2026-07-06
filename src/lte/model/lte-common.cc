@@ -25,10 +25,24 @@
 #include "lte-common.h"
 #include <ns3/log.h>
 #include <ns3/abort.h>
+#include <ns3/global-value.h>
+#include <ns3/boolean.h>
 
 namespace ns3 {
 
 NS_LOG_COMPONENT_DEFINE ("LteCommon");
+
+static GlobalValue g_nbiotDebugTrace ("NbIotDebugTrace",
+    "Enable NB-IoT diagnostic std::cout traces (ENB-DATA-RX, UE-TX, RESUME-MSG4, ...)",
+    BooleanValue (false), MakeBooleanChecker ());
+
+bool&
+NbIotDebugTrace ()
+{
+  // Cached once on first use (after CommandLine::Parse has set the GlobalValue).
+  static bool cached = [] { BooleanValue b; g_nbiotDebugTrace.GetValue (b); return b.Get (); }();
+  return cached;
+}
 
 LteFlowId_t::LteFlowId_t ()
 {

@@ -160,6 +160,14 @@ public:
                        uint32_t contentionOffset);
   void SetSrHybridContention (bool en);   ///< also contend on shared subcarriers while waiting for the reserved slot
   void SetOracleBsr (bool en);            ///< oracle / ideal BSR: eNB learns the buffer instantly (no SR delay/energy)
+  uint64_t GetPendingUlBytes () { return GetBufferSizeComplete (); } ///< diagnostic: pending UL buffer (in-flight/backlog at sim end)
+  /// diagnostic breakdown of the pending UL buffer: tx (never sent) / retx (sent, unACKed) / status (signalling residue)
+  void GetPendingUlBreakdown (uint64_t &tx, uint64_t &retx, uint64_t &status) {
+    tx = retx = status = 0;
+    for (auto &kv : m_ulBsrReceived) {
+      tx += kv.second.txQueueSize; retx += kv.second.retxQueueSize; status += kv.second.statusPduSize;
+    }
+  }
   /**
    * Enable/disable the persistent-grant ideal-BSR hook.
    **/
@@ -423,6 +431,7 @@ private:
   bool m_simplifiedNprach;
   bool m_inSearchSpace;
   bool m_transmissionScheduled;
+  uint64_t m_lastUlGrantNpuschSf {0}; ///< NPUSCH start subframe of the last UL grant acted on; de-dups repeated NPDCCH DCI deliveries (repetitions) so the UE transmits a grant once
   bool m_listenToSearchSpaces;
   bool m_edrx;
   bool m_psm;
@@ -470,11 +479,15 @@ private:
   void SendContentionSrPreamble (void);  ///< contend on a random shared subcarrier
   EventId m_srContentionEvent;           ///< pending contention SR transmission event
   bool m_srPending {false};              ///< an SR is already scheduled/awaiting tx
+  bool m_srContentionRa {false};         ///< a faithful hybrid-contention RA is in flight (keeps C-RNTI; retry on loss)
+  uint16_t m_contentionTempRnti {0};     ///< RAR Temp C-RNTI for a contention Msg3: tag the Msg3 tx with it so the eNB receives it on the allocated Msg3 resource
   EventId m_srEvent;                     ///< pending SR transmission event
   Time m_srProhibitUntil {Seconds (0)};  ///< sr-ProhibitTimer: no new SR before this time
   uint32_t m_srProhibitPeriods {1};      ///< prohibit duration, in SR periods
   bool m_grantSessionActive {false};     ///< eNB is actively granting (post-SR); the real BSR
                                          ///< conveys the buffer and new SRs are suppressed
+  uint64_t m_prevBsrTotal {0};           ///< diagnostic: last total UL buffer seen in
+                                         ///< DoReportBufferStatus, to detect the 0->n arrival edge
   uint32_t m_srBootstrapBytes {50};      ///< NOT transmitted: the SR on air is a 1-bit NPRACH
                                          ///< preamble (TS 36.321, carries no buffer size). This
                                          ///< token trips the eNB grant gate (rlcUlBuffer>0) and
