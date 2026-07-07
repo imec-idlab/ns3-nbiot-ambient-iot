@@ -1381,7 +1381,14 @@ LteSpectrumPhy::EndRxData ()
   ChangeState (IDLE);
   m_rxPacketBurstList.clear ();
   m_rxControlMessageList.clear ();
-  m_expectedTbs.clear ();
+  // Do NOT blanket-clear m_expectedTbs here. In the NB-IoT design the UE arms an
+  // expected TB ONCE for a future NPDSCH (LteUePhy::AddNbiotExpectedTb at the DCI-
+  // indicated window); on the shared DL carrier every UE's spectrum phy runs
+  // EndRxData for EVERY eNB burst, so the blanket clear (stock per-TTI LTE
+  // semantics) wiped expectations armed for a burst still in flight -- under load
+  // this silently discarded small DL PDUs (RLC-AM status/ACKs) and t-PollRetransmit
+  // later forced below-window duplicate retransmissions. Consumed TBs are already
+  // erased individually (RemoveExpectedTb / AddExpectedTb overwrite by rnti).
 }
 
 

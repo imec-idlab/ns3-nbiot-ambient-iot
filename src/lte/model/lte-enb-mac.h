@@ -575,6 +575,11 @@ private:
   bool m_enbProactiveRoundRobin = false; ///< fug RR arm; applied to the scheduler on creation
   // Dedicated-SR resource->UE map (the eNB-held identity, set via RRC config).
   std::map<uint32_t, uint16_t> m_dedicatedSrIndexToRnti; ///< srIndex -> C-RNTI
+  // Last received UL DATA size per RNTI (DRB, lcid>2). A dedicated-SR preamble carries no
+  // volume, so the eNB sizes its blind first grant to this UE's last observed packet
+  // (+ BSR margin) instead of a flat 50 B: big enough for one packet PLUS a BSR MAC CE, so
+  // the UE reports any remaining backlog and the eNB keeps granting until it drains.
+  std::map<uint16_t, uint32_t> m_lastUlDataSize;
   uint32_t m_srReservedSubcarriers = 0;  ///< N_res reserved for dedicated SR (0 = disabled)
   uint32_t m_srContentionOffset = 0;     ///< first reserved subcarrier index (= N_cont)
   uint32_t m_srCycle = 1;                 ///< round-robin cycle in occasions = ceil(N/N_res)

@@ -34,6 +34,7 @@
 #include "lte-rrc-protocol-real.h"
 #include "lte-ue-rrc.h"
 #include "lte-enb-rrc.h"
+#include "lte-common.h"
 #include "lte-enb-net-device.h"
 #include "lte-ue-net-device.h"
 #include "nb-iot-contention-resolution-tag.h"
@@ -986,6 +987,26 @@ LteEnbRrcProtocolReal::DoReceivePdcpPdu (uint16_t rnti, Ptr<Packet> p)
     logfile.open(logfile_path, std::ios_base::app);
     logfile <<  rnti << ",DoReceivePdcpPdu," << Simulator::Now().GetMilliSeconds() << ",MessageType," << rrcUlCcchMessage.GetMessageType () << "\n";
     logfile.close();
+  }
+
+  // Malformed UL-CCCH guard (the real-eNB CRC-fail analogue): NB-IoT UEs never send
+  // type 0 (RRCConnectionReestablishmentRequest -- only the *receive* handlers exist
+  // UE-side), and no real CCCH message fits in under 4 bytes. Such a PDU is a stray
+  // untagged Msg3 dummy or otherwise corrupt reception; deserializing it over-reads
+  // the packet buffer and aborts the sim. Drop it -- the UE's contention-resolution
+  // timer expires and it retries RA, exactly as with a CRC-failed Msg3 on hardware.
+  {
+    uint32_t ccchType = rrcUlCcchMessage.GetMessageType ();
+    uint32_t ccchSize = p->GetSize ();
+    if (NbIotDebugTrace ())
+      std::cerr << "[CCCH-DIAG] t=" << Simulator::Now ().GetSeconds () << " rnti=" << rnti
+                << " type=" << ccchType << " size=" << ccchSize << std::endl;
+    if (ccchType == 0 || ccchSize < 4)
+      {
+        std::cerr << "[CCCH-DROP] rnti=" << rnti << " type=" << ccchType
+                  << " size=" << ccchSize << " t=" << Simulator::Now ().GetSeconds () << std::endl;
+        return;
+      }
   }
 
   // Deserialize packet and call member recv function with appropriate structure

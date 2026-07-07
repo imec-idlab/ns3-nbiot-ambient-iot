@@ -27,6 +27,7 @@
 
 #include "ns3/lte-rlc-am-header.h"
 #include "ns3/lte-rlc-am.h"
+#include "lte-common.h"
 #include "ns3/lte-rlc-sdu-status-tag.h"
 #include "ns3/lte-rlc-tag.h"
 
@@ -258,7 +259,7 @@ LteRlcAm::DoNotifyTxOpportunity (LteMacSapUser::TxOpportunityParameters txOpPara
       return;
     }
 
-  if ( m_statusPduRequested && ! m_statusProhibitTimer.IsRunning ()  && txOpParams.bytes == 4)
+  if ( m_statusPduRequested && ! m_statusProhibitTimer.IsRunning () )
     {
       if (txOpParams.bytes < m_statusPduBufferSize)
         {
@@ -329,6 +330,9 @@ LteRlcAm::DoNotifyTxOpportunity (LteMacSapUser::TxOpportunityParameters txOpPara
       params.componentCarrierId = txOpParams.componentCarrierId;
 
       m_macSapProvider->TransmitPdu (params);
+      if (NbIotDebugTrace ())
+        std::cout << "[AM-STATTX] t=" << Simulator::Now ().GetSeconds () << " rnti=" << m_rnti
+                  << " lcid=" << (uint32_t) m_lcid << std::endl;
 
       m_statusPduRequested = false;
       m_statusPduBufferSize = 0;
@@ -351,6 +355,9 @@ LteRlcAm::DoNotifyTxOpportunity (LteMacSapUser::TxOpportunityParameters txOpPara
           if (m_retxBuffer.at (seqNumberValue).m_pdu != 0)
             {
               Ptr<Packet> packet = m_retxBuffer.at (seqNumberValue).m_pdu->Copy ();
+              if (NbIotDebugTrace ())
+                std::cout << "[AM-RETX] t=" << Simulator::Now ().GetSeconds () << " rnti=" << m_rnti
+                          << " lcid=" << (uint32_t) m_lcid << " sn=" << seqNumberValue << std::endl;
               
               if (( packet->GetSize () <= txOpParams.bytes )
                   || m_txOpportunityForRetxAlwaysBigEnough)
@@ -681,6 +688,9 @@ LteRlcAm::DoNotifyTxOpportunity (LteMacSapUser::TxOpportunityParameters txOpPara
   // Build RLC header
   //
 
+  if (NbIotDebugTrace ())
+    std::cout << "[AM-TX] t=" << Simulator::Now ().GetSeconds () << " rnti=" << m_rnti
+              << " lcid=" << (uint32_t) m_lcid << " sn=" << m_vtS.GetValue () << std::endl;
   rlcAmHeader.SetSequenceNumber ( m_vtS++ );
   rlcAmHeader.SetResegmentationFlag (LteRlcAmHeader::PDU);
   rlcAmHeader.SetLastSegmentFlag (LteRlcAmHeader::LAST_PDU_SEGMENT);
@@ -828,7 +838,7 @@ LteRlcAm::DoNotifyTxOpportunityNb (LteMacSapUser::TxOpportunityParameters txOpPa
       return;
     }
 
-  if ( m_statusPduRequested && ! m_statusProhibitTimer.IsRunning ()  && txOpParams.bytes == 4)
+  if ( m_statusPduRequested && ! m_statusProhibitTimer.IsRunning () )
     {
       if (txOpParams.bytes < m_statusPduBufferSize)
         {
@@ -899,6 +909,9 @@ LteRlcAm::DoNotifyTxOpportunityNb (LteMacSapUser::TxOpportunityParameters txOpPa
       params.componentCarrierId = txOpParams.componentCarrierId;
 
       //m_macSapProvider->TransmitPdu (params);
+      if (NbIotDebugTrace ())
+        std::cout << "[AM-STATTX] t=" << Simulator::Now ().GetSeconds () << " rnti=" << m_rnti
+                  << " lcid=" << (uint32_t) m_lcid << " delayMs=" << schedulingDelay << std::endl;
       Simulator::Schedule(MilliSeconds(schedulingDelay), &LteMacSapProvider::TransmitPdu, m_macSapProvider, params);
 
       m_statusPduRequested = false;
@@ -922,6 +935,9 @@ LteRlcAm::DoNotifyTxOpportunityNb (LteMacSapUser::TxOpportunityParameters txOpPa
           if (m_retxBuffer.at (seqNumberValue).m_pdu != 0)
             {
               Ptr<Packet> packet = m_retxBuffer.at (seqNumberValue).m_pdu->Copy ();
+              if (NbIotDebugTrace ())
+                std::cout << "[AM-RETX] t=" << Simulator::Now ().GetSeconds () << " rnti=" << m_rnti
+                          << " lcid=" << (uint32_t) m_lcid << " sn=" << seqNumberValue << std::endl;
               
               if (( packet->GetSize () <= txOpParams.bytes )
                   || m_txOpportunityForRetxAlwaysBigEnough)
@@ -1253,6 +1269,9 @@ LteRlcAm::DoNotifyTxOpportunityNb (LteMacSapUser::TxOpportunityParameters txOpPa
   // Build RLC header
   //
 
+  if (NbIotDebugTrace ())
+    std::cout << "[AM-TX] t=" << Simulator::Now ().GetSeconds () << " rnti=" << m_rnti
+              << " lcid=" << (uint32_t) m_lcid << " sn=" << m_vtS.GetValue () << std::endl;
   rlcAmHeader.SetSequenceNumber ( m_vtS++ );
   rlcAmHeader.SetResegmentationFlag (LteRlcAmHeader::PDU);
   rlcAmHeader.SetLastSegmentFlag (LteRlcAmHeader::LAST_PDU_SEGMENT);
@@ -1390,6 +1409,34 @@ void
 LteRlcAm::DoNotifyHarqDeliveryFailure ()
 {
   NS_LOG_FUNCTION (this);
+  // EDT Msg3 under capture: the MAC signals that PDUs transmitted on a captured
+  // collision were lost (contention-resolution timeout -- this UE was not the
+  // winner). Move all sent-but-unACKed PDUs back to the retransmission buffer so
+  // they are retransmittable at the next opportunity (retry Msg3 or the reserved
+  // SR slot) instead of stranding in the txed buffer until t-PollRetransmit (25 s).
+  // Mirrors the ExpirePollRetransmitTimer txed->retx move.
+  bool moved = false;
+  for (SequenceNumber10 sn = m_vtA; sn < m_vtS; sn++)
+    {
+      uint16_t snValue = sn.GetValue ();
+      if (m_txedBuffer.at (snValue).m_pdu != 0)
+        {
+          NS_LOG_INFO ("HARQ delivery failure: move PDU " << snValue << " txed->retx");
+          m_retxBuffer.at (snValue).m_pdu = m_txedBuffer.at (snValue).m_pdu->Copy ();
+          m_retxBuffer.at (snValue).m_retxCount = m_txedBuffer.at (snValue).m_retxCount;
+          m_retxBuffer.at (snValue).m_waitingSince = m_txedBuffer.at (snValue).m_waitingSince;
+          m_retxBufferSize += m_retxBuffer.at (snValue).m_pdu->GetSize ();
+          m_txedBufferSize -= m_txedBuffer.at (snValue).m_pdu->GetSize ();
+          m_txedBuffer.at (snValue).m_pdu = 0;
+          m_txedBuffer.at (snValue).m_retxCount = 0;
+          m_txedBuffer.at (snValue).m_waitingSince = MilliSeconds (0);
+          moved = true;
+        }
+    }
+  if (moved)
+    {
+      DoReportBufferStatus ();
+    }
 }
 
 
@@ -1515,11 +1562,21 @@ LteRlcAm::DoReceivePdu (LteMacSapUser::ReceivePduParameters rxPduParams)
       NS_LOG_LOGIC ("VR(MS) = " << m_vrMs);
       NS_LOG_LOGIC ("VR(H)  = " << m_vrH);
 
+      if (NbIotDebugTrace ())
+        std::cout << "[AM-RX] t=" << Simulator::Now ().GetSeconds () << " rnti=" << m_rnti
+                  << " lcid=" << (uint32_t) m_lcid << " sn=" << seqNumber.GetValue () << std::endl;
+
       // - if x falls outside of the receiving window; or
       // - if byte segment numbers y to z of the AMD PDU with SN = x have been received before:
       if ( ! IsInsideReceivingWindow (seqNumber) )
         {
           NS_LOG_LOGIC ("PDU discarded");
+          if (NbIotDebugTrace ())
+            std::cout << "[RLC-DROP] t=" << Simulator::Now ().GetSeconds ()
+                      << " rnti=" << m_rnti << " lcid=" << (uint32_t) m_lcid
+                      << " sn=" << seqNumber.GetValue ()
+                      << " vrR=" << m_vrR.GetValue () << " vrMr=" << m_vrMr.GetValue ()
+                      << " (SN outside receive window -> dropped, not ACKed)" << std::endl;
           return;
         }
       else
@@ -1661,6 +1718,9 @@ LteRlcAm::DoReceivePdu (LteMacSapUser::ReceivePduParameters rxPduParams)
 
       SequenceNumber10 ackSn = rlcAmHeader.GetAckSn ();
       SequenceNumber10 sn;
+      if (NbIotDebugTrace ())
+        std::cout << "[AM-STATRX] t=" << Simulator::Now ().GetSeconds () << " rnti=" << m_rnti
+                  << " lcid=" << (uint32_t) m_lcid << " ackSn=" << ackSn.GetValue () << std::endl;
 
       NS_LOG_INFO ("ackSn     = " << ackSn);
       NS_LOG_INFO ("VT(A)     = " << m_vtA);
@@ -1752,7 +1812,13 @@ LteRlcAm::DoReceivePdu (LteMacSapUser::ReceivePduParameters rxPduParams)
             }
           
         } // loop over SN : VT(A) <= SN < ACK SN
-      
+
+      // The ACK just (possibly) emptied the txed/retx buffers -> re-report so the
+      // MAC's unackedSize view updates and the cDRX Active Time gate can release.
+      // Without this, no report fires here (tx/retx/status sizes unchanged) and a
+      // stale unackedSize>0 would pin the UE awake forever.
+      DoReportBufferStatus ();
+
       return;
 
     }
@@ -2260,6 +2326,10 @@ LteRlcAm::DoReportBufferStatus (void)
   r.txQueueHolDelay = txonQueueHolDelay.GetMilliSeconds ();
   r.retxQueueSize = m_retxBufferSize;
   r.retxQueueHolDelay = retxQueueHolDelay.GetMilliSeconds ();
+  // Sent-but-unACKed bytes: keeps the UE in cDRX Active Time until the eNB's
+  // status PDU (ACK) arrives -- a UE must not sleep on outstanding ARQ state.
+  // Deliberately NOT part of the BSR volume (see lte-mac-sap.h).
+  r.unackedSize = m_txedBufferSize + m_retxBufferSize;
 
   if ( m_statusPduRequested && ! m_statusProhibitTimer.IsRunning () )
     {
@@ -2270,11 +2340,13 @@ LteRlcAm::DoReportBufferStatus (void)
       r.statusPduSize = 0;
     }
 
-  if ( r.txQueueSize != m_lastTxQueueSize  || r.retxQueueSize != m_lastRetxQueueSize || r.statusPduSize != m_lastStatusPduSize )
+  if ( r.txQueueSize != m_lastTxQueueSize  || r.retxQueueSize != m_lastRetxQueueSize || r.statusPduSize != m_lastStatusPduSize
+       || r.unackedSize != m_lastUnackedSize )
     {
       m_lastTxQueueSize = r.txQueueSize;
       m_lastRetxQueueSize = r.retxQueueSize;
       m_lastStatusPduSize = r.statusPduSize;
+      m_lastUnackedSize = r.unackedSize;
       NS_LOG_INFO ("Send ReportBufferStatus: " << r.txQueueSize << ", " << r.txQueueHolDelay << ", " 
                                                << r.retxQueueSize << ", " << r.retxQueueHolDelay << ", " 
                                                << r.statusPduSize);

@@ -259,7 +259,8 @@ int main (int argc, char *argv[])
   uint32_t cdrxInactivityMs {500};   // drx-InactivityTimer (extends Active Time after a grant)
   bool     proactiveFug {false};
   bool     fugRoundRobin {false};        // proactive FUG round-robin arm (only applies when proactiveFug)
-  uint32_t srDedicatedSubcarriers {4};   // SR subcarriers carved from the 12-tone NPRACH pool
+  uint32_t srDedicatedSubcarriers {6};   // SR tones carved from the 12-tone NPRACH pool; equal
+                                         // split with srContentionSubcarriers=6 -> 6 RA + 6 SR = 12
   uint32_t srBaseNprachPeriodMs   {80};  // CE0 NPRACH occasion period (round-robin base); matches
                                          // lte-enb-rrc.cc CE0 ms80. Sensitivity floor ms40 (CE0-only).
   uint32_t srPeriodMs {0};               // manual override in ms; 0 = derive from round-robin model
@@ -733,7 +734,14 @@ int main (int argc, char *argv[])
     else{
       ueRrc->SetAttribute("CIoT-Opt", BooleanValue(false));
     }
-    if(edt == true){
+    // SR arms (srPreambleSr): RRC-level EDT stays OFF. Their EDT rides the
+    // contention-SR route instead (eNB issues EDT-sized Msg3 grants for
+    // contention-pool preambles when EDT is on cell-side; the UE reacts to
+    // tbs > 88). Enabling RRC EDT here would also let a context-keeping
+    // re-RACH (RESUME-LOST) run DoStartRandomAccessProcedureNb(edt=true),
+    // which overwrites m_CeLevel with the EDT partition and never restores
+    // it -- silently breaking the dedicated-SR tone map for that UE.
+    if(edt == true && !srPreambleSr){
       //std::cout << "EDT" << std::endl;
       ueRrc->SetAttribute("EDT", BooleanValue(true));
     }
@@ -743,7 +751,7 @@ int main (int argc, char *argv[])
 
     if (persistentGrant) {
       ueRrc->SetAttribute ("PSM",  BooleanValue (deepSleepFug));
-      ueRrc->SetAttribute ("eDRX", BooleanValue (false));
+      ueRrc->SetAttribute ("eDRX", BooleanValue (srPreambleSr));
       ueRrc->SetAttribute ("PersistentGrant", BooleanValue (persistentGrant));
       ueRrc->SetAttribute ("ProactiveFug", BooleanValue (proactiveFug));
       ueLteDevice->GetMac ()->SetPersistentGrant (persistentGrant);   // mirror to MAC
@@ -754,6 +762,9 @@ int main (int argc, char *argv[])
       ueLteDevice->GetMac ()->SetOracleBsr (oracleBsr);               // upper-bound arm: instant ideal BSR
       if (srPreambleSr && !proactiveFug) {
         ueLteDevice->GetMac ()->SetSrDedicated (i, srDedicatedSubcarriers, srContentionSubcarriers);
+        // EDT on the hybrid-contention SR route: contention attempts transmit on the
+        // EDT NPRACH partition (the Rel-15 EDT request) -> data rides Msg3.
+        ueLteDevice->GetMac ()->SetSrEdtContention (edt && srHybridContention);
         ueLteDevice->GetMac ()->SetSrHybridContention (srHybridContention);
       }
       }

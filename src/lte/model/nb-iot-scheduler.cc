@@ -22,6 +22,7 @@
 
 
 #include "nb-iot-scheduler.h"
+#include "lte-common.h"
 #include <istream>
 #include <fstream>
 #include <string>
@@ -327,6 +328,7 @@ NbiotScheduler::ScheduleRarReq (NbIotRrcSap::NpdcchMessage msg, SearchSpaceConfi
 
       m_rntiUeConfigMap[it->cellRnti].lastDl = 0;
       m_rntiUeConfigMap[it->cellRnti].lastUl = 0;
+      m_rntiUeConfigMap[it->cellRnti].lastUlStart = 0;
       m_rntiUeConfigMap[it->cellRnti].rlcDlBuffer = 0;
       m_rntiUeConfigMap[it->cellRnti].rlcUlBuffer = 0;
       m_rntiUeConfigMap[it->cellRnti].rnti = it->cellRnti;
@@ -526,6 +528,8 @@ NbiotScheduler::ScheduleNpdcchMessage (NbIotRrcSap::NpdcchMessage &message, Sear
       std::vector<uint64_t> test = GetNextAvailableSearchSpaceCandidate (
           message.rnti, m_frameNo - 1, m_subframeNo - 1, ssc.R_max,
           NbIotRrcSap::ConvertDciN1Repetitions2int (message.dciN1));
+      if (NbIotDebugTrace () && test.empty ())
+        std::cout << "[N1-FAIL] sf=" << (10 * (m_frameNo - 1) + m_subframeNo - 1) << " rnti=" << message.rnti << " step=searchspace" << std::endl;
       if (test.size () > 0) // WE GOT A DOWNLINK NPDCCH CANDIDATE
         {
 
@@ -534,6 +538,8 @@ NbiotScheduler::ScheduleNpdcchMessage (NbIotRrcSap::NpdcchMessage &message, Sear
               NbIotRrcSap::ConvertNumNpdschRepetitions2int (message.dciN1);
           std::vector<uint64_t> npdschsubframes = GetNextAvailableNpdschCandidate (
               *(test.end () - 1), m_minSchedulingDelayDci2Downlink, subframesNpdsch, ssc.R_max);
+          if (NbIotDebugTrace () && npdschsubframes.empty ())
+            std::cout << "[N1-FAIL] sf=" << (10 * (m_frameNo - 1) + m_subframeNo - 1) << " rnti=" << message.rnti << " step=npdsch" << std::endl;
           if (npdschsubframes.size () > 0) // WE GOT A DOWNLINK CANDIDATE
             {
               uint64_t subframesNpusch;
@@ -611,6 +617,7 @@ NbiotScheduler::ScheduleNpdcchMessage (NbIotRrcSap::NpdcchMessage &message, Sear
                           //NS_BUILD_DEBUG (std::cout << std::endl);
                           ++rar;
                           m_rntiUeConfigMap[rar->cellRnti].lastUl = ulgrant.second.second.back ();
+                          m_rntiUeConfigMap[rar->cellRnti].lastUlStart = ulgrant.second.second.front ();
                         }
                       else
                         {
@@ -627,6 +634,8 @@ NbiotScheduler::ScheduleNpdcchMessage (NbIotRrcSap::NpdcchMessage &message, Sear
                   std::vector<std::pair<uint64_t, std::vector<uint64_t>>> npuschharqsubframes =
                       GetNextAvailableNpuschCandidate (*(npdschsubframes.end () - 1), 0,
                                                        subframesNpuschHarq, true);
+                  if (NbIotDebugTrace () && npuschharqsubframes.empty ())
+                    std::cout << "[N1-FAIL] sf=" << (10 * (m_frameNo - 1) + m_subframeNo - 1) << " rnti=" << message.rnti << " step=harq" << std::endl;
                   if (npuschharqsubframes.size () > 0)
                     {
                       //NS_BUILD_DEBUG (std::cout << "Scheduling NPUSCH HARQ at ");
@@ -643,6 +652,8 @@ NbiotScheduler::ScheduleNpdcchMessage (NbIotRrcSap::NpdcchMessage &message, Sear
 
                       m_rntiUeConfigMap[message.rnti].lastUl =
                           npuschharqsubframes[0].second.back ();
+                      m_rntiUeConfigMap[message.rnti].lastUlStart =
+                          npuschharqsubframes[0].second.front ();
                     }
                 }
               if (scheduleSuccessful)
@@ -713,6 +724,7 @@ NbiotScheduler::ScheduleNpdcchMessage (NbIotRrcSap::NpdcchMessage &message, Sear
               message.dciN0.npuschOpportunity = npuschsubframes;
               message.dciN0.dciSubframes = test;
               m_rntiUeConfigMap[message.rnti].lastUl = npuschsubframes[0].second.back ();
+              m_rntiUeConfigMap[message.rnti].lastUlStart = npuschsubframes[0].second.front ();
               //NS_BUILD_DEBUG (std::cout << std::endl);
               return true;
             }
@@ -757,7 +769,13 @@ NbiotScheduler::ScheduleSearchSpace (SearchSpaceConfig ssc)
             {
               dci_candidate =
                   CreateDciNpdcchMessage ((*it), NbIotRrcSap::NpdcchMessage::DciType::n1);
-              if (ScheduleNpdcchMessage (dci_candidate, ssc))
+              bool okN1 = ScheduleNpdcchMessage (dci_candidate, ssc);
+              if (NbIotDebugTrace ())
+                std::cout << "[SCHED-N1] sf=" << (10 * (m_frameNo - 1) + m_subframeNo - 1)
+                          << " rnti=" << (*it) << " prio=DL dlBuf="
+                          << m_rntiUeConfigMap[(*it)].rlcDlBuffer << " npdcchOk=" << okN1
+                          << " tbs=" << dci_candidate.tbs << std::endl;
+              if (okN1)
                 {
                   scheduledMessages.push_back (dci_candidate);
                   m_rntiUeConfigMap[(*it)].rlcDlBuffer = 0;
@@ -769,7 +787,12 @@ NbiotScheduler::ScheduleSearchSpace (SearchSpaceConfig ssc)
                 {
                   dci_candidate =
                       CreateDciNpdcchMessage ((*it), NbIotRrcSap::NpdcchMessage::DciType::n0);
-                  if (ScheduleNpdcchMessage (dci_candidate, ssc))
+                  bool okN0dl = ScheduleNpdcchMessage (dci_candidate, ssc);
+                  if (NbIotDebugTrace ())
+                    std::cout << "[SCHED-N0] rnti=" << (*it) << " prio=DL ulBuf="
+                              << m_rntiUeConfigMap[(*it)].rlcUlBuffer << " npdcchOk=" << okN0dl
+                              << " tbs=" << dci_candidate.tbs << std::endl;
+                  if (okN0dl)
                     {
                       scheduledMessages.push_back (dci_candidate);
                       if (int (m_rntiUeConfigMap[(*it)].rlcUlBuffer - (dci_candidate.tbs / 8)) > 0)
@@ -791,7 +814,12 @@ NbiotScheduler::ScheduleSearchSpace (SearchSpaceConfig ssc)
             {
               dci_candidate =
                   CreateDciNpdcchMessage ((*it), NbIotRrcSap::NpdcchMessage::DciType::n0);
-              if (ScheduleNpdcchMessage (dci_candidate, ssc))
+              bool okN0 = ScheduleNpdcchMessage (dci_candidate, ssc);
+              if (NbIotDebugTrace ())
+                std::cout << "[SCHED-N0] rnti=" << (*it) << " prio=UL ulBuf="
+                          << m_rntiUeConfigMap[(*it)].rlcUlBuffer << " npdcchOk=" << okN0
+                          << " tbs=" << dci_candidate.tbs << std::endl;
+              if (okN0)
                 {
                   scheduledMessages.push_back (dci_candidate);
                   if (int (m_rntiUeConfigMap[(*it)].rlcUlBuffer - (dci_candidate.tbs / 8)) > 0)
@@ -833,21 +861,43 @@ NbiotScheduler::GetNextAvailableNpuschCandidate (uint64_t endSubframeNpdsch,
   std::vector<std::pair<uint64_t, std::vector<uint64_t>>> allocation;
   if (isHarq)
     {
-
-      for (auto &i : m_HarqTimeOffsets)
+      // Spec HARQ time offsets first (shift=0 == the original behavior). Under a deep
+      // NPUSCH backlog (cold-start herd) ALL of them can be booked; previously that
+      // failed the WHOLE DCI N1, blocking every DL to the UE (incl. the 4-byte RLC-AM
+      // status/ACK) until the backlog drained (~25 s at N=80) -- the UE's
+      // t-PollRetransmit then forced a duplicate retransmission the eNB dropped below
+      // the receive window. Fall back to progressively later anchors (bounded) so the
+      // DL itself proceeds; a late HARQ-ACK slot is a benign model approximation (no
+      // radio loss modeled), and the half-duplex guard in
+      // GetNextAvailableSearchSpaceCandidate clears DL candidates on either side of a
+      // far-future UL booking.
+      // Cap the fallback at 2000 sf (2 s): enough to clear a real cold-start NPUSCH
+      // queue, but never deep enough to fight the SR arms' pre-booked grant lattice
+      // or let a pathological rescheduling loop book the UL map solid (observed:
+      // an eternal N1 loop pushed anchors 46+ s out and ground the sim to a crawl
+      // before this cap). Beyond the cap the N1 fails exactly like pre-fallback code.
+      for (uint64_t shift = 0; shift <= 2000;
+           shift += (numSubframes > 0 ? numSubframes : 16))
         {
-          for (size_t j = 0; j < 4; ++j)
-            { // For subcarrier 0-3 for 15khz Subcarrier spacing | needs change for 3.75 Khz
-              uint64_t candidate =
-                  endSubframeNpdsch + NbIotRrcSap::HarqAckResource::ConvertHarqTimeOffset2int (i);
-              std::vector<uint64_t> subframesOccupied =
-                  GetUlSubframeRangeWithoutSystemResources (candidate, numSubframes, j);
-              subframesOccupied =
-                  CheckforNContiniousSubframesUl (subframesOccupied, candidate, numSubframes, j);
-              if (subframesOccupied.size () > 0)
-                {
-                  allocation.push_back (std::make_pair (j, subframesOccupied));
-                  return allocation;
+          for (auto &i : m_HarqTimeOffsets)
+            {
+              for (size_t j = 0; j < 4; ++j)
+                { // For subcarrier 0-3 for 15khz Subcarrier spacing | needs change for 3.75 Khz
+                  uint64_t candidate =
+                      endSubframeNpdsch + shift +
+                      NbIotRrcSap::HarqAckResource::ConvertHarqTimeOffset2int (i);
+                  std::vector<uint64_t> subframesOccupied =
+                      GetUlSubframeRangeWithoutSystemResources (candidate, numSubframes, j);
+                  subframesOccupied =
+                      CheckforNContiniousSubframesUl (subframesOccupied, candidate, numSubframes, j);
+                  if (subframesOccupied.size () > 0)
+                    {
+                      if (shift > 0 && NbIotDebugTrace ())
+                        std::cout << "[HARQ-DEFER] anchor shifted +" << shift
+                                  << "sf (spec offsets booked)" << std::endl;
+                      allocation.push_back (std::make_pair (j, subframesOccupied));
+                      return allocation;
+                    }
                 }
             }
         }
@@ -1113,7 +1163,24 @@ NbiotScheduler::GetNextAvailableSearchSpaceCandidate (uint32_t rnti, uint64_t Se
 
       if (subframes_to_use.size () > 0)
         {
-          if (subframes_to_use.front () > m_rntiUeConfigMap[rnti].lastUl + 3)
+          // Half-duplex guard: the UE cannot monitor NPDCCH while transmitting its
+          // pending NPUSCH allocation [lastUlStart, lastUl] (+3 sf guard band). The
+          // old form (candidate must start AFTER lastUl+3) also rejected candidates
+          // completing well BEFORE the queued UL even starts: under a deep NPUSCH
+          // backlog (cold-start herd) lastUl sits many seconds ahead, which froze
+          // ALL downlink to this UE (incl. the 4-byte RLC-AM status/ACK) for the
+          // whole backlog depth -- the UE's t-PollRetransmit then forced a duplicate
+          // retransmission the eNB drops below the receive window. Accept candidates
+          // that clear the UL window on EITHER side.
+          uint64_t ulStart = m_rntiUeConfigMap[rnti].lastUlStart;
+          uint64_t ulEnd = m_rntiUeConfigMap[rnti].lastUl;
+          // The NPDSCH ride follows the NPDCCH candidate after the minimum DCI->DL
+          // scheduling delay; keep that pipeline tail clear of the UL window too.
+          uint64_t dlTailEnd =
+              subframes_to_use.back () + m_minSchedulingDelayDci2Downlink + 8;
+          bool clearsAfterUl = subframes_to_use.front () > ulEnd + 3;
+          bool clearsBeforeUl = (ulStart > 3) && (dlTailEnd + 3 < ulStart);
+          if (clearsAfterUl || clearsBeforeUl)
             {
               return subframes_to_use;
             }
@@ -1284,6 +1351,10 @@ NbiotScheduler::ScheduleDlRlcBufferReq (
   SearchSpaceConfig searchSpace = m_rntiUeConfigMap[rnti].searchSpaceConfig;
   std::vector<uint16_t>::iterator findit = std::find (
       m_searchSpaceRntiMap[searchSpace].begin (), m_searchSpaceRntiMap[searchSpace].end (), rnti);
+  if (NbIotDebugTrace ())
+    std::cout << "[SCHED-DLREQ] rnti=" << rnti << " dlBytes=" << buffer_size
+              << " inSearchSpace=" << (findit != m_searchSpaceRntiMap[searchSpace].end ())
+              << std::endl;
   if (findit == m_searchSpaceRntiMap[searchSpace].end ())
     {
       m_searchSpaceRntiMap[searchSpace].push_back (rnti);
@@ -1292,8 +1363,14 @@ NbiotScheduler::ScheduleDlRlcBufferReq (
 void
 NbiotScheduler::ScheduleUlRlcBufferReq (uint64_t rnti, uint64_t dataSize)
 {
+  bool freshCfg = (m_rntiUeConfigMap.find (rnti) == m_rntiUeConfigMap.end ());
   m_rntiUeConfigMap[rnti].rlcUlBuffer = dataSize;
   SearchSpaceConfig searchSpace = m_rntiUeConfigMap[rnti].searchSpaceConfig;
+  if (NbIotDebugTrace ())
+    std::cout << "[SCHED-ULREQ] rnti=" << rnti << " bytes=" << dataSize
+              << " freshCfg=" << freshCfg << " ssRmax=" << searchSpace.R_max
+              << " ssStartSf=" << searchSpace.startSf << " ssOffset=" << searchSpace.offset
+              << std::endl;
   std::vector<uint16_t>::iterator it = std::find (m_searchSpaceRntiMap[searchSpace].begin (),
                                                   m_searchSpaceRntiMap[searchSpace].end (), rnti);
   if (it == m_searchSpaceRntiMap[searchSpace].end ())

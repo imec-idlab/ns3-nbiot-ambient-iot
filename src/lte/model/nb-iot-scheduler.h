@@ -68,6 +68,7 @@ struct UeConfig{
   uint64_t rlcDlBuffer;
   uint64_t rlcUlBuffer;
   uint64_t lastUl;
+  uint64_t lastUlStart = 0; ///< first subframe of the pending NPUSCH allocation (half-duplex DL guard)
   uint64_t lastDl;
   // Proactive Fast Uplink Grant (standalone 4th mode, distinct from the reactive
   // SR-based FUG): the eNB predicts this UE's traffic period and pushes a grant

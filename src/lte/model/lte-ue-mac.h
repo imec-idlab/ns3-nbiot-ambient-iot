@@ -159,6 +159,7 @@ public:
   void SetSrDedicated (uint32_t srIndex, uint32_t reservedSubcarriers,
                        uint32_t contentionOffset);
   void SetSrHybridContention (bool en);   ///< also contend on shared subcarriers while waiting for the reserved slot
+  void SetSrEdtContention (bool en);      ///< contention-SR attempts use the EDT NPRACH partition (data rides Msg3)
   void SetOracleBsr (bool en);            ///< oracle / ideal BSR: eNB learns the buffer instantly (no SR delay/energy)
   uint64_t GetPendingUlBytes () { return GetBufferSizeComplete (); } ///< diagnostic: pending UL buffer (in-flight/backlog at sim end)
   /// diagnostic breakdown of the pending UL buffer: tx (never sent) / retx (sent, unACKed) / status (signalling residue)
@@ -477,15 +478,23 @@ private:
   bool m_oracleBsr {false};              ///< oracle / ideal BSR: instant zero-cost buffer report to the eNB
   uint64_t MsToNextBaseOccasion (void) const;  ///< time to the next NPRACH occasion (any phase)
   void SendContentionSrPreamble (void);  ///< contend on a random shared subcarrier
+  void RestoreSrCeLevelAfterEdt (void);  ///< undo the EDT-partition m_CeLevel swap (all contention exits)
   EventId m_srContentionEvent;           ///< pending contention SR transmission event
   bool m_srPending {false};              ///< an SR is already scheduled/awaiting tx
   bool m_srContentionRa {false};         ///< a faithful hybrid-contention RA is in flight (keeps C-RNTI; retry on loss)
+  uint32_t m_srContentionFailures {0};   ///< contention attempts (RAR-timeout/Msg4-loss) for the CURRENT packet; inflates the RA-cost estimate so a UE stops dogpiling the shared pool and falls back to its guaranteed dedicated slot
+  Time m_lastDedSrTx {Seconds (-1.0)};   ///< last dedicated-SR preamble TX: its blind grant is inbound; contention holds off (grant-grace)
   uint16_t m_contentionTempRnti {0};     ///< RAR Temp C-RNTI for a contention Msg3: tag the Msg3 tx with it so the eNB receives it on the allocated Msg3 resource
   EventId m_srEvent;                     ///< pending SR transmission event
   Time m_srProhibitUntil {Seconds (0)};  ///< sr-ProhibitTimer: no new SR before this time
   uint32_t m_srProhibitPeriods {1};      ///< prohibit duration, in SR periods
   bool m_grantSessionActive {false};     ///< eNB is actively granting (post-SR); the real BSR
                                          ///< conveys the buffer and new SRs are suppressed
+  bool m_drbDataSentThisSession {false}; ///< a DRB (data, lcid>2) PDU has been transmitted since the
+                                         ///< last resume; gates RAI so it can't fire on the transient
+                                         ///< empty-BSR window during resume signalling (which would
+                                         ///< release the UE BEFORE its data -> a stale release that
+                                         ///< strands the next epoch's packet)
   uint64_t m_prevBsrTotal {0};           ///< diagnostic: last total UL buffer seen in
                                          ///< DoReportBufferStatus, to detect the 0->n arrival edge
   uint32_t m_srBootstrapBytes {50};      ///< NOT transmitted: the SR on air is a 1-bit NPRACH
@@ -517,6 +526,13 @@ private:
   // C-RNTI MAC CE (connected-UE RA keeping its identity).
   uint16_t m_raKeepCrnti {0};            ///< if !=0, this RA keeps this C-RNTI (signalled in Msg3)
   bool m_msg3HasCrntiMacCe {false};      ///< attach the C-RNTI MAC CE to the next Msg3
+  bool m_edtMsg3DataSent {false};        ///< EDT contention Msg3 carried the DATA (loser re-arms RLC txed->retx)
+  // EDT (Rel-15) on the hybrid-contention SR route: the contention preamble is sent
+  // on the SEPARATE EDT NPRACH partition (that IS the EDT request); m_CeLevel is
+  // swapped to the partition params for the transaction and restored at every exit.
+  bool m_srEdtContention {false};        ///< contention-SR attempts use the EDT partition
+  bool m_srCeLevelSwapped {false};       ///< m_CeLevel currently holds the EDT partition params
+  NbIotRrcSap::NprachParametersNb m_srCeLevelSaved {}; ///< legacy CE params to restore
   bool m_awaitingContentionResolution {false}; ///< Msg3 sent with C-RNTI MAC CE, waiting for Msg4
   EventId m_contentionResolutionTimer;   ///< mac-ContentionResolutionTimer (fails CR if no Msg4)
   uint16_t m_crniTempForCr {0};          ///< the Temporary C-RNTI to discard on successful CR

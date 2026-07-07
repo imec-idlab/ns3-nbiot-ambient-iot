@@ -783,16 +783,38 @@ LteEnbMac::CheckIfPreambleWasReceived (NbIotRrcSap::NprachParametersNb ce, bool 
       for (std::map<uint8_t, uint32_t>::iterator iter = receivedNprachs.begin ();
            iter != receivedNprachs.end (); ++iter)
         {
-          if (iter->second == 1 && m_srReservedSubcarriers > 0
+          bool onReservedSub = (m_srReservedSubcarriers > 0
               && iter->first >= m_srContentionOffset
-              && iter->first < m_srContentionOffset + m_srReservedSubcarriers)
+              && iter->first < m_srContentionOffset + m_srReservedSubcarriers);
+          if (onReservedSub)
+            {
+              if (NbIotDebugTrace ())
+                {
+                  uint32_t slotDbg = occPhase * m_srReservedSubcarriers
+                                     + (iter->first - m_srContentionOffset);
+                  auto ritDbg = m_dedicatedSrIndexToRnti.find (slotDbg);
+                  std::cout << "[ENB-DEDSR-RX] t=" << Simulator::Now ().GetSeconds ()
+                            << " sub=" << (uint32_t) iter->first << " count=" << iter->second
+                            << " occPhase=" << occPhase << " slot=" << slotDbg
+                            << " mappedRnti=" << (ritDbg != m_dedicatedSrIndexToRnti.end () ? ritDbg->second : 0)
+                            << " resolved=" << ((iter->second == 1 && ritDbg != m_dedicatedSrIndexToRnti.end ()) ? 1 : 0)
+                            << std::endl;
+                }
+            }
+          if (iter->second == 1 && onReservedSub)
             {
               uint32_t slot = occPhase * m_srReservedSubcarriers
                               + (iter->first - m_srContentionOffset);
               auto rit = m_dedicatedSrIndexToRnti.find (slot);
               if (rit != m_dedicatedSrIndexToRnti.end ())
                 {
-                  NotifyIdealUlBuffer (rit->second, 50); // identity from map -> DCI N0
+                  // Blind first grant: no volume rides a dedicated-SR preamble, so size it
+                  // to this UE's last observed packet + a BSR margin (so data + a BSR fit
+                  // and any backlog is reported), falling back to 50 B if never seen.
+                  auto szit = m_lastUlDataSize.find (rit->second);
+                  uint64_t grantBytes = (szit != m_lastUlDataSize.end ())
+                                          ? (uint64_t) szit->second + 20 : 50;
+                  NotifyIdealUlBuffer (rit->second, grantBytes); // identity from map -> DCI N0
                 }
               m_receivedNprachPreambleCount[subcarrierOffset].erase (iter->first);
               continue; // dedicated SR: no RAR
@@ -1085,7 +1107,12 @@ LteEnbMac::DoSubframeIndicationNb (uint32_t frameNo, uint32_t subframeNo)
                           }
                       }
 
-                    if ((bytesforallLc> 7) // 7 is the min TxOpportunity useful for Rlc
+                    // ">= 7": a small SDU (e.g. 2 B on SRB1 -> 6 B request) gets an AMC-
+                    // quantized grant of EXACTLY 7 B (tbs 56); the old strict "> 7" then
+                    // refused to serve it -> the "remaining" re-report re-raised the DL
+                    // request every round -> eternal N1 loop (~3/s per UE) that saturated
+                    // the UL map with HARQ bookings and ground the sim to a crawl.
+                    if ((bytesforallLc >= 7) // 7 is the min TxOpportunity useful for Rlc
                         && ((bsr->second.retxQueueSize > 0) ||
                             (bsr->second.txQueueSize > 0)))
                       {
@@ -1498,6 +1525,11 @@ LteEnbMac::DoReceivePhyPdu (Ptr<Packet> p)
   uint32_t serializedSize = p->GetSerializedSize();
   NS_LOG_INFO("LteEnbMac::DoReceivePhyPdu RNTI: " << rnti << ", Id: " << p->GetUid () << ", Size: " << frameSize << " bytes, " << serializedSize << " bytes");
 
+  // Remember this UE's last DRB (data) PDU size so the dedicated-SR blind grant can be
+  // sized to a real packet rather than a flat 50 B (see NotifyIdealUlBuffer call site).
+  if (lcid > 2 && frameSize > 0)
+    m_lastUlDataSize[rnti] = frameSize;
+
   // Proactive FUG predictor: feed this UL arrival to the scheduler. It is a no-op
   // unless the UE is in proactive mode, and it filters intra-epoch follow-up PDUs
   // so the period estimate tracks true packet arrivals (1 subframe == 1 ms).
@@ -1557,7 +1589,10 @@ LteEnbMac::DoReceivePhyPdu (Ptr<Packet> p)
   // control bytes are not a PDCP data PDU, so under heavy collision they corrupt RLC-AM
   // reassembly -> bad PDCP D/C bit (assert) and unbounded reassembly (bad_alloc). The
   // cold-start RA Msg3 (CCCH SDU, no C-RNTI MAC CE) is unaffected and still flows up.
-  if (hadCrntiMacCe)
+  // EXCEPTION -- EDT (Rel-15): an EDT-sized Msg3 carries a REAL RLC data PDU alongside
+  // the CE+DPR tags (never the fragmented control residue this guard exists for);
+  // deliver it. Only the 3-byte control-only dummy is consumed here.
+  if (hadCrntiMacCe && frameSize <= 3)
     return;
 
   std::map<uint16_t, std::map<uint8_t, LteMacSapUser *>>::iterator rntiIt =

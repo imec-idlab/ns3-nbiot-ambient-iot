@@ -446,12 +446,29 @@ LteUeMac::ContentionResolutionTimeout (void)
       NS_LOG_WARN ("Contention resolution FAILED (no Msg4) for C-RNTI=" << m_rnti);
       m_awaitingContentionResolution = false;
       m_crniTempForCr = 0;
+      RestoreSrCeLevelAfterEdt ();
+      // EDT Msg3 carried the DATA and we lost the captured collision: the RLC
+      // already emitted the PDU (txon -> txed, unACKed). Re-arm it (txed -> retx)
+      // so the retry Msg3 / reserved slot can carry it again -- otherwise it
+      // strands until t-PollRetransmit (25 s).
+      if (m_edtMsg3DataSent)
+        {
+          m_edtMsg3DataSent = false;
+          for (auto &kv : m_lcInfoMap)
+            {
+              if (kv.first > 2 && kv.second.macSapUser != nullptr)
+                {
+                  kv.second.macSapUser->NotifyHarqDeliveryFailure ();
+                }
+            }
+        }
       // Faithful hybrid-contention SR: lost the captured collision (no Msg4 for our
       // C-RNTI). The UE kept its real C-RNTI, so just keep contending at the next
       // base occasion; the dedicated reserved slot is the guaranteed floor.
       if (m_srContentionRa && m_srPending)
         {
           m_srContentionRa = false;
+          ++m_srContentionFailures;   // this packet's RA route just got costlier -> gate may peel it to dedicated
           // TS 36.321 5.1.4: back off (BACKOFF from the contention RAR's BI) before
           // re-contending so colliders that lost spread across occasions instead of
           // re-colliding in lockstep at the same next base occasion.
@@ -517,6 +534,22 @@ LteUeMac::SendDedicatedSrPreamble (void)
       m_contentionTempRnti = 0;
       m_raKeepCrnti = 0;
       m_msg5Buffer = 0;
+      // Restore the legacy partition FIRST: the reserved-subcarrier computation
+      // below reads m_CeLevel, which the abandoned EDT contention had swapped.
+      RestoreSrCeLevelAfterEdt ();
+      // Abandoning an EDT contention whose Msg3 already carried the DATA: re-arm
+      // the RLC (txed -> retx) so the reserved-slot grant below can carry it.
+      if (m_edtMsg3DataSent)
+        {
+          m_edtMsg3DataSent = false;
+          for (auto &kv : m_lcInfoMap)
+            {
+              if (kv.first > 2 && kv.second.macSapUser != nullptr)
+                {
+                  kv.second.macSapUser->NotifyHarqDeliveryFailure ();
+                }
+            }
+        }
     }
 
   // Transmit a real NPRACH preamble on this UE's reserved subcarrier. The
@@ -524,6 +557,11 @@ LteUeMac::SendDedicatedSrPreamble (void)
   // resource->UE map it holds (registered at connect). Reserved subcarrier =
   // contentionOffset + (srIndex % N_res). Preamble duration mirrors the RA path.
   uint32_t reservedSub = m_srContentionOffset + (m_srIndex % m_srReservedSubcarriers);
+  m_lastDedSrTx = Simulator::Now ();  // blind grant inbound: contention holds off (grant-grace)
+  if (NbIotDebugTrace ())
+    std::cout << "[UE-DEDSR-TX] t=" << Simulator::Now ().GetSeconds ()
+              << " rnti=" << m_rnti << " srIdx=" << m_srIndex
+              << " reservedSub=" << reservedSub << " total=" << total << std::endl;
   uint8_t  ceOffset = NbIotRrcSap::ConvertNprachSubcarrierOffset2int (m_CeLevel);
   double ts = 1000.0 / (15000.0 * 2048.0);
   double preambleGroupTime = NbIotRrcSap::ConvertNprachCpLenght2double (
@@ -535,10 +573,17 @@ LteUeMac::SendDedicatedSrPreamble (void)
                        m_cmacSapUser, NbiotEnergyModel::PowerState::RRC_CONNECTED_IDLE);
   Simulator::Schedule (MilliSeconds (time), &LteUePhySapProvider::SendNprachPreamble,
                        m_uePhySapProvider, (uint32_t) reservedSub, (uint32_t) m_rnti, ceOffset);
-  // Retry at the next dedicated occasion if no grant arrives (the DCI N0 handler
-  // clears m_srPending and cancels m_srEvent on success).
+  // Retry at this UE's OWN next dedicated occasion if no grant arrives (the DCI N0 handler
+  // clears m_srPending and cancels m_srEvent on success). Right after firing at our slot,
+  // MsToNextDedicatedOccasion() returns 0 -- the fallback must then be a FULL round-robin
+  // cycle (m_srPeriodSubframes ~1600 ms, our next real slot), NOT one NPRACH period (80 ms).
+  // The 80 ms fallback re-fired on the very next occasion (a DIFFERENT phase/UE) every 80 ms,
+  // so the "collision-free" dedicated SR collided across the whole round-robin -- the root of
+  // the dedicated-SR collisions and the delay. The hybrid contention leg (scheduled in the SR
+  // branch, self-rescheduling) runs in PARALLEL and provides the fast "keep trying" path,
+  // contending whenever the next dedicated slot is farther than a full RA.
   uint64_t toNext = MsToNextDedicatedOccasion ();
-  if (toNext == 0) toNext = NbIotRrcSap::ConvertNprachPeriodicity2int (m_CeLevel);
+  if (toNext == 0) toNext = m_srPeriodSubframes;   // our next real slot, not one 80 ms occasion
   m_srEvent = Simulator::Schedule (MilliSeconds (toNext), &LteUeMac::SendDedicatedSrPreamble, this);
 }
 
@@ -577,13 +622,50 @@ LteUeMac::SendContentionSrPreamble (void)
   // round but keep the cadence for the gaps between reserved occasions. Estimate
   // preamble->Msg4 from the same CE-level RA constants as the RA window (TS 36.321 5.1.4)
   // plus a representative Msg3+Msg4 (~64 ms typical at CE0; CR-timer worst case is 512 ms).
+  // Faithful full-RA latency (TS 36.321 5.1): sum ALL FIVE messages at this CE level,
+  // not just preamble->RAR + a flat 64. Each NPDCCH grant search costs ~one NPDCCH
+  // period; each NPUSCH transmission ~one more (Msg3/Msg5 are single-block at CE0).
+  //   Msg1 preamble tx | Msg2 RAR window | Msg3 (UL grant + tx) | Msg4 (contention
+  //   resolution PDCCH, well under the pp32 CR-timer CAP) | Msg5 (data grant + tx).
   double npdcchPeriodRa = NbIotRrcSap::ConvertNpdcchNumRepetitionsRa2int (m_CeLevel) *
                           NbIotRrcSap::ConvertNpdcchStartSfCssRa2double (m_CeLevel);
-  uint32_t preambleToRarMs =
-      (NbIotRrcSap::ConvertNumRepetitionsPerPreambleAttempt2int (m_CeLevel) >= 64 ? 41u : 4u)
-      + (uint32_t) (NbIotRrcSap::ConvertRaResponseWindowSize2int (m_rachConfigCe) * npdcchPeriodRa);
-  uint32_t fullRachLatencyMs = preambleToRarMs + 64u; // + Msg3 grant/tx + Msg4 resolution
-  if (MsToNextDedicatedOccasion () <= fullRachLatencyMs)
+  uint32_t msg1PreambleMs = (NbIotRrcSap::ConvertNumRepetitionsPerPreambleAttempt2int (m_CeLevel) >= 64 ? 41u : 4u);
+  uint32_t msg2RarMs      = (uint32_t) (NbIotRrcSap::ConvertRaResponseWindowSize2int (m_rachConfigCe) * npdcchPeriodRa);
+  uint32_t msg3Ms         = (uint32_t) (2.0 * npdcchPeriodRa);   // UL grant search + Msg3 NPUSCH tx
+  uint32_t msg4Ms         = (uint32_t) (3.0 * npdcchPeriodRa);   // contention-resolution PDCCH
+  uint32_t msg5Ms         = (uint32_t) (2.0 * npdcchPeriodRa);   // data grant search + Msg5 NPUSCH tx
+  uint32_t fullRachLatencyMs = msg1PreambleMs + msg2RarMs + msg3Ms + msg4Ms + msg5Ms;
+  // Load-aware: RA is only the fast path when it SUCCEEDS. Each failed contention for
+  // this packet (RAR timeout or Msg4/CR loss) multiplies the real cost of the RA route.
+  // Once the honest estimate exceeds the wait for this UE's GUARANTEED collision-free
+  // dedicated slot, stop dogpiling the shared pool and let the (already-scheduled,
+  // self-retrying) dedicated preamble serve it -- TS 36.321 5.1.5 reserved SR is the
+  // floor. This is what keeps the 6-tone pool from cascading at high density: colliding
+  // UEs peel off to their reserved slots instead of re-colliding indefinitely.
+  uint64_t estimatedRaMs = (uint64_t) fullRachLatencyMs * (m_srContentionFailures + 1);
+  uint64_t toNextDedMs = MsToNextDedicatedOccasion ();
+  bool timeSaysContend = toNextDedMs > estimatedRaMs;
+  // Grant-grace: the reserved preamble just fired and its blind grant is inbound
+  // (typ. 100-300 ms under load). Re-evaluating 80 ms later, the wait has wrapped
+  // to the NEXT cycle and looks huge -- contending then races the grant, and the
+  // stray preamble resurrects the just-served session (ghost resume: UE dangles
+  // awake past its PSM sleep and browns out at the next epoch wave).
+  bool grantPending = (Simulator::Now () - m_lastDedSrTx) < MilliSeconds (500);
+  // Energy-aware admission: a capacitor UE only gambles on the shared pool if its
+  // remaining charge can fund a full LOSING round above the brown-out floor
+  // (preamble + RAR listen + EDT-Msg3 data TX + CR listen, with margin). An
+  // energy-poor UE keeps its guaranteed single-transmission reserved slot.
+  bool energyOk = !timeSaysContend || m_cmacSapUser->HasEnergyForContention ();
+  if (NbIotDebugTrace ())
+    std::cout << "[SR-GATE] t=" << Simulator::Now ().GetSeconds () << " imsi=" << m_imsi
+              << " waitMs=" << toNextDedMs << " estMs=" << estimatedRaMs
+              << " fails=" << m_srContentionFailures
+              << " decision=" << (!timeSaysContend ? "WAIT-SLOT"
+                                  : grantPending    ? "WAIT-GRANT"
+                                  : energyOk        ? "CONTEND"
+                                                    : "WAIT-ENERGY")
+              << std::endl;
+  if (!timeSaysContend || grantPending || !energyOk)
     {
       m_srContentionEvent = Simulator::Schedule (
           MilliSeconds (MsToNextBaseOccasion ()),
@@ -606,8 +688,65 @@ LteUeMac::SendContentionSrPreamble (void)
   m_srContentionRa = true;                      // RAR-timeout / CR-loss => retry
   m_preambleTransmissionCounter = 0;
   m_preambleTransmissionCounterCe = 0;
+  // EDT (Rel-15) on the contention route: transmit the preamble on the SEPARATE EDT
+  // NPRACH partition -- the partition itself IS the EDT request (TS 36.321), so the
+  // eNB's EDT scan returns an isEdt RAR with an edt-TBS Msg3 grant and the DATA rides
+  // Msg3 (with the C-RNTI MAC CE + DPR) instead of a control-only dummy. m_CeLevel is
+  // swapped to the partition params for this transaction and restored at EVERY exit
+  // (win / CR-loss / RAR-timeout / reserved-slot abandonment).
+  if (m_srEdtContention && m_msg5Buffer > 0 && (m_msg5Buffer + 10) * 8 <= 1000)
+    {
+      NbIotRrcSap::NprachParametersNbR14 edtP =
+          m_radioResourceConfig.nprachConfigR15.nprachParameterListEdt.nprachParametersNb0;
+      if (!m_srCeLevelSwapped)
+        {
+          m_srCeLevelSaved = m_CeLevel;
+          m_srCeLevelSwapped = true;
+        }
+      m_edt = true;
+      m_CeLevel.coverageEnhancementLevel = edtP.coverageEnhancementLevel;
+      m_CeLevel.nprachPeriodicity = edtP.nprachPeriodicity;
+      m_CeLevel.nprachStartTime = edtP.nprachStartTime;
+      m_CeLevel.nprachSubcarrierOffset = edtP.nprachSubcarrierOffset;
+      m_CeLevel.nprachNumSubcarriers = edtP.nprachNumSubcarriers;
+      m_CeLevel.nprachSubcarrierMsg3RangeStart = edtP.nprachSubcarrierMsg3RangeStart;
+      m_CeLevel.npdcchNumRepetitionsRA = edtP.npdcchNumRepetitionsRA;
+      m_CeLevel.npdcchStartSfCssRa = edtP.npdcchStartSfCssRa;
+      m_CeLevel.npdcchOffsetRa = edtP.npdcchOffsetRa;
+      m_raPreambleId = m_raPreambleUniformVariable->GetInteger (
+          0, NbIotRrcSap::ConvertNprachNumSubcarriers2int (m_CeLevel) - 1);
+      // Align to the EDT partition's OWN NPRACH occasions (period/start differ from
+      // the legacy partition whose cadence scheduled this call).
+      uint64_t nowMs = 10ull * (m_frameNo - 1) + (m_subframeNo - 1);
+      uint64_t periodMs = NbIotRrcSap::ConvertNprachPeriodicity2int (m_CeLevel);
+      uint64_t startMs = NbIotRrcSap::ConvertNprachStartTime2int (m_CeLevel);
+      uint64_t phaseMs = (periodMs - ((nowMs + periodMs - startMs) % periodMs)) % periodMs;
+      if (NbIotDebugTrace ())
+        std::cout << "[SR-EDT-TX] t=" << Simulator::Now ().GetSeconds () << " rnti=" << m_rnti
+                  << " preamble=" << (uint32_t) m_raPreambleId << " occInMs=" << phaseMs
+                  << " vol=" << m_msg5Buffer << std::endl;
+      Simulator::Schedule (MilliSeconds (phaseMs), &LteUeMac::SendRaPreambleNb, this, true);
+      return;
+    }
   m_raPreambleId = m_raPreambleUniformVariable->GetInteger (0, m_srContentionOffset - 1);
   SendRaPreambleNb (true);
+}
+
+void
+LteUeMac::RestoreSrCeLevelAfterEdt (void)
+{
+  if (m_srCeLevelSwapped)
+    {
+      m_CeLevel = m_srCeLevelSaved;
+      m_srCeLevelSwapped = false;
+      m_edt = false;
+    }
+}
+
+void
+LteUeMac::SetSrEdtContention (bool en)
+{
+  m_srEdtContention = en;
 }
 
 
@@ -735,6 +874,8 @@ LteUeMac::DoTransmitPdu (LteMacSapProvider::TransmitPduParameters params)
   uint16_t txRnti = (m_msg3HasCrntiMacCe && m_contentionTempRnti != 0)
                         ? m_contentionTempRnti : params.rnti;
   LteRadioBearerTag radioTag (txRnti, params.lcid, 0 /* UE works in SISO mode*/);
+  if (params.lcid > 2)
+    m_drbDataSentThisSession = true;   // real DRB data went out -> RAI may now signal on drain
   if (NbIotDebugTrace () && params.lcid > 2)
     std::cout << "[UE-TX] t=" << Simulator::Now ().GetSeconds () << " rnti=" << params.rnti
               << " txRnti=" << txRnti << " lcid=" << (uint32_t) params.lcid
@@ -743,10 +884,18 @@ LteUeMac::DoTransmitPdu (LteMacSapProvider::TransmitPduParameters params)
   BufferStatusReportTag bsrTag;
   uint64_t bsr =0;
   //DoSetTransmissionScheduled(false);
-  if(m_msg5Buffer > 0){
+  // Also enter when a contention Msg3 is pending but the volume snapshot is EMPTY
+  // (0 at RA trigger, or consumed by an interleaved transmission during the
+  // RAR->Msg3 delay). Without this, that Msg3 went out with NO DPR and NO C-RNTI
+  // MAC CE: the eNB could not consume it at the MAC (needs the CE) and fed the
+  // 3-byte dummy to RRC as a CCCH message, whose ASN.1 deserializer decoded the
+  // zeros as type 0 (Reestablishment, never sent in NB-IoT) and over-read the
+  // buffer -> sim abort. It also wasted the whole RA round (identity unresolved).
+  if(m_msg5Buffer > 0 || (m_msg3HasCrntiMacCe && m_raKeepCrnti != 0)){
     // We are just about to send MSG3, add DPR Element for MSG5 (potentially CIoT-Opt)
     //std::cout << " set payload" << std::endl;
-    uint8_t dataVolumeIndex = DataVolumeDPR::BufferSize2DVId(m_msg5Buffer);
+    uint64_t msg3Volume = (m_msg5Buffer > 0) ? m_msg5Buffer : GetBufferSizeComplete ();
+    uint8_t dataVolumeIndex = DataVolumeDPR::BufferSize2DVId(msg3Volume);
     m_msg5Buffer = 0;
     m_nextIsMsg5 = true;
     dprTag.SetDataVolumeValue(dataVolumeIndex);
@@ -875,7 +1024,8 @@ LteUeMac::DoReportBufferStatus (LteMacSapProvider::ReportBufferStatusParameters 
       std::cout << "[ARRIVAL] t=" << Simulator::Now ().GetSeconds () << " rnti=" << m_rnti
                 << " total=" << total << " prev=" << m_prevBsrTotal
                 << " fresh=" << freshArrival << " sessionActiveAtArrival=" << m_grantSessionActive
-                << std::endl;
+                << " srPending=" << m_srPending << " suspended=" << m_suspended
+                << " oracle=" << (m_idealBsrCb.IsNull()?0:1) << std::endl;
     }
     m_prevBsrTotal = total;
     if (total == 0)
@@ -884,7 +1034,12 @@ LteUeMac::DoReportBufferStatus (LteMacSapProvider::ReportBufferStatusParameters 
       // the end of an active grant session and no further UL/DL data is expected
       // (single-packet-per-epoch). Signal the AS RAI MAC CE so the eNB releases
       // immediately, instead of waiting for the data-inactivity timer.
-      if (m_grantSessionActive && m_raiActivation && m_rnti != 0 && !m_raiCb.IsNull ())
+      // Only signal RAI once the UE has actually sent its DRB DATA this session. During a
+      // resume the signalling PDUs (Msg3/resume-complete) drain first, so the BSR hits 0
+      // BEFORE the data is reported -- firing RAI here would release the UE pre-data (a
+      // stale release that later strands the next packet). m_grantSessionActive is already
+      // true from the signalling grant, so it can't distinguish this; m_drbDataSentThisSession does.
+      if (m_grantSessionActive && m_drbDataSentThisSession && m_raiActivation && m_rnti != 0 && !m_raiCb.IsNull ())
       {
         m_raiCb (m_rnti);
       }
@@ -909,15 +1064,18 @@ LteUeMac::DoReportBufferStatus (LteMacSapProvider::ReportBufferStatusParameters 
         std::cout << "[ORACLE-STRANDED] t=" << Simulator::Now ().GetSeconds ()
                   << " rnti=" << m_rnti << " total=" << total << std::endl;
     }
-    else if (!m_srPending && !m_grantSessionActive && !m_suspended
+    else if (!m_srPending && !m_suspended
+             && (!m_grantSessionActive || newUngrantedData)
              && Simulator::Now () >= m_srProhibitUntil
              && !(m_proactiveFug && m_fugBootstrapEpochs >= kProactiveBootstrapEpochs))
     {
-      // Proactive FUG (4th mode): once the eNB has learned this UE's period it
-      // pushes a predicted grant, so the UE sends NO scheduling request -- the
-      // guard above disables the SR subsystem in steady state. Only the first
-      // kProactiveBootstrapEpochs epochs still fire a reactive SR, to give the
-      // eNB the >=2 arrivals it needs before it can predict.
+      // Fire the SR on genuinely NEW data (newUngrantedData: buffer grew) EVEN IF the grant
+      // session is flagged active. m_grantSessionActive is set on any grant and cleared only
+      // when the buffer drains to EXACTLY 0; a single strand (e.g. a UE suspended with a
+      // trailing bootstrap PDU still pending) leaves the buffer > 0, so the latch sticks true
+      // forever and the raw !m_grantSessionActive guard would block the SR for EVERY later
+      // packet -> the UE accumulates and never transmits (observed: hybridsr backlog cascade,
+      // buffer 87->399 over epochs, 7 s delay). Mirrors the oracle-branch fire-on-growth fix.
       if (m_proactiveFug)
         m_fugBootstrapEpochs++;
       // !m_suspended: while RRC-suspended (PSM/eDRX) the UE must NOT fire a
@@ -925,6 +1083,7 @@ LteUeMac::DoReportBufferStatus (LteMacSapProvider::ReportBufferStatusParameters 
       // IDLE_WAIT_MIB -> SR-resume). Firing here would re-wake a just-suspended
       // UE and spin the suspend<->wake loop.
       m_srPending = true;
+      m_srContentionFailures = 0;   // fresh packet: start the RA-cost estimate from a single clean attempt
       if (m_srPreamble)
         {
           // Faithful dedicated SR: transmit a real NPRACH preamble on this UE's
@@ -952,6 +1111,20 @@ LteUeMac::DoReportBufferStatus (LteMacSapProvider::ReportBufferStatusParameters 
           m_srEvent = Simulator::Schedule (MilliSeconds (dedicatedWait),
                                            &LteUeMac::SendSchedulingRequest, this);
         }
+    }
+    else if (newUngrantedData && total > 0 && !m_oracleBsr)
+    {
+      // Diagnostic: new UL data present but NO branch requested a grant. Print WHICH
+      // guard blocked the SR (the hybridsr imsi=64 strand: UE CONNECTED, direct-sent
+      // to the DRB, but never re-announced via SR -> parked eNB never re-grants).
+      if (NbIotDebugTrace ())
+        std::cout << "[SR-SKIPPED] t=" << Simulator::Now ().GetSeconds ()
+                  << " rnti=" << m_rnti << " total=" << total
+                  << " srPending=" << m_srPending << " suspended=" << m_suspended
+                  << " grantSession=" << m_grantSessionActive
+                  << " prohibitInMs=" << (Simulator::Now () >= m_srProhibitUntil ? 0.0
+                         : (double)(m_srProhibitUntil - Simulator::Now ()).GetMilliSeconds ())
+                  << std::endl;
     }
   }
 }
@@ -1270,7 +1443,18 @@ LteUeMac::RecvRaResponseNb (NbIotRrcSap::RarPayload raResponse)
   }
   m_cmacSapUser->NotifyRandomAccessSuccessful (edt);
 
-  if (m_msg3HasCrntiMacCe)
+  // EDT (Rel-15) on the hybrid-contention SR route: an EDT-sized Msg3 grant
+  // (tbs > 88) carries the DATA itself (plus the C-RNTI MAC CE + DPR attached in
+  // DoTransmitPdu) -- fall through to the data-LC txop path below instead of the
+  // 3-byte control dummy. The grant is large enough that nothing fragments (the
+  // historical data-on-tiny-Msg3 deserializer crash does not apply). If this UE
+  // loses the captured collision, the CR-timeout path re-arms the RLC via
+  // NotifyHarqDeliveryFailure (txed->retx) so the data is not stranded.
+  if (m_msg3HasCrntiMacCe && edt)
+    {
+      m_edtMsg3DataSent = true;
+    }
+  else if (m_msg3HasCrntiMacCe)
     {
       // Faithful hybrid-contention Msg3: a CONTROL-only Msg3. Build a minimal MAC PDU
       // on which DoTransmitPdu attaches the DPR (BSR) + C-RNTI MAC CE and tags the
@@ -1400,8 +1584,10 @@ LteUeMac::RaResponseTimeoutNb (bool contention)
       m_raKeepCrnti = 0;
       m_msg5Buffer = 0;
       m_msg3HasCrntiMacCe = false;
+      RestoreSrCeLevelAfterEdt ();   // no RAR: leave the EDT partition before retrying/peeling
       if (m_srPending)
         {
+          ++m_srContentionFailures;   // no RAR this occasion -> RA route costlier; gate may peel this UE to dedicated
           // TS 36.321 5.1.4: back off (BACKOFF from the contention RAR's BI) before
           // re-contending so colliders that lost spread across occasions instead of
           // re-colliding in lockstep.
@@ -1711,6 +1897,7 @@ LteUeMac::DoNotifyConnectionSuccessful ()
   m_uePhySapProvider->NotifyConnectionSuccessful ();
   m_listenToSearchSpaces = true;
   m_suspended = false;   // resumed/connected: the MAC SR machine is live again
+  m_drbDataSentThisSession = false;  // new session: RAI must wait until this session's DRB data is sent
   // A fresh resume/connection starts NO active grant session. m_grantSessionActive
   // latches true (it is only cleared by a total==0 BSR, which is unreliable), so a
   // stale value here would block the SR-schedule branch in DoReportBufferStatus --
@@ -2101,6 +2288,9 @@ LteUeMac::DoReceiveLteControlMessage (Ptr<LteControlMessage> msg)
       // window so genuinely new data can request again immediately.
       m_srPending = false;
       m_srContentionRa = false;          // faithful contention RA (if any) is resolved
+      m_srContentionFailures = 0;        // packet served: reset the RA-cost inflation for the next one
+      m_edtMsg3DataSent = false;         // EDT Msg3 (if any) won: its data was delivered
+      RestoreSrCeLevelAfterEdt ();       // back to the legacy partition for the SR machine
       // A grant addressed to our C-RNTI IS the contention resolution (TS 36.321
       // 5.1.5): stop the contention-resolution timer and clear the awaiting state so
       // the buffered data is sent on this grant rather than the UE retrying/timing out.
@@ -2114,6 +2304,10 @@ LteUeMac::DoReceiveLteControlMessage (Ptr<LteControlMessage> msg)
       // periodic-BSR path), not via further SRs. Stays active until the buffer
       // drains (see DoReportBufferStatus).
       m_grantSessionActive = true;
+      // If this UE is SR-resuming from PSM (it announced via its preamble and the RRC is
+      // held in a resuming state), this grant is the eNB's confirmation that it resynced
+      // -> tell the RRC to flip to CONNECTED now. No-op for a normal connected-mode grant.
+      m_cmacSapUser->NotifySrResumeConnected ();
       // drx-InactivityTimer (TS 36.321 5.7): a grant extends Active Time, so the
       // cDRX gate keeps monitoring through the rest of this session.
       m_cdrxInactivityUntil = Simulator::Now () + MilliSeconds (m_cdrxInactivityMs);
@@ -2550,11 +2744,21 @@ LteUeMac::DoSubframeIndication (uint32_t frameNo, uint32_t subframeNo)
       // capture loser re-RACHing deep in the sim), it MUST keep monitoring NPDCCH. Without
       // these, a UE resuming while cDRX is engaged DRX-sleeps through its Msg4, never
       // confirms, and the resume times out/re-parks forever (observed: one UE stuck).
+      // RLC-AM ARQ gate: outstanding sent-but-unACKed PDUs hold Active Time -- the
+      // UE keeps listening for the eNB's status PDU (ACK) before it may DRX-sleep.
+      // Sleeping on pending ARQ state loses the ACK, and t-PollRetransmit later
+      // forces a duplicate retransmission the eNB drops below its receive window.
+      bool amUnacked = false;
+      for (auto &kv : m_ulBsrReceived)
+        {
+          if (kv.second.unackedSize > 0) { amUnacked = true; break; }
+        }
       bool activeTime = m_transmissionScheduled
                         || GetBufferSizeComplete () > 0
                         || Simulator::Now () < m_cdrxInactivityUntil
                         || m_waitingForRaResponse
-                        || m_awaitingContentionResolution;
+                        || m_awaitingContentionResolution
+                        || amUnacked;
       cdrxSleep = !inOnDuration && !activeTime;
       if (cdrxSleep)
         {
@@ -2637,6 +2841,33 @@ LteUeMac::DoNotifyEdrx(){
   m_grantSessionActive = false;
   m_srEvent.Cancel ();
   m_srContentionEvent.Cancel ();
+  // Kill any IN-FLIGHT contention RA too (preamble already on the air): the event
+  // cancellations above stop FUTURE attempts, but a RAR arriving after this
+  // suspend would still be processed (m_waitingForRaResponse) and re-animate the
+  // just-released session -- a ghost resume with nothing to send that dangles
+  // until the next inactivity release and misses its PSM sleep (observed: ~20
+  // UEs/run at duty 0.72 browning out at the next epoch wave).
+  m_waitingForRaResponse = false;
+  m_noRaResponseReceivedEvent.Cancel ();
+  m_awaitingContentionResolution = false;
+  m_contentionResolutionTimer.Cancel ();
+  m_srContentionRa = false;
+  m_msg3HasCrntiMacCe = false;
+  m_contentionTempRnti = 0;
+  m_raKeepCrnti = 0;
+  m_msg5Buffer = 0;
+  RestoreSrCeLevelAfterEdt ();
+  if (m_edtMsg3DataSent)
+    {
+      m_edtMsg3DataSent = false;
+      for (auto &kv : m_lcInfoMap)
+        {
+          if (kv.first > 2 && kv.second.macSapUser != nullptr)
+            {
+              kv.second.macSapUser->NotifyHarqDeliveryFailure ();
+            }
+        }
+    }
   // NOTE: do NOT clear m_ulBsrReceived here. The spurious-SR-on-suspend loop is
   // already prevented by the m_suspended guard in SendSchedulingRequest/the SR
   // gate. Clearing the buffer view orphans data that is still in the RLC when the
@@ -2653,6 +2884,28 @@ LteUeMac::DoNotifyPsm(){
   m_grantSessionActive = false;
   m_srEvent.Cancel ();
   m_srContentionEvent.Cancel ();
+  // See DoNotifyEdrx: kill any IN-FLIGHT contention RA (ghost-resume guard).
+  m_waitingForRaResponse = false;
+  m_noRaResponseReceivedEvent.Cancel ();
+  m_awaitingContentionResolution = false;
+  m_contentionResolutionTimer.Cancel ();
+  m_srContentionRa = false;
+  m_msg3HasCrntiMacCe = false;
+  m_contentionTempRnti = 0;
+  m_raKeepCrnti = 0;
+  m_msg5Buffer = 0;
+  RestoreSrCeLevelAfterEdt ();
+  if (m_edtMsg3DataSent)
+    {
+      m_edtMsg3DataSent = false;
+      for (auto &kv : m_lcInfoMap)
+        {
+          if (kv.first > 2 && kv.second.macSapUser != nullptr)
+            {
+              kv.second.macSapUser->NotifyHarqDeliveryFailure ();
+            }
+        }
+    }
   // See DoNotifyEdrx: do NOT clear m_ulBsrReceived (orphans RLC-pending data).
   m_freshUlBsr = false;
 }

@@ -68,9 +68,11 @@ public:
   virtual void SetTemporaryCellRnti (uint16_t rnti);
   virtual void NotifyRandomAccessSuccessful (bool edt);
   virtual void NotifyRandomAccessFailed ();
+  virtual void NotifySrResumeConnected ();
   virtual void NotifyEnergyState(NbiotEnergyModel::PowerState state);
   virtual bool GetEdtEnabled();
   virtual NbiotEnergyModel::PowerState GetEnergyState();
+  virtual bool HasEnergyForContention ();
 
 private:
   LteUeRrc* m_rrc; ///< the RRC class
@@ -101,6 +103,12 @@ UeMemberLteUeCmacSapUser::NotifyRandomAccessFailed ()
 }
 
 void
+UeMemberLteUeCmacSapUser::NotifySrResumeConnected ()
+{
+  m_rrc->DoNotifySrResumeConnected ();
+}
+
+void
 UeMemberLteUeCmacSapUser::NotifyEnergyState(NbiotEnergyModel::PowerState state)
 {
   m_rrc->DoNotifyEnergyState(state);
@@ -110,6 +118,12 @@ NbiotEnergyModel::PowerState
 UeMemberLteUeCmacSapUser::GetEnergyState()
 {
   return m_rrc->DoGetEnergyState();
+}
+
+bool
+UeMemberLteUeCmacSapUser::HasEnergyForContention ()
+{
+  return m_rrc->DoHasEnergyForContention ();
 }
 
 bool
@@ -939,7 +953,6 @@ LteUeRrc::DoNotifyRandomAccessSuccessful (bool edt)
 
             std::vector<Ptr<Packet>>::iterator next_packet = m_packetStored.begin();
             uint32_t msg5size = 14; // tbd
-            uint32_t size_left_to_fill = 1500-msg5size; // use actual Resume complete size later
             if (edt)
               {
                 // UP-EDT: the user data rides Msg3 (below), so Msg5 carries only the
@@ -948,7 +961,7 @@ LteUeRrc::DoNotifyRandomAccessSuccessful (bool edt)
               }
             else if (!m_persistentGrant)
               {
-                // Data-aware DPR (TS 36.321 5.4.6) for the contention RA scheme: 
+                // Data-aware DPR (TS 36.321 5.4.6) for the contention RA scheme:
                 uint32_t pendingData = 0;
                 for (std::vector<Ptr<Packet>>::iterator it = m_packetStored.begin ();
                      it != m_packetStored.end (); ++it)
@@ -957,11 +970,27 @@ LteUeRrc::DoNotifyRandomAccessSuccessful (bool edt)
                   }
                 m_cmacSapProvider.at(0)->SetMsg5Buffer(msg5size + pendingData);
               }
-            else if (m_cIotOpt && size_left_to_fill > 0 && size_left_to_fill - (*next_packet)->GetSize() > 0){
-              m_cmacSapProvider.at(0)->SetMsg5Buffer(msg5size+(*next_packet)->GetSize());
-            }else{
-              m_cmacSapProvider.at(0)->SetMsg5Buffer(msg5size);
-            }
+            else
+              {
+                // Data-aware DPR for persistent-grant resumes too (hybridsr / dsr).
+                // Previously this reported only the 14 B signalling size, so the eNB
+                // under-granted and the packet fragmented across grants (the mid-packet
+                // transient that fires RAI early -> next-packet strand). Report the REAL
+                // pending UL volume. The data may sit in m_packetStored (RRC) OR already in
+                // the MAC/RLC buffer, so take the max of both; a diagnostic prints which.
+                uint32_t pendingData = 0;
+                for (std::vector<Ptr<Packet>>::iterator it = m_packetStored.begin ();
+                     it != m_packetStored.end (); ++it)
+                  pendingData += (*it)->GetSize ();
+                uint32_t macBuf = (m_cmacSapProvider.at (0) != 0)
+                                    ? m_cmacSapProvider.at (0)->GetUlBufferSize () : 0;
+                uint32_t vol = pendingData > macBuf ? pendingData : macBuf;
+                if (NbIotDebugTrace ())
+                  std::cout << "[UE-RESUME-DPR] t=" << Simulator::Now ().GetSeconds ()
+                            << " imsi=" << m_imsi << " pktStored=" << pendingData
+                            << " macBuf=" << macBuf << " -> msg5=" << vol << std::endl;
+                m_cmacSapProvider.at(0)->SetMsg5Buffer(vol);   // just the real data volume (no +14 resume-complete)
+              }
 
             NbIotRrcSap::RrcConnectionResumeRequestNb msg;
             msg.resumeIdentity = m_resumeId;
@@ -1002,6 +1031,21 @@ LteUeRrc::DoNotifyRandomAccessSuccessful (bool edt)
         m_cmacSapProvider.at (0)->NotifyConnectionSuccessful (); //RA successful during handover
         m_handoverEndOkTrace (m_imsi, m_cellId, m_rnti);
       }
+      break;
+
+    case IDLE_CONNECTING:
+      if (m_srResumePending){
+        // SR-resume via CONTENTION: the UE announced on a shared RA subcarrier and got a
+        // RAR. Contention Msg3 is built/sent at the MAC (C-RNTI MAC CE + data DPR, keeping
+        // the real C-RNTI) -- the RRC has nothing to do here and stays resuming until the
+        // eNB's Msg4/N0 grant flips it to CONNECTED (DoNotifySrResumeConnected). Ignore the
+        // RAR at the RRC, exactly as the CONNECTED_NORMALLY contention-SR case below does.
+        NS_LOG_DEBUG ("UE IMSI=" << m_imsi
+                      << " DoNotifyRandomAccessSuccessful: SR-resume contention RAR"
+                      << " (MAC handles Msg3), staying IDLE_CONNECTING");
+        break;
+      }
+      NS_FATAL_ERROR ("unexpected event in state " << ToString (m_state));
       break;
 
     case IDLE_SUSPEND_EDRX:
@@ -1066,9 +1110,46 @@ LteUeRrc::DoNotifyRandomAccessFailed ()
       }
       break;
 
+    case IDLE_SUSPEND_EDRX:
+    case IDLE_SUSPEND_PSM:
+    case CONNECTED_NORMALLY:
+    case IDLE_CONNECTING:
+      if (m_persistentGrant){
+        // Hybrid SR: a contention-RA attempt (routed from the dedicated-SR retry, or a
+        // hybrid-contention SR) reported RA-failed while the UE is connected / resuming.
+        // Benign under persistent grant -- the MAC keeps retrying the SR (dedicated slot +
+        // contention) and a grant will arrive; the packet is not lost. Ignore, don't fatal.
+        // Mirrors the persistent-grant handling in DoNotifyRandomAccessSuccessful.
+        NS_LOG_WARN ("UE IMSI=" << m_imsi
+                     << " DoNotifyRandomAccessFailed: ignoring RA-failed in state="
+                     << ToString (m_state) << " (hybrid SR under persistent grant)");
+        break;
+      }
+      NS_FATAL_ERROR ("unexpected event in state " << ToString (m_state));
+      break;
+
     default:
       NS_FATAL_ERROR ("unexpected event in state " << ToString (m_state));
       break;
+    }
+}
+
+void
+LteUeRrc::DoNotifySrResumeConnected ()
+{
+  // A UL grant landed for an in-progress SR-resume: the eNB resolved the UE's announce
+  // preamble, resynced the parked context, and granted -- so it is now safe to declare
+  // CONNECTED. Guarded to only act while actually SR-resuming (IDLE_CONNECTING with
+  // m_srResumePending); a grant in any other state is a normal connected-mode grant and is
+  // ignored here.
+  if (m_srResumePending && m_state == IDLE_CONNECTING)
+    {
+      m_srResumePending = false;
+      SwitchToState (CONNECTED_NORMALLY);
+      if (NbIotDebugTrace ())
+        std::cout << "[UE-SRRESUME-CONNECTED] t=" << Simulator::Now ().GetSeconds ()
+                  << " imsi=" << m_imsi << " rnti=" << m_rnti
+                  << " (grant landed -> CONNECTED)" << std::endl;
     }
 }
 
@@ -1322,9 +1403,28 @@ LteUeRrc::DoRecvMasterInformationBlockNb (uint16_t cellId,
     {
     case IDLE_WAIT_MIB:
       if(m_resumePending){
-        if (m_persistentGrant && m_rnti != 0) {
-          // FUG (Model 1): the MIB re-acquisition above is the REAL PSM-exit
-          // re-sync (DL timing/SFN). 
+        if (m_persistentGrant && m_rnti != 0 && !m_proactiveFug) {
+          // Faithful SR-resume (hybridsr / dedicated SR). The MIB re-acquisition above is
+          // the DL-timing re-sync, but we do NOT declare CONNECTED here (that is the
+          // phantom reconnect that desyncs from the eNB, which has parked this UE). Ready
+          // the MAC (un-suspend + SR machine + NPDCCH monitoring) and queue the data so the
+          // MAC ANNOUNCES via its dedicated-SR preamble on the reserved occasion -- or
+          // contends on the RA pool if that occasion is too far (SendContentionSrPreamble's
+          // existing decision). The RRC stays in a resuming state and flips to CONNECTED
+          // only when the eNB's grant lands (DoNotifySrResumeConnected) -- i.e. once the eNB
+          // has demonstrably resynced. Queuing to RLC is safe: RLC-AM advances its SN only
+          // on transmission (on that grant, when both sides agree), not on enqueue.
+          m_resumePending = false;
+          m_srResumePending = true;
+          SwitchToState (IDLE_CONNECTING);
+          m_cmacSapProvider.at(0)->NotifyConnectionSuccessful();  // MAC: un-suspend + SR + monitor
+          while (!m_packetStored.empty()) {
+            SendDataNb (m_packetStored.front(), 1);               // -> DRB RLC (queued; fires the SR)
+            m_packetStored.erase (m_packetStored.begin());
+          }
+        } else if (m_persistentGrant && m_rnti != 0) {
+          // Non-SR persistent grant (proactiveFug): the eNB pushes a predicted grant onto
+          // the retained context, so the fast reconnect is correct here.
           m_resumePending = false;
           SwitchToState (CONNECTED_NORMALLY);
           m_cmacSapProvider.at(0)->NotifyConnectionSuccessful();
@@ -4318,6 +4418,28 @@ LteUeRrc::DoNotifyEnergyState(NbiotEnergyModel::PowerState state){
 NbiotEnergyModel::PowerState
 LteUeRrc::DoGetEnergyState(){
   return m_energyModel.DoGetState();
+}
+
+bool
+LteUeRrc::DoHasEnergyForContention ()
+{
+  // Energy-aware contention admission (capacitor-powered UE): can the remaining
+  // charge fund one full LOSING contention round above the brown-out floor?
+  //   E_attempt = P_ul x (preamble ~6.6 ms + EDT-Msg3 data TX ~32 ms)
+  //             + P_dl x (RAR window ~276 ms + contention-resolution window ~512 ms)
+  // MARGIN x E_attempt must fit in the headroom (margin 2.0: one funded retry).
+  // If thresholds are unconfigured (brownoutJ == 0, brown-out gating disabled)
+  // the gate is permissive -- energy is not modeled as scarce in that setup.
+  const double kPreambleS = 0.0066;
+  const double kEdtMsg3S  = 0.032;
+  const double kRarWinS   = 0.276;
+  const double kCrWinS    = 0.512;
+  const double kMargin    = 2.0;
+  double pUl = m_energyModel.GetModule ().GetUplinkPower ();
+  double pDl = m_energyModel.GetModule ().GetDownlinkPower ();
+  double eAttempt = pUl * (kPreambleS + kEdtMsg3S) + pDl * (kRarWinS + kCrWinS);
+  double headroom = m_energyModel.GetEnergyRemaining () - m_energyModel.GetBrownoutJ ();
+  return headroom > kMargin * eAttempt;
 }
 
 void LteUeRrc::AttachSuspendedNb(uint64_t resumeId, uint16_t cellid, uint32_t dlEarfcn, LteRrcSap::RadioResourceConfigDedicated rrcd, NbIotRrcSap::SystemInformationBlockType1Nb sib1, NbIotRrcSap::SystemInformationNb si)

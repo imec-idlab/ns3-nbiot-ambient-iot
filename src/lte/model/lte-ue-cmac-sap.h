@@ -195,9 +195,29 @@ public:
    */
   virtual void NotifyRandomAccessFailed () = 0;
 
+  /**
+   * Notify the RRC that a UL grant landed for an in-progress SR-resume (hybridsr /
+   * dedicated SR waking from PSM). The UE announced via its dedicated-SR preamble (or
+   * contention RA) and stayed in a resuming state; this grant is the eNB's confirmation
+   * that it has resynced, so the RRC now transitions to CONNECTED_NORMALLY. Deferring the
+   * CONNECTED transition to the grant (rather than declaring it up front on wake) keeps
+   * the UE faithful to the eNB and closes the phantom-reconnect desync window.
+   */
+  virtual void NotifySrResumeConnected () = 0;
+
   virtual void NotifyEnergyState(NbiotEnergyModel::PowerState state)= 0;
 
   virtual NbiotEnergyModel::PowerState GetEnergyState() = 0;
+
+  /**
+   * Energy-aware contention admission (capacitor-powered UE): true iff the
+   * remaining charge can fund at least one full LOSING contention round
+   * (preamble TX + RAR-window listen + EDT-Msg3 data TX + CR-window listen)
+   * above the brown-out floor, with margin. An energy-poor UE must not gamble
+   * on the shared pool -- its reserved SR slot is the guaranteed,
+   * single-transmission (energy-optimal) path.
+   */
+  virtual bool HasEnergyForContention () = 0;
 
   virtual bool GetEdtEnabled() = 0;
 

@@ -432,6 +432,8 @@ private:
   void DoNotifyRandomAccessSuccessful (bool edt);
   /// Notify random access failed function
   void DoNotifyRandomAccessFailed ();
+  /// Notify that a UL grant landed for an in-progress SR-resume -> transition to CONNECTED
+  void DoNotifySrResumeConnected ();
 
   // LTE AS SAP methods
   /**
@@ -1412,6 +1414,7 @@ private:
 
   uint64_t m_resumeId;
   bool m_resumePending;
+  bool m_srResumePending {false};   ///< SR-resume in progress: announced via preamble, awaiting the eNB grant to flip -> CONNECTED
   bool m_enablePSM;
   bool m_enableEDRX;
   bool m_useEdtPreamble;
@@ -1446,6 +1449,8 @@ public:
   bool DoGetEdtEnabled();
 
   NbiotEnergyModel::PowerState DoGetEnergyState();
+
+  bool DoHasEnergyForContention (); ///< energy-aware contention admission (see lte-ue-cmac-sap.h)
 
   uint16_t m_numberOfComponentCarriers;
   void SetLogDir(std::string dirname);

@@ -76,6 +76,11 @@ public:
     uint32_t retxQueueSize;  /**<  the current size of the RLC retransmission queue in bytes */
     uint16_t retxQueueHolDelay;  /**<  the Head Of Line delay of the retransmission queue */
     uint16_t statusPduSize;  /**< the current size of the pending STATUS RLC  PDU message in bytes */
+    uint32_t unackedSize {0}; /**< RLC-AM only: bytes sent but not yet ACKed (txed+retx buffers).
+                                   NOT added to the BSR volume (no UL grant is needed for it); it
+                                   only keeps the UE in cDRX Active Time until the ACK arrives, so
+                                   a UE never sleeps on outstanding ARQ state (else the eNB status
+                                   PDU lands in deaf air and t-PollRetransmit forces a duplicate). */
   };
 
   /**

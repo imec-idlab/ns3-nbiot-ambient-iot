@@ -145,6 +145,7 @@ public:
     void   SetBrownoutThresholds(double brownoutJ, double recoveryJ);
     bool   IsBrownedOut() const { return m_brownedOut; }
     uint32_t GetBrownoutCount() const { return m_brownoutCount; }
+    double GetBrownoutJ() const { return m_brownoutEnergyJ; } ///< depletion floor (energy-aware contention gate)
     typedef Callback<void, uint32_t /*imsi*/, bool /*entering*/> BrownoutCb;
     void   SetBrownoutCallback(BrownoutCb cb);
     // Standalone recovery probe: must be called periodically from outside
@@ -158,6 +159,7 @@ public:
     void EnableLogging();
     void SetLogDir(std::string dirname);
     void SetModule(NbiotChip module);
+    NbiotChip& GetModule() { return m_module; } ///< chip power figures (energy-aware contention gate)
     std::string PowerStateToString(PowerState state);
 private:
     Ptr<EnergySource> m_battery; // Battery model

@@ -620,6 +620,8 @@ private:
   uint64_t m_imsi;
 
   uint64_t m_resumeId;
+  /// bounded retry count for the pre-release RLC-AM ACK-drain deferral (SwitchToResumeNb)
+  uint8_t m_releaseAckDeferCount {0};
   /**
    * ID of the primary CC for this UE
    */
@@ -987,6 +989,13 @@ public:
    * \return the corresponding UeManager instance
    */
   Ptr<UeManager> GetUeManagerbyRnti (uint16_t rnti);
+
+  /**
+   * Deferred re-entry of UeManager::SwitchToResumeNb after the pre-release
+   * RLC-AM ACK-drain deferral. Looked up by RNTI so a UE that was removed or
+   * re-activated (left CONNECTED_NORMALLY) during the deferral safely no-ops.
+   */
+  void DeferredReleaseNb (uint16_t rnti);
 
   /**
    *

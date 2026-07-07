@@ -2141,6 +2141,35 @@ void UeManager::SwitchToResumeNb(){
   NS_LOG_DEBUG ("UeManager::SwitchToResumeNb RNTI=" << m_rnti
                 << " IMSI=" << m_imsi
                 << " PG=" << m_persistentGrant);
+  // Complete the RLC-AM ACK exchange BEFORE commanding the UE to suspend: if any
+  // of this UE's eNB-side AM entities still OWES a status PDU (ACK), releasing now
+  // wipes the pending DL request (ParkUe) -- the ACK is never born, and the UE
+  // poll-retransmits an already-delivered PDU at its next contact, which lands
+  // below the eNB's receive window. Defer the release briefly (bounded) so the
+  // status N1 goes out first; a real eNB drains ARQ state before RRC release.
+  bool ackOwed = false;
+  if (m_srb1 != 0 && m_srb1->m_rlc != 0)
+    {
+      Ptr<LteRlcAm> srb1Am = DynamicCast<LteRlcAm> (m_srb1->m_rlc);
+      if (srb1Am != 0 && srb1Am->HasPendingStatusPdu ()) ackOwed = true;
+    }
+  for (std::map<uint8_t, Ptr<LteDataRadioBearerInfo> >::iterator drbIt = m_drbMap.begin ();
+       !ackOwed && drbIt != m_drbMap.end (); ++drbIt)
+    {
+      Ptr<LteRlcAm> drbAm = DynamicCast<LteRlcAm> (drbIt->second->m_rlc);
+      if (drbAm != 0 && drbAm->HasPendingStatusPdu ()) ackOwed = true;
+    }
+  if (ackOwed && m_releaseAckDeferCount < 10)
+    {
+      ++m_releaseAckDeferCount;
+      if (NbIotDebugTrace ())
+        std::cout << "[RELEASE-DEFER] t=" << Simulator::Now ().GetSeconds () << " rnti=" << m_rnti
+                  << " imsi=" << m_imsi << " try=" << (uint32_t) m_releaseAckDeferCount
+                  << " (ACK owed; deferring release 40 ms)" << std::endl;
+      Simulator::Schedule (MilliSeconds (40), &LteEnbRrc::DeferredReleaseNb, m_rrc, m_rnti);
+      return;
+    }
+  m_releaseAckDeferCount = 0;
   // Loss-diagnostic: eNB data-inactivity release. Reallocates the resumeId, so if the UE
   // later resumes with its OLD resumeId (e.g. a contention loser delayed past this 5 s timer)
   // the eNB won't recognise it -> resume rejected -> the UE's buffered packet is orphaned.
@@ -2815,6 +2844,20 @@ LteEnbRrc::GetUeManagerbyRnti (uint16_t rnti)
       return nullptr;
     }
   return it->second;
+}
+
+void
+LteEnbRrc::DeferredReleaseNb (uint16_t rnti)
+{
+  // Deferred re-entry of the pre-release ACK-drain (UeManager::SwitchToResumeNb).
+  // Looked up by RNTI: if the UE was removed, already released, or re-activated
+  // (left CONNECTED_NORMALLY -- new data restarted the session and the normal
+  // inactivity machinery owns the next release) this safely no-ops.
+  Ptr<UeManager> um = GetUeManagerbyRnti (rnti);
+  if (um != nullptr && um->GetState () == UeManager::CONNECTED_NORMALLY)
+    {
+      um->SwitchToResumeNb ();
+    }
 }
 
 Ptr<UeManager>

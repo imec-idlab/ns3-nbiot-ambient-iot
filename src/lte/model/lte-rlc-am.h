@@ -68,6 +68,15 @@ public:
    * \param txOpParams the LteMacSapUser::TxOpportunityParameters
    */
   virtual void DoNotifyTxOpportunityNb (LteMacSapUser::TxOpportunityParameters txOpParams, uint32_t schedulingDelay);
+
+  /**
+   * True while this entity still owes its peer a STATUS PDU (ACK) that has not
+   * been built/handed off yet. Used by the eNB RRC to complete the RLC-AM ACK
+   * exchange BEFORE commanding a UE to suspend (release deferral): releasing
+   * with a pending status orphans the ACK and forces a t-PollRetransmit
+   * duplicate from the UE at its next contact.
+   */
+  bool HasPendingStatusPdu () const { return m_statusPduRequested; }
     /**
    * Notify HARQ delivery failure
    */
@@ -164,6 +173,7 @@ private:
     uint32_t m_lastTxQueueSize; ///< transmit on buffer size
     uint32_t m_lastRetxQueueSize; ///< retransmit buffer size
     uint32_t m_lastStatusPduSize; ///< transmit ed buffer size
+    uint32_t m_lastUnackedSize {0}; ///< last reported sent-but-unACKed size (cDRX Active Time gate)
 
 
 
