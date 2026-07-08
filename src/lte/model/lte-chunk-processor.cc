@@ -90,8 +90,6 @@ LteChunkProcessor::End ()
 void
 LteSpectrumValueCatcher::ReportValue (const SpectrumValue& value)
 {
-  std::cout << "Catcher triggered: " << value[0] << std::endl;  // TODO: remove debug print
-
   m_value = value.Copy ();
 }
 

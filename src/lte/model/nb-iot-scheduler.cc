@@ -1231,8 +1231,11 @@ NbiotScheduler::CreateDciNpdcchMessage (uint16_t rnti, NbIotRrcSap::NpdcchMessag
   else if (m_rntiRsrpMap[rnti] < m_sib2config.radioResourceConfigCommon.nprachConfig
                                      .rsrpThresholdsPrachInfoList.ce1_lowerbound)
     {
-      std::cout <<" why are you called here m_rntiRsrpMap[rnti] "<<m_rntiRsrpMap[rnti]<< " ce1_lowerbound "<< m_sib2config.radioResourceConfigCommon.nprachConfig
-                                     .rsrpThresholdsPrachInfoList.ce1_lowerbound <<std::endl;
+      if (NbIotDebugTrace ())
+        std::cout << "[SCHED-CE1] rnti=" << rnti << " rsrp=" << m_rntiRsrpMap[rnti]
+                  << " < ce1_lowerbound=" << m_sib2config.radioResourceConfigCommon.nprachConfig
+                                                 .rsrpThresholdsPrachInfoList.ce1_lowerbound
+                  << std::endl;
       dciN1Repetitions = NbIotRrcSap::DciN1::DciRepetitions::r32;
       dciN0Repetitions = NbIotRrcSap::DciN0::DciRepetitions::r32;
       ceLevel = m_ce1.coverageEnhancementLevel;

@@ -29,6 +29,7 @@
 #include "ns3/packet.h"
 #include "ns3/uinteger.h"
 #include "ns3/boolean.h"
+#include "ns3/global-value.h"
 #include "ns3/seq-ts-header.h"
 #include "markov-udp-client.h"
 #include <cstdlib>
@@ -39,6 +40,21 @@ namespace ns3 {
 NS_LOG_COMPONENT_DEFINE ("MarkovUdpClient");
 
 NS_OBJECT_ENSURE_REGISTERED (MarkovUdpClient);
+
+// Gate the brown-out pause/resume traces behind the same --NbIotDebugTrace=1
+// runtime toggle as the LTE-module diagnostics. Looked up by GlobalValue name
+// so this module needs no lte dependency; resolves to false if the global is
+// absent. Cached once (after CommandLine::Parse).
+static bool
+MarkovDebugTrace ()
+{
+  static bool cached = [] {
+    BooleanValue b (false);
+    GlobalValue::GetValueByNameFailSafe ("NbIotDebugTrace", b);
+    return b.Get ();
+  }();
+  return cached;
+}
 
 TypeId
 MarkovUdpClient::GetTypeId (void)
@@ -213,6 +229,7 @@ MarkovUdpClient::StartApplication (void)
   // remainder of the run is steady state (contention-free under FUG). Subsequent
   // packets follow the normal sendFirst=false decide-then-send cadence.
   m_state = ACTIVE;
+  m_pendingIsWakeUp = false;
   m_sendEvent = Simulator::Schedule (Seconds (0.0), &MarkovUdpClient::Send, this);
 }
 
@@ -268,9 +285,15 @@ MarkovUdpClient::Send (void)
   // and reschedule one inactive interval later so we wake up to check again.
   if (m_paused)
     {
+      if (MarkovDebugTrace ())
+        std::cerr << "[APP-TICK-PAUSED] node=" << (GetNode () ? GetNode ()->GetId () : 9999)
+                  << " t=" << Simulator::Now ().GetSeconds () << std::endl;
       if (m_sent < m_count)
-        m_sendEvent = Simulator::Schedule (m_intervalInactive,
-                                           &MarkovUdpClient::Send, this);
+        {
+          m_pendingIsWakeUp = false;
+          m_sendEvent = Simulator::Schedule (m_intervalInactive,
+                                             &MarkovUdpClient::Send, this);
+        }
       return;
     }
 
@@ -285,10 +308,12 @@ MarkovUdpClient::Send (void)
           UpdateState ();
           if (m_state == ACTIVE)
             {
+              m_pendingIsWakeUp = false;
               m_sendEvent = Simulator::Schedule (m_intervalActive, &MarkovUdpClient::Send, this);
             }
           else
             {
+              m_pendingIsWakeUp = true;
               m_sendEvent = Simulator::Schedule (m_intervalInactive, &MarkovUdpClient::WakeUp, this);
             }
         }
@@ -303,6 +328,7 @@ MarkovUdpClient::Send (void)
       UpdateState ();
       if (m_sent < m_count)
         {
+          m_pendingIsWakeUp = false;
           m_sendEvent = Simulator::Schedule (GetNextInterval (), &MarkovUdpClient::Send, this);
         }
     }
@@ -321,6 +347,7 @@ MarkovUdpClient::WakeUp (void)
     }
   else if (m_sent < m_count)
     {
+      m_pendingIsWakeUp = true;
       m_sendEvent = Simulator::Schedule (m_intervalInactive, &MarkovUdpClient::WakeUp, this);
     }
 }
@@ -348,6 +375,15 @@ MarkovUdpClient::Pause()
 {
   if (m_paused) return;
   m_paused = true;
+  if (MarkovDebugTrace ())
+    std::cerr << "[APP-PAUSE] node=" << (GetNode () ? GetNode ()->GetId () : 9999)
+              << " t=" << Simulator::Now ().GetSeconds () << std::endl;
+  // Remember how much of the tick was left so Resume() can preserve phase.
+  // Re-arming a FULL interval instead livelocks under brown-out oscillation:
+  // any pause period shorter than the tick interval resets the timer forever
+  // and the client silently generates nothing (seen on fug-rr N=1).
+  m_pausedDelayLeft = m_sendEvent.IsExpired () ? Time::Min ()
+                                               : Simulator::GetDelayLeft (m_sendEvent);
   Simulator::Cancel (m_sendEvent);
 }
 
@@ -356,16 +392,30 @@ MarkovUdpClient::Resume()
 {
   if (!m_paused) return;
   m_paused = false;
+  if (MarkovDebugTrace ())
+    std::cerr << "[APP-RESUME] node=" << (GetNode () ? GetNode ()->GetId () : 9999)
+              << " t=" << Simulator::Now ().GetSeconds () << std::endl;
   if (m_sent < m_count)
     {
-      // Re-arm the regular Markov cadence only. Do NOT mint a new packet on
+      // Re-arm the tick Pause() cancelled with the delay it had LEFT, and the
+      // SAME handler (send-first mode parks WakeUp in m_sendEvent; re-arming
+      // Send there would mint a packet). Do NOT mint a new packet on
       // recovery: a packet generated before the brown-out is still buffered in
       // the RLC and is delivered by the access layer once the radio is back.
       // Injecting a fresh packet here (new SeqTs, ++m_sent) double-counts the
       // offered load and inflates the loss ratio for any scheme that depletes,
       // confounding the cross-scheme comparison.
-      m_sendEvent = Simulator::Schedule (GetNextInterval (),
-                                         &MarkovUdpClient::Send, this);
+      Time delay = m_pausedDelayLeft.IsNegative () ? GetNextInterval ()
+                                                   : m_pausedDelayLeft;
+      m_pausedDelayLeft = Time::Min ();
+      if (m_pendingIsWakeUp)
+        {
+          m_sendEvent = Simulator::Schedule (delay, &MarkovUdpClient::WakeUp, this);
+        }
+      else
+        {
+          m_sendEvent = Simulator::Schedule (delay, &MarkovUdpClient::Send, this);
+        }
     }
 }
 

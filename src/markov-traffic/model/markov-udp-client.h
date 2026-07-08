@@ -90,8 +90,11 @@ public:
   void Pause();
 
   /**
-   * @brief Resume Markov ticking. Re-arms a single send event one tick from
-   *        now (using the current state's interval). Idempotent.
+   * @brief Resume Markov ticking. Re-arms the event cancelled by Pause() with
+   *        the delay it had LEFT (phase-preserving), so repeated short
+   *        brown-outs cannot keep resetting a long tick timer and starve the
+   *        traffic source. Falls back to a full interval if nothing was
+   *        pending. Idempotent.
    */
   void Resume();
 
@@ -165,6 +168,8 @@ private:
 
   bool m_sendFirst; //!< If true, always send then decide; if false, original interval-based behavior
   bool m_paused {false}; //!< Pause flag set by Pause()/Resume() (energy brown-out gate)
+  bool m_pendingIsWakeUp {false}; //!< m_sendEvent holds WakeUp (send-first mode), not Send
+  Time m_pausedDelayLeft {Time::Min ()}; //!< delay left on the tick cancelled by Pause(); negative = none
 
   Ptr<UniformRandomVariable> m_uniformRv;
 

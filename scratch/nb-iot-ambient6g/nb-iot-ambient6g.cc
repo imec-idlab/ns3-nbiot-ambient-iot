@@ -681,11 +681,12 @@ int main (int argc, char *argv[])
           : (static_cast<uint32_t> (numUes) + srDedicatedSubcarriers - 1) / srDedicatedSubcarriers;
   uint32_t effSrPeriodMs =
       (srPeriodMs != 0) ? srPeriodMs : srBaseNprachPeriodMs * srRoundRobinPeriods;
-  std::cout << "[SR model] numUes=" << numUes
-            << " dedicatedSubcarriers=" << srDedicatedSubcarriers
-            << " base=" << srBaseNprachPeriodMs << "ms"
-            << " roundRobinPeriods=" << srRoundRobinPeriods
-            << " => effSrPeriod=" << effSrPeriodMs << "ms" << std::endl;
+  if (NbIotDebugTrace ())
+    std::cout << "[SR model] numUes=" << numUes
+              << " dedicatedSubcarriers=" << srDedicatedSubcarriers
+              << " base=" << srBaseNprachPeriodMs << "ms"
+              << " roundRobinPeriods=" << srRoundRobinPeriods
+              << " => effSrPeriod=" << effSrPeriodMs << "ms" << std::endl;
 
   // Capture for ALL schemes: a collided NPRACH preamble is WON by one UE (Msg4 contention
   // resolution) instead of dropping the whole herd. Critical for EDT, where a dropped preamble
@@ -954,21 +955,24 @@ int main (int argc, char *argv[])
             txTot += tx; retxTot += retx; statusTot += status;
           }
       }
-    std::cout << "[BACKLOG@END] t=" << Simulator::Now ().GetSeconds ()
-              << " uesWithPendingUL=" << uesWithBacklog
-              << " totalPendingBytes=" << backlogBytes << std::endl;
-    // tx = never transmitted (genuine orphan); retx = sent but unACKed (likely delivered =
-    // phantom); status = signalling residue (not a real packet).
-    std::cout << "[BACKLOG-BREAKDOWN] txQueue(never-sent)=" << txTot
-              << " retxQueue(sent-unACKed)=" << retxTot
-              << " statusPdu(residue)=" << statusTot << std::endl;
-    // Histogram of the backlogged UEs' RRC state. SUSPEND_* / CAMPED == orphan awaiting a
-    // next-packet trigger (would flush in continuous traffic). RANDOM_ACCESS / CONNECTING /
-    // WAIT_MIB / EARLY_DATA == actively trying to access but stuck == genuine starvation.
-    for (auto &kv : stateHist)
-      std::cout << "[BACKLOG-STATE] "
-                << ((kv.first >= 0 && kv.first < 17) ? stName[kv.first] : "?")
-                << " count=" << kv.second << std::endl;
+    if (NbIotDebugTrace ())
+      {
+        std::cout << "[BACKLOG@END] t=" << Simulator::Now ().GetSeconds ()
+                  << " uesWithPendingUL=" << uesWithBacklog
+                  << " totalPendingBytes=" << backlogBytes << std::endl;
+        // tx = never transmitted (genuine orphan); retx = sent but unACKed (likely delivered =
+        // phantom); status = signalling residue (not a real packet).
+        std::cout << "[BACKLOG-BREAKDOWN] txQueue(never-sent)=" << txTot
+                  << " retxQueue(sent-unACKed)=" << retxTot
+                  << " statusPdu(residue)=" << statusTot << std::endl;
+        // Histogram of the backlogged UEs' RRC state. SUSPEND_* / CAMPED == orphan awaiting a
+        // next-packet trigger (would flush in continuous traffic). RANDOM_ACCESS / CONNECTING /
+        // WAIT_MIB / EARLY_DATA == actively trying to access but stuck == genuine starvation.
+        for (auto &kv : stateHist)
+          std::cout << "[BACKLOG-STATE] "
+                    << ((kv.first >= 0 && kv.first < 17) ? stName[kv.first] : "?")
+                    << " count=" << kv.second << std::endl;
+      }
   }
 
    // Statistics
