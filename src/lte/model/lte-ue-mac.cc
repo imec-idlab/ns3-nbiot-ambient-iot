@@ -1473,6 +1473,12 @@ LteUeMac::RecvRaResponseNb (NbIotRrcSap::RarPayload raResponse)
       Simulator::Schedule (MilliSeconds (subframesTillNpusch),
                            &LteUeCmacSapUser::NotifyEnergyState, m_cmacSapUser,
                            NbiotEnergyModel::PowerState::RRC_CONNECTED_SENDING_NPUSCH);
+
+      uint32_t subframesMsg3End = raResponse.ulGrant.subframes.second.back ()
+                                  - (10 * (m_frameNo - 1) + m_subframeNo - 1);
+      Simulator::Schedule (MilliSeconds (subframesMsg3End + 1),
+                           &LteUeCmacSapUser::NotifyEnergyState, m_cmacSapUser,
+                           NbiotEnergyModel::PowerState::RRC_CONNECTED_IDLE);
       Simulator::Schedule (MilliSeconds (subframesTillNpusch),
                            &LteUeMac::DoTransmitPdu, this, tp);
       return;
