@@ -21,6 +21,7 @@
 
 
 #include "nb-iot-energy.h"
+#include "lte-common.h"   // NbIotDebugTrace() gate for the raw per-event log
 namespace ns3{
 
 NS_OBJECT_ENSURE_REGISTERED (NbiotEnergyModel);
@@ -134,7 +135,12 @@ void NbiotEnergyModel::DoNotifyStateChange(PowerState newState){
         return;
     }
 
-    if (m_logging){
+    // Raw per-event log: debug-gated. It reaches hundreds of MB per run and
+    // the per-entry open/append/close pattern is punishing on network
+    // filesystems; the analysis needs only the windowed per-state sums, which
+    // the scenario exports at statsEnd from GetEnergyPerState()
+    // (energy_states.out). Enable with --NbIotDebugTrace=1 for deep-dives.
+    if (m_logging && NbIotDebugTrace ()){
         std::ofstream logfile;
         logfile.open(m_logdir + "nbiot_energy.log", std::ios_base::app);
         logfile << Simulator::Now().GetMilliSeconds() << ", " << m_imsi << ", " << PowerStateToString( m_lastState )<< ", " << lostEnergy << std::endl;
@@ -229,6 +235,10 @@ void NbiotEnergyModel::FlushStateTime() {
 void NbiotEnergyModel::ResetAccounting() {
     FlushStateTime();              // account the current interval up to now
     m_timeSpendInState.clear();    // discard warm-up dwell -> duty over [now, end]
+    // Also discard warm-up ENERGY so GetEnergyPerState() is windowed to
+    // [now, end]. Safe: the dwell spanning the cut books its full energy at
+    // its end (post-clear), exactly like a timestamp cut of the raw log.
+    m_energySpendInState.clear();
     m_lastStateChange = Simulator::Now();
 }
 

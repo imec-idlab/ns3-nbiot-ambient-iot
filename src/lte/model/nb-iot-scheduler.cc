@@ -1446,11 +1446,18 @@ NbiotScheduler::ParkUe (uint16_t rnti)
   // while RRC-suspended) but KEEP its context so it can resume contention-free.
   auto cfgIt = m_rntiUeConfigMap.find (rnti);
   if (cfgIt == m_rntiUeConfigMap.end ()) { return; }
+  if (NbIotDebugTrace ())
+    std::cout << "[SCHED-PARK] t=" << Simulator::Now ().GetSeconds () << " rnti=" << rnti
+              << " wiping ulBuf=" << cfgIt->second.rlcUlBuffer
+              << " keeping dlBuf=" << cfgIt->second.rlcDlBuffer << std::endl;
+  
   cfgIt->second.rlcUlBuffer = 0;
-  cfgIt->second.rlcDlBuffer = 0;
-  auto &ss = m_searchSpaceRntiMap[cfgIt->second.searchSpaceConfig];
-  auto it = std::find (ss.begin (), ss.end (), rnti);
-  if (it != ss.end ()) { ss.erase (it); }
+  if (cfgIt->second.rlcDlBuffer == 0)
+    {
+      auto &ss = m_searchSpaceRntiMap[cfgIt->second.searchSpaceConfig];
+      auto it = std::find (ss.begin (), ss.end (), rnti);
+      if (it != ss.end ()) { ss.erase (it); }
+    }
 }
 
 void

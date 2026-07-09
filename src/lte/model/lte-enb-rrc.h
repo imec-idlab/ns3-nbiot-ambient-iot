@@ -158,6 +158,8 @@ public:
   void NotifyDataInactivitySchedulerNb();
   void ReleaseOnRai();
   void NotifyDataActivitySchedulerNb();
+  /// Radio-level observed-UL wake (received DRB PDU); wakes proactiveFug too.
+  void NotifyUlDataObservedNb();
   uint64_t AttachSuspendedNb(uint32_t imsi);
 
   /** 
@@ -202,6 +204,17 @@ public:
    * \param lcid LCID
    */
   void SwitchToResumeNb();
+  /**
+   * Drop the SRB1 RLC-AM residue of the just-sent RRCConnectionRelease (the
+   * un-ACKed release PDU + poll state) once the release has had time to be
+   * delivered. The release is the session's LAST message (no RRC-level ACK,
+   * TS 36.331 5.3.8); the UE flushes its SRB1 on suspend, so this reset keeps
+   * both ends at SN 0 for the next resume. Without it the eNB (a) poll-
+   * retransmits the release to a sleeping UE and (b) sends the NEXT session's
+   * release with an advanced SN that the UE's reset window silently drops.
+   * No-ops unless still IDLE_SUSPEND_* (a resume in the meantime owns SRB1).
+   */
+  void FlushSrb1ReleaseResidueNb();
 
   /**
    * Set the directory for txt file logging
@@ -622,6 +635,15 @@ private:
   uint64_t m_resumeId;
   /// bounded retry count for the pre-release RLC-AM ACK-drain deferral (SwitchToResumeNb)
   uint8_t m_releaseAckDeferCount {0};
+  /// Time the last RRC release (suspend) was sent. Activity notifications
+  /// inside the release-grace window after it are ARQ residue of the release
+  /// itself (the UE's SRB1 status ACK / its ideal-BSR report, which fires
+  /// before the UE-side reset can run), NOT new data, and must not resurrect
+  /// the parked UeManager -- else release<->ACK wake loop (~1 Hz under the
+  /// ambient-IoT 1 s inactivity timer). A real wake (next packet) arrives
+  /// epochs later; worst-case race (data during the grace) self-heals via the
+  /// DRB ACK-exchange activity right after the grace.
+  Time m_lastReleaseTime {Seconds (-1.0)};
   /**
    * ID of the primary CC for this UE
    */
@@ -996,6 +1018,11 @@ public:
    * re-activated (left CONNECTED_NORMALLY) during the deferral safely no-ops.
    */
   void DeferredReleaseNb (uint16_t rnti);
+  /**
+   * Deferred SRB1 flush after an RRC release (UeManager::FlushSrb1ReleaseResidueNb).
+   * Looked up by RNTI; safely no-ops if the UE was removed or resumed meanwhile.
+   */
+  void FlushSrb1AfterReleaseNb (uint16_t rnti);
 
   /**
    *
@@ -1458,6 +1485,7 @@ private:
   void DoNotifyReleaseAssistanceNb(uint16_t rnti);
 
   void DoNotifyDataActivitySchedulerNb(uint16_t rnti);
+  void DoNotifyUlDataObservedNb(uint16_t rnti);
   /**
    * RRC configuration update indication function
    *

@@ -1528,7 +1528,17 @@ LteEnbMac::DoReceivePhyPdu (Ptr<Packet> p)
   // Remember this UE's last DRB (data) PDU size so the dedicated-SR blind grant can be
   // sized to a real packet rather than a flat 50 B (see NotifyIdealUlBuffer call site).
   if (lcid > 2 && frameSize > 0)
-    m_lastUlDataSize[rnti] = frameSize;
+    {
+      m_lastUlDataSize[rnti] = frameSize;
+      // Observed-UL wake: this PDU is radio-level proof the UE is awake and
+      // transmitting DRB data (lcid >= 3 also excludes SRB signalling such as
+      // the release's RLC status, so the release<->ACK loop cannot re-enter
+      // through this path). Brings a suspended UeManager back to
+      // CONNECTED_NORMALLY -- for proactive FUG this is the ONLY legitimate
+      // wake (scheduler activity is dominated by our own speculative pushes).
+      if (m_cmacSapUser)
+        m_cmacSapUser->NotifyUlDataObservedNb (rnti);
+    }
 
   // Proactive FUG predictor: feed this UL arrival to the scheduler. It is a no-op
   // unless the UE is in proactive mode, and it filters intra-epoch follow-up PDUs

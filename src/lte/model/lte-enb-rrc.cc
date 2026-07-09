@@ -113,6 +113,7 @@ public:
   virtual void NotifyDataInactivitySchedulerNb(uint16_t rnti);
   virtual void NotifyReleaseAssistanceNb(uint16_t rnti);
   virtual void NotifyDataActivitySchedulerNb(uint16_t rnti);
+  virtual void NotifyUlDataObservedNb(uint16_t rnti);
 
 private:
   LteEnbRrc* m_rrc; ///< the RRC
@@ -172,6 +173,11 @@ void
 EnbRrcMemberLteEnbCmacSapUser::NotifyDataActivitySchedulerNb(uint16_t rnti)
 {
   m_rrc->DoNotifyDataActivitySchedulerNb(rnti);
+}
+void
+EnbRrcMemberLteEnbCmacSapUser::NotifyUlDataObservedNb(uint16_t rnti)
+{
+  m_rrc->DoNotifyUlDataObservedNb(rnti);
 }
 ///////////////////////////////////////////
 // UeManager
@@ -2132,10 +2138,63 @@ void UeManager::NotifyDataActivitySchedulerNb(){
     if (m_proactiveFug){
       return;
     }
+    // Release-grace: activity arriving within this window of the release we
+    // just sent is ARQ residue of that release (UE status ACK / ideal-BSR echo
+    // reported before the UE-side SRB1 reset runs), not new data. Resurrecting
+    // on it re-arms data-inactivity and re-releases: a release<->ACK loop.
+    // Swallow it; the +100 ms SRB1 flush then finds the manager still
+    // suspended and clears the residue for good. (Same idiom as grant-grace.)
+    if (m_lastReleaseTime.IsPositive ()
+        && Simulator::Now () - m_lastReleaseTime < MilliSeconds (200))
+      {
+        if (NbIotDebugTrace ())
+          std::cout << "[ENB-RELEASE-GRACE] t=" << Simulator::Now ().GetSeconds ()
+                    << " rnti=" << m_rnti << " imsi=" << m_imsi
+                    << " (activity within release-grace: ARQ residue, no wake)" << std::endl;
+        return;
+      }
     if (m_persistentGrant &&
         (m_state == IDLE_SUSPEND_EDRX || m_state == IDLE_SUSPEND_PSM || m_state == CONNECTED_TAU)){
       WakeFromPersistentGrant();
     }
+}
+void UeManager::NotifyUlDataObservedNb(){
+    // Radio-level evidence: a DRB NPUSCH transport block from this UE was
+    // actually RECEIVED (lcid >= 3, filtered at the MAC). Unlike scheduler
+    // activity, this cannot be one of our own speculative proactive-FUG pushes
+    // and cannot fire while the UE is genuinely asleep -- so it wakes the
+    // manager for ALL persistent-grant arms, proactiveFug included. Without
+    // this, a fug manager parks forever after its first (now promptly
+    // delivered) release: the inactivity timer can never re-arm and the UE is
+    // never re-suspended -> never-sleeps from packet 2 on.
+    NS_LOG_DEBUG ("UeManager::NotifyUlDataObservedNb"
+                  << " RNTI=" << m_rnti << " state=" << ToString (m_state));
+    // Same release-grace as scheduler activity: a DRB retransmission landing
+    // right after the release is session residue, not a new session.
+    if (m_lastReleaseTime.IsPositive ()
+        && Simulator::Now () - m_lastReleaseTime < MilliSeconds (200))
+      {
+        if (NbIotDebugTrace ())
+          std::cout << "[ENB-RELEASE-GRACE] t=" << Simulator::Now ().GetSeconds ()
+                    << " rnti=" << m_rnti << " imsi=" << m_imsi
+                    << " (observed-UL within release-grace: residue, no wake)" << std::endl;
+        return;
+      }
+    if (m_persistentGrant &&
+        (m_state == IDLE_SUSPEND_EDRX || m_state == IDLE_SUSPEND_PSM || m_state == CONNECTED_TAU)){
+      if (NbIotDebugTrace ())
+        std::cout << "[ENB-OBSERVED-WAKE] t=" << Simulator::Now ().GetSeconds ()
+                  << " rnti=" << m_rnti << " imsi=" << m_imsi
+                  << " (received UL DRB data -> manager back to CONNECTED)" << std::endl;
+      WakeFromPersistentGrant();
+    }
+    // Observed data = activity NOW: RESTART the data-inactivity countdown via
+    // the canonical method (which also carries the cdrxFug never-release guard
+    // and the CONNECTED_NORMALLY guard). Do NOT merely cancel it: PDU
+    // reception fires AFTER the DCI opportunity-end re-arm, so a bare cancel
+    // orphans the countdown and no release ever fires again (verified: a
+    // cancel-only version regressed EVERY arm to never-sleep).
+    NotifyDataInactivitySchedulerNb();
 }
 void UeManager::SwitchToResumeNb(){
   NS_LOG_DEBUG ("UeManager::SwitchToResumeNb RNTI=" << m_rnti
@@ -2182,7 +2241,15 @@ void UeManager::SwitchToResumeNb(){
   msg.releaseCauseNb = NbIotRrcSap::RrcConnectionReleaseNb::ReleaseCauseNb::rrc_Suspend;
   m_resumeId = m_rrc->DoAllocateTemporaryResumeId();
   msg.resumeIdentity = m_resumeId;
+  m_lastReleaseTime = Simulator::Now ();   // arm the release-grace window
   m_rrc->m_rrcSapUser->SendRrcConnectionReleaseNb(m_rnti, msg);
+  // The release is fire-and-forget (no RRC ACK). Once it has had time to be
+  // delivered (N1 + HARQ ~25 ms; 100 ms = margin), drop its RLC-AM residue so
+  // (a) the AM entity cannot poll-retransmit it to the sleeping UE and (b) our
+  // SRB1 restarts at SN 0 to match the UE, which flushes its SRB1 on suspend
+  // (else the NEXT session's release carries an advanced SN that lands outside
+  // the UE's reset receive window and is silently dropped -> UE never sleeps).
+  Simulator::Schedule (MilliSeconds (100), &LteEnbRrc::FlushSrb1AfterReleaseNb, m_rrc, m_rnti);
   SwitchToState(IDLE_SUSPEND_EDRX);
   if (m_persistentGrant){
     // Park the UE in the scheduler: stop UL scheduling (so residual buffer can't
@@ -2196,6 +2263,20 @@ void UeManager::SwitchToResumeNb(){
   NS_LOG_DEBUG ("RNTI=" << m_rnti
                 << " suspended, scheduling MoveUeToResumed in 1000ms");
   Simulator::Schedule(MilliSeconds(1000), &LteEnbRrc::MoveUeToResumed, m_rrc, m_rnti, m_resumeId);
+}
+
+void UeManager::FlushSrb1ReleaseResidueNb(){
+  // Only while still suspended: if the UE resumed in the meantime, SRB1 is
+  // live again and the normal machinery owns it.
+  if (m_state != IDLE_SUSPEND_EDRX && m_state != IDLE_SUSPEND_PSM) { return; }
+  if (m_srb1 != 0 && m_srb1->m_rlc != 0)
+    {
+      if (NbIotDebugTrace ())
+        std::cout << "[ENB-SRB1-FLUSH] t=" << Simulator::Now ().GetSeconds ()
+                  << " rnti=" << m_rnti << " imsi=" << m_imsi
+                  << " (drop un-ACKed release PDU; SN 0 to match the UE)" << std::endl;
+      m_srb1->m_rlc->DoReset ();
+    }
 }
 
 void UeManager::RePark(){
@@ -2857,6 +2938,16 @@ LteEnbRrc::DeferredReleaseNb (uint16_t rnti)
   if (um != nullptr && um->GetState () == UeManager::CONNECTED_NORMALLY)
     {
       um->SwitchToResumeNb ();
+    }
+}
+
+void
+LteEnbRrc::FlushSrb1AfterReleaseNb (uint16_t rnti)
+{
+  Ptr<UeManager> um = GetUeManagerbyRnti (rnti);
+  if (um != nullptr)
+    {
+      um->FlushSrb1ReleaseResidueNb ();
     }
 }
 
@@ -3688,6 +3779,18 @@ LteEnbRrc::DoNotifyDataActivitySchedulerNb(uint16_t rnti)
     }
   Ptr<UeManager> ueManager = GetUeManagerbyRnti(rnti);
   ueManager->NotifyDataActivitySchedulerNb();
+}
+
+void
+LteEnbRrc::DoNotifyUlDataObservedNb(uint16_t rnti)
+{
+  NS_LOG_FUNCTION (this << (uint32_t) rnti);
+  if (!HasUeManager (rnti))
+    {
+      return;
+    }
+  Ptr<UeManager> ueManager = GetUeManagerbyRnti(rnti);
+  ueManager->NotifyUlDataObservedNb();
 }
 uint8_t
 LteEnbRrc::DoAddUeMeasReportConfigForHandover (LteRrcSap::ReportConfigEutra reportConfig)

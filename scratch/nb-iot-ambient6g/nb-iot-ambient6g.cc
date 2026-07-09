@@ -148,6 +148,29 @@ static void PollUeEnergy (UeEnergyTracker* t, Time interval, Time simEnd) {
 // the warm-up so the END-of-sim energy metrics (duty cycle, uptime, depletion,
 // harvested) reflect ONLY the steady-state window [statsStart, simEnd] -- the
 // same window the app-level loss/delay/throughput already use.
+// Windowed per-UE per-state energy/time table. The per-state maps are cleared
+// at statsStartSec (NbiotEnergyModel::ResetAccounting) and snapshotted here at
+// statsEndSec WITHOUT flushing -- numerically identical to cutting the raw
+// nbiot_energy.log (now debug-gated) at [statsStart, statsEnd], since both
+// book each dwell's energy at the dwell's END. Replaces the multi-hundred-MB
+// raw log as the analysis input for energy-per-bit.
+static void DumpEnergyStates (std::string logDir, NetDeviceContainer ueLteDevs) {
+    std::ofstream st (logDir + "energy_states.out");
+    st << "UE_ID\tState\tTime_ms\tEnergy_J\n";
+    for (uint32_t i = 0; i < ueLteDevs.GetN (); ++i) {
+        Ptr<LteUeNetDevice> ued = ueLteDevs.Get (i)->GetObject<LteUeNetDevice> ();
+        if (!ued) continue;
+        NbiotEnergyModel& em = ued->GetRrc ()->m_energyModel;
+        const auto& timeMap = em.GetTimePerState ();
+        for (const auto& kv : em.GetEnergyPerState ()) {
+            auto it = timeMap.find (kv.first);
+            st << (i + 1) << "\t" << em.PowerStateToString (kv.first) << "\t"
+               << (it != timeMap.end () ? it->second : 0.0) << "\t"
+               << kv.second << "\n";
+        }
+    }
+}
+
 static void StatsReset (UeEnergyTracker* t) {
     t->harvestedAtStart    = t->harvestedJ;     // windowed harvest = final - this
     t->uptime              = Seconds(0);
@@ -915,6 +938,10 @@ int main (int argc, char *argv[])
       if (cli) { cli->SetStatsStartTime (Seconds (statsStartSec));
                  cli->SetStatsEndTime (Seconds (statsEndEff)); }
     }
+
+  // Snapshot the windowed per-state energy/time table at the window end (the
+  // per-state maps were cleared at statsStartSec by ResetAccounting).
+  Simulator::Schedule (Seconds (statsEndEff), &DumpEnergyStates, logDir, ueLteDevs);
 
   // FlowMonitor: IP-layer delay + packet loss (UE -> remote host)
   FlowMonitorHelper flowHelper;

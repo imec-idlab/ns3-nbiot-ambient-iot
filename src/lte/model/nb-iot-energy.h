@@ -129,13 +129,19 @@ public:
     // GetDutyCycle() at simulation end.
     void   FlushStateTime();
     // Warm-up exclusion: account the current interval up to now, then discard
-    // all accumulated dwell time so GetDutyCycle() reflects only [now, end].
-    // Does NOT touch the per-state energy log (m_states), so the log/energy-per-bit
-    // can be windowed separately by timestamp. Call once at the stats-start cutoff.
+    // all accumulated dwell time AND per-state energy, so GetDutyCycle() and
+    // the per-state maps reflect only [now, end]. Call once at the stats-start
+    // cutoff. The dwell in progress at the cut books its full energy at its
+    // END (inside the window), matching a timestamp cut of the raw debug log.
     void   ResetAccounting();
     double GetActiveTimeMs() const;
     double GetTotalAccountedTimeMs() const;
     double GetDutyCycle() const;
+    // Per-state accounting since the last ResetAccounting() (= the stats
+    // window). Snapshot WITHOUT flushing: the dwell in progress at read time
+    // is excluded, matching a timestamp cut of the raw log at that instant.
+    const std::map<PowerState, double>& GetTimePerState  () const { return m_timeSpendInState;   }
+    const std::map<PowerState, double>& GetEnergyPerState() const { return m_energySpendInState; }
 
     // Brown-out gating: when remaining energy drops below m_brownoutEnergyJ the
     // model freezes — DoNotifyStateChange records timing for completeness but

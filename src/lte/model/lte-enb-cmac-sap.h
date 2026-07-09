@@ -275,7 +275,18 @@ public:
   virtual void NotifyDataActivitySchedulerNb(uint16_t rnti) = 0;
 
   /**
-   * \brief Parameters for [re]configuring the UE 
+   * Radio-level evidence of an awake UE: a DRB (lcid >= 3) NPUSCH transport
+   * block from this RNTI was actually RECEIVED. Unlike scheduler activity --
+   * which for proactive FUG is dominated by the eNB's own speculative pushed
+   * grants, and which includes the ideal-BSR side channel that can fire while
+   * the UE is mid-suspend -- this cannot be speculative. Used to wake a
+   * suspended UeManager so the data-inactivity release cycle re-arms.
+   * \param rnti the rnti of the user
+   */
+  virtual void NotifyUlDataObservedNb(uint16_t rnti) = 0;
+
+  /**
+   * \brief Parameters for [re]configuring the UE
    */
   struct UeConfig
   {

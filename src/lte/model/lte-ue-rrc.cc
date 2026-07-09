@@ -2054,6 +2054,7 @@ LteUeRrc::DoRecvRrcConnectionReleaseNb (NbIotRrcSap::RrcConnectionReleaseNb msg)
                   << (ulBuf > 0 ? " <<< STRANDING (suspended with UL data pending)" : "")
                   << std::endl;
       }
+    if (m_srb1) m_srb1->m_rlc->DoReset ();
     m_asSapUser->NotifyConnectionSuspended();
     if (msg.resumeIdentity != 0){
       m_resumeId = msg.resumeIdentity;
@@ -4410,6 +4411,30 @@ LteUeRrc::ResetRlfParams ()
 
 void
 LteUeRrc::DoNotifyEnergyState(NbiotEnergyModel::PowerState state){
+  // Floor-state fidelity: the MAC's end-of-burst fallbacks say CONNECTED_IDLE,
+  // but if this UE is RRC-suspended (a late DL residue -- e.g. the eNB's DRB
+  // status ACK landing just after the release -- briefly re-activated the
+  // radio), the correct resting floor is the RRC-derived sleep state, not the
+  // ~3 mW connected floor. Without this translation one stray PDU after
+  // suspend re-parks the energy model at CONNECTED_IDLE for the WHOLE sleep
+  // (~200x over-billing; measured on fug N=5: 0.92 J idle-billed 299 s
+  // sleeps). Gated by RRC STATE, deliberately not by arm: the race is
+  // arm-independent and a per-arm meter would break cross-arm comparability.
+  // Burst states (TX/RX/NPDCCH) pass through unchanged -- residue servicing
+  // is billed honestly; only the floor follows the RRC state. Accepted side
+  // effect: inter-burst gaps of a wake attempt started from PSM bill at the
+  // PSM floor until the RRC resumes (sub-mJ per attempt, TX-dominated).
+  if (state == NbiotEnergyModel::PowerState::RRC_CONNECTED_IDLE)
+    {
+      if (m_state == IDLE_SUSPEND_PSM)
+        {
+          state = NbiotEnergyModel::PowerState::RRC_SUSPENDED_PSM;
+        }
+      else if (m_state == IDLE_SUSPEND_EDRX)
+        {
+          state = NbiotEnergyModel::PowerState::RRC_SUSPENDED_EDRX;
+        }
+    }
   m_energyModel.DoNotifyStateChange(state);
   if(m_logging){
     LogEnergyRemaining();
