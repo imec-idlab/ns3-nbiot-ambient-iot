@@ -217,6 +217,7 @@ UdpServer::HandleRead (Ptr<Socket> socket)
               m_receivedWin++;
               m_delaySumWin += pktDelay;
               m_totalRxWin  += receivedSize;
+              m_delaysWin.push_back (pktDelay.GetMicroSeconds () / 1000.0); // [ms]
             }
 
           if (InetSocketAddress::IsMatchingType (from))

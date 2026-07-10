@@ -29,6 +29,7 @@
 #include "ns3/address.h"
 #include "ns3/traced-callback.h"
 #include "packet-loss-counter.h"
+#include <vector>
 
 namespace ns3 {
 /**
@@ -102,6 +103,10 @@ public:
   uint64_t GetReceivedWindow (void) const;   //!< received packets generated at/after the cutoff
   Time     GetDelaySumWindow (void) const;    //!< delay sum over those packets
   uint64_t GetTotalRxWindow (void) const;     //!< bytes received over those packets
+  /** @brief Per-packet end-to-end delays [ms] of the windowed packets, in
+   *  reception order. 
+   */
+  const std::vector<double>& GetDelaysWindow (void) const { return m_delaysWin; }
 
   /**
    * \brief Set the size of the window used for checking loss. This value should
@@ -138,6 +143,7 @@ private:
   uint64_t m_receivedWin {0};      //!< received packets generated at/after m_statsStart
   Time     m_delaySumWin {Seconds (0)}; //!< delay sum over windowed packets
   uint64_t m_totalRxWin {0};       //!< bytes received over windowed packets
+  std::vector<double> m_delaysWin; //!< per-packet windowed delays [ms] (percentiles/CDF)
   PacketLossCounter m_lossCounter; //!< Lost packet counter
 
   /// Callbacks for tracing the packet Rx events

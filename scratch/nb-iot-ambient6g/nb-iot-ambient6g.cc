@@ -1010,12 +1010,12 @@ int main (int argc, char *argv[])
   perUeOutStream.open (logDir + "rxbytes_per_ue.out", std::ios::out);
   perUeOutStream << "UE_ID\tRxBytes_bits\tThroughput_kbps" << std::endl;
 
-  // App-level loss + delay (exact; no FlowMonitor 10s timeout/cap). Counted over
-  // the steady-state window (packets GENERATED at/after statsStartSec): sent from
-  // the MarkovUdpClient, received + accumulated delay from the UdpServer.
+  // App-level loss + delay (exact; no FlowMonitor 10s timeout/cap).
   uint64_t appSent = 0, appReceived = 0, appRxBytesWin = 0;
   Time     appDelaySum = Seconds (0);
   const double statsWindowS = std::max (1.0, statsEndEff - statsStartSec);
+  std::ofstream delaysOutStream (logDir + "delays.out");
+  delaysOutStream << "UE_ID\tDelay_ms\n";
   for (uint32_t i = 0; i < serverApps.GetN (); i++)
     {
       Ptr<UdpServer> srv = DynamicCast<UdpServer> (serverApps.Get (i));
@@ -1029,8 +1029,11 @@ int main (int argc, char *argv[])
       appReceived   += srv->GetReceivedWindow ();
       appDelaySum   += srv->GetDelaySumWindow ();
       appRxBytesWin += srv->GetTotalRxWindow ();
+      for (double dMs : srv->GetDelaysWindow ())
+        delaysOutStream << (i + 1) << "\t" << dMs << "\n";
     }
   perUeOutStream.close ();
+  delaysOutStream.close ();
 
   double appLossRatio   = appSent ? double (appSent - appReceived) / appSent : 0.0;
   double appMeanDelayMs = appReceived ? appDelaySum.GetMilliSeconds () / double (appReceived) : 0.0;
