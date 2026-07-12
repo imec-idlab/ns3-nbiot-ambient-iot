@@ -77,6 +77,14 @@ public:
    * duplicate from the UE at its next contact.
    */
   bool HasPendingStatusPdu () const { return m_statusPduRequested; }
+  /**
+   * Bytes queued for FIRST transmission (txon buffer) -- PDUs that have never
+   * yet been sent on air. ARQ residue (transmitted/retransmit PDUs awaiting
+   * ACK) is NOT counted. Used by the eNB RRC's delivery-conditional SRB1
+   * flush: an RRC release that is still un-transmitted (DL congestion) must
+   * not be dropped, or the UE never hears it and monitors until brown-out.
+   */
+  uint32_t GetUntransmittedBytes () const { return m_txonBufferSize; }
     /**
    * Notify HARQ delivery failure
    */

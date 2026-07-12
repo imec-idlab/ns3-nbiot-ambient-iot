@@ -1690,6 +1690,18 @@ UeManager::DoReceivePdcpSdu (LtePdcpSapUser::ReceivePdcpSduParameters params)
                   << " imsi=" << m_imsi << " lcid=" << (uint32_t) params.lcid
                   << " size=" << params.pdcpSdu->GetSize () << " (DRB data -> server)" << std::endl;
       m_rrc->m_forwardUpCallback (params.pdcpSdu);
+
+      if (m_persistentGrant && !m_proactiveFug &&
+          (m_state == IDLE_SUSPEND_EDRX || m_state == IDLE_SUSPEND_PSM || m_state == CONNECTED_TAU))
+        {
+          if (NbIotDebugTrace ())
+            std::cout << "[ENB-DATA-WAKE] t=" << Simulator::Now ().GetSeconds ()
+                      << " rnti=" << m_rnti << " imsi=" << m_imsi
+                      << " (DRB SDU forwarded while manager parked -> wake, grace bypassed)"
+                      << std::endl;
+          WakeFromPersistentGrant ();
+          NotifyDataInactivitySchedulerNb ();
+        }
     }
 }
 
@@ -2243,12 +2255,8 @@ void UeManager::SwitchToResumeNb(){
   msg.resumeIdentity = m_resumeId;
   m_lastReleaseTime = Simulator::Now ();   // arm the release-grace window
   m_rrc->m_rrcSapUser->SendRrcConnectionReleaseNb(m_rnti, msg);
-  // The release is fire-and-forget (no RRC ACK). Once it has had time to be
-  // delivered (N1 + HARQ ~25 ms; 100 ms = margin), drop its RLC-AM residue so
-  // (a) the AM entity cannot poll-retransmit it to the sleeping UE and (b) our
-  // SRB1 restarts at SN 0 to match the UE, which flushes its SRB1 on suspend
-  // (else the NEXT session's release carries an advanced SN that lands outside
-  // the UE's reset receive window and is silently dropped -> UE never sleeps).
+  // The release is fire-and-forget (no RRC ACK).
+  m_srb1FlushDeferCount = 0;   // fresh delivery-wait budget for this release
   Simulator::Schedule (MilliSeconds (100), &LteEnbRrc::FlushSrb1AfterReleaseNb, m_rrc, m_rnti);
   SwitchToState(IDLE_SUSPEND_EDRX);
   if (m_persistentGrant){
@@ -2271,6 +2279,22 @@ void UeManager::FlushSrb1ReleaseResidueNb(){
   if (m_state != IDLE_SUSPEND_EDRX && m_state != IDLE_SUSPEND_PSM) { return; }
   if (m_srb1 != 0 && m_srb1->m_rlc != 0)
     {
+      // Delivery-conditional flush:
+      Ptr<LteRlcAm> srb1Am = DynamicCast<LteRlcAm> (m_srb1->m_rlc);
+      if (srb1Am != 0 && srb1Am->GetUntransmittedBytes () > 0
+          && m_srb1FlushDeferCount < 50)
+        {
+          m_srb1FlushDeferCount++;
+          if (NbIotDebugTrace ())
+            std::cout << "[ENB-SRB1-FLUSH-DEFER] t=" << Simulator::Now ().GetSeconds ()
+                      << " rnti=" << m_rnti << " imsi=" << m_imsi
+                      << " untransmitted=" << srb1Am->GetUntransmittedBytes ()
+                      << " defers=" << (uint32_t) m_srb1FlushDeferCount
+                      << " (release not yet on air -- keep it)" << std::endl;
+          Simulator::Schedule (MilliSeconds (100), &LteEnbRrc::FlushSrb1AfterReleaseNb,
+                               m_rrc, m_rnti);
+          return;
+        }
       if (NbIotDebugTrace ())
         std::cout << "[ENB-SRB1-FLUSH] t=" << Simulator::Now ().GetSeconds ()
                   << " rnti=" << m_rnti << " imsi=" << m_imsi

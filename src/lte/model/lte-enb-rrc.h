@@ -635,14 +635,9 @@ private:
   uint64_t m_resumeId;
   /// bounded retry count for the pre-release RLC-AM ACK-drain deferral (SwitchToResumeNb)
   uint8_t m_releaseAckDeferCount {0};
-  /// Time the last RRC release (suspend) was sent. Activity notifications
-  /// inside the release-grace window after it are ARQ residue of the release
-  /// itself (the UE's SRB1 status ACK / its ideal-BSR report, which fires
-  /// before the UE-side reset can run), NOT new data, and must not resurrect
-  /// the parked UeManager -- else release<->ACK wake loop (~1 Hz under the
-  /// ambient-IoT 1 s inactivity timer). A real wake (next packet) arrives
-  /// epochs later; worst-case race (data during the grace) self-heals via the
-  /// DRB ACK-exchange activity right after the grace.
+  /// bounded re-arm count for the delivery-conditional SRB1 flush
+  uint8_t m_srb1FlushDeferCount {0};
+  /// Time the last RRC release (suspend) was sent. 
   Time m_lastReleaseTime {Seconds (-1.0)};
   /**
    * ID of the primary CC for this UE

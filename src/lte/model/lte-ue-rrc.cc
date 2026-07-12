@@ -774,6 +774,7 @@ LteUeRrc::DoSendData (Ptr<Packet> packet, uint8_t bid)
     NS_LOG_DEBUG (" UE IMSI=" << m_imsi
                   << " DoSendData: PG fast-path RNTI=" << m_rnti
                   << " state=IDLE_SUSPEND_EDRX -> sending without RACH");
+    if (m_srb1) m_srb1->m_rlc->DoReset ();   // wake-side SRB1 re-align (see the SR-resume branch in DoRecvMasterInformationBlockNb)
     SendDataNb(packet, bid);
     if (!m_eDrxTimeout.IsExpired())  { m_eDrxTimeout.Cancel(); }
     SwitchToState (CONNECTED_NORMALLY);
@@ -1137,14 +1138,11 @@ LteUeRrc::DoNotifyRandomAccessFailed ()
 void
 LteUeRrc::DoNotifySrResumeConnected ()
 {
-  // A UL grant landed for an in-progress SR-resume: the eNB resolved the UE's announce
-  // preamble, resynced the parked context, and granted -- so it is now safe to declare
-  // CONNECTED. Guarded to only act while actually SR-resuming (IDLE_CONNECTING with
-  // m_srResumePending); a grant in any other state is a normal connected-mode grant and is
-  // ignored here.
+  // A UL grant landed for an in-progress SR-resume
   if (m_srResumePending && m_state == IDLE_CONNECTING)
     {
       m_srResumePending = false;
+      if (m_srb1) m_srb1->m_rlc->DoReset ();
       SwitchToState (CONNECTED_NORMALLY);
       if (NbIotDebugTrace ())
         std::cout << "[UE-SRRESUME-CONNECTED] t=" << Simulator::Now ().GetSeconds ()
@@ -1404,19 +1402,11 @@ LteUeRrc::DoRecvMasterInformationBlockNb (uint16_t cellId,
     case IDLE_WAIT_MIB:
       if(m_resumePending){
         if (m_persistentGrant && m_rnti != 0 && !m_proactiveFug) {
-          // Faithful SR-resume (hybridsr / dedicated SR). The MIB re-acquisition above is
-          // the DL-timing re-sync, but we do NOT declare CONNECTED here (that is the
-          // phantom reconnect that desyncs from the eNB, which has parked this UE). Ready
-          // the MAC (un-suspend + SR machine + NPDCCH monitoring) and queue the data so the
-          // MAC ANNOUNCES via its dedicated-SR preamble on the reserved occasion -- or
-          // contends on the RA pool if that occasion is too far (SendContentionSrPreamble's
-          // existing decision). The RRC stays in a resuming state and flips to CONNECTED
-          // only when the eNB's grant lands (DoNotifySrResumeConnected) -- i.e. once the eNB
-          // has demonstrably resynced. Queuing to RLC is safe: RLC-AM advances its SN only
-          // on transmission (on that grant, when both sides agree), not on enqueue.
           m_resumePending = false;
           m_srResumePending = true;
           SwitchToState (IDLE_CONNECTING);
+
+          if (m_srb1) m_srb1->m_rlc->DoReset ();
           m_cmacSapProvider.at(0)->NotifyConnectionSuccessful();  // MAC: un-suspend + SR + monitor
           while (!m_packetStored.empty()) {
             SendDataNb (m_packetStored.front(), 1);               // -> DRB RLC (queued; fires the SR)
@@ -1427,6 +1417,7 @@ LteUeRrc::DoRecvMasterInformationBlockNb (uint16_t cellId,
           // the retained context, so the fast reconnect is correct here.
           m_resumePending = false;
           SwitchToState (CONNECTED_NORMALLY);
+          if (m_srb1) m_srb1->m_rlc->DoReset ();   // wake-side SRB1 re-align (see SR-resume branch above)
           m_cmacSapProvider.at(0)->NotifyConnectionSuccessful();
           while (!m_packetStored.empty()) {
             SendDataNb (m_packetStored.front(), 1);
