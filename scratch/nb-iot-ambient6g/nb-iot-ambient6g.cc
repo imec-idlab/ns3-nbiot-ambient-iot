@@ -442,11 +442,13 @@ int main (int argc, char *argv[])
   // come from the eNB predictor instead of an SR. Force the implied settings.
   if (proactiveFug) { persistentGrant = true; deepSleepFug = true; cdrxFug = false; }
 
-  // Oracle / ideal-BSR: the instant-BSR path fires only for a CONNECTED UE
-  // (DoReportBufferStatus, !suspended), so keep the UE connected (no deep sleep)
-  // with a persistent grant. cDRX may stay ON to save DL-monitoring energy while
-  // idle (Idealised FUG = oracle scheduling + cDRX); leave cdrxFug as configured.
-  if (oracleBsr) { persistentGrant = true; deepSleepFug = false; }
+  // Oracle / ideal-BSR implies a persistent grant. deepSleepFug is NOT forced
+  // off any more: oracle+deepSleep is a valid arm (sleeping idealized FUG --
+  // the UE rests in PSM, wakes on packet generation, and the oracle informs
+  // the eNB instantly; arrival == awake, so the oracle never has to reach a
+  // sleeping UE). The classic Idealised FUG (oracle + cDRX, never released)
+  // passes --deepSleepFug=false explicitly.
+  if (oracleBsr) { persistentGrant = true; }
 
   if (ns3Debug) log_levels(false, LOG_LEVEL_DEBUG);
   /*

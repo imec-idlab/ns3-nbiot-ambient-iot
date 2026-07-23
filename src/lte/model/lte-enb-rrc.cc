@@ -114,6 +114,7 @@ public:
   virtual void NotifyReleaseAssistanceNb(uint16_t rnti);
   virtual void NotifyDataActivitySchedulerNb(uint16_t rnti);
   virtual void NotifyUlDataObservedNb(uint16_t rnti);
+  virtual bool IsUeInReleaseGraceNb(uint16_t rnti);
 
 private:
   LteEnbRrc* m_rrc; ///< the RRC
@@ -178,6 +179,11 @@ void
 EnbRrcMemberLteEnbCmacSapUser::NotifyUlDataObservedNb(uint16_t rnti)
 {
   m_rrc->DoNotifyUlDataObservedNb(rnti);
+}
+bool
+EnbRrcMemberLteEnbCmacSapUser::IsUeInReleaseGraceNb(uint16_t rnti)
+{
+  return m_rrc->DoIsUeInReleaseGraceNb(rnti);
 }
 ///////////////////////////////////////////
 // UeManager
@@ -2273,6 +2279,13 @@ void UeManager::SwitchToResumeNb(){
   Simulator::Schedule(MilliSeconds(1000), &LteEnbRrc::MoveUeToResumed, m_rrc, m_rnti, m_resumeId);
 }
 
+bool UeManager::InReleaseGraceNb() const {
+  // Same window as the activity/observed-UL handlers: activity arriving within
+  // 200 ms of the release we just sent is ARQ residue of that release.
+  return m_lastReleaseTime.IsPositive ()
+         && Simulator::Now () - m_lastReleaseTime < MilliSeconds (200);
+}
+
 void UeManager::FlushSrb1ReleaseResidueNb(){
   // Only while still suspended: if the UE resumed in the meantime, SRB1 is
   // live again and the normal machinery owns it.
@@ -3815,6 +3828,16 @@ LteEnbRrc::DoNotifyUlDataObservedNb(uint16_t rnti)
     }
   Ptr<UeManager> ueManager = GetUeManagerbyRnti(rnti);
   ueManager->NotifyUlDataObservedNb();
+}
+bool
+LteEnbRrc::DoIsUeInReleaseGraceNb(uint16_t rnti)
+{
+  NS_LOG_FUNCTION (this << (uint32_t) rnti);
+  if (!HasUeManager (rnti))
+    {
+      return false;
+    }
+  return GetUeManagerbyRnti (rnti)->InReleaseGraceNb ();
 }
 uint8_t
 LteEnbRrc::DoAddUeMeasReportConfigForHandover (LteRrcSap::ReportConfigEutra reportConfig)

@@ -1436,6 +1436,16 @@ LteEnbMac::NotifyIdealUlBuffer (uint16_t rnti, uint64_t bytes)
   NS_LOG_FUNCTION (this << rnti << bytes);
   NS_LOG_DEBUG ("LteEnbMac::NotifyIdealUlBuffer RNTI=" << rnti
                 << " bytes=" << bytes);
+  // Release-grace gate for the SCHEDULER half (the manager half is grace-gated
+  // inside NotifyDataActivitySchedulerNb). 
+  if (m_cmacSapUser && m_cmacSapUser->IsUeInReleaseGraceNb (rnti))
+  {
+    if (NbIotDebugTrace ())
+      std::cout << "[ENB-ORACLE-GRACE] t=" << Simulator::Now ().GetSeconds ()
+                << " rnti=" << rnti << " bytes=" << bytes
+                << " (ideal BSR within release-grace: residue, no grant)" << std::endl;
+    return;
+  }
   if (m_schedulerNb)
   {
     NS_LOG_DEBUG ("NotifyIdealUlBuffer: calling ScheduleUlRlcBufferReq RNTI=" << rnti);

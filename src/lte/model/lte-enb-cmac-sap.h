@@ -276,14 +276,19 @@ public:
 
   /**
    * Radio-level evidence of an awake UE: a DRB (lcid >= 3) NPUSCH transport
-   * block from this RNTI was actually RECEIVED. Unlike scheduler activity --
-   * which for proactive FUG is dominated by the eNB's own speculative pushed
-   * grants, and which includes the ideal-BSR side channel that can fire while
-   * the UE is mid-suspend -- this cannot be speculative. Used to wake a
-   * suspended UeManager so the data-inactivity release cycle re-arms.
+   * block from this RNTI was actually RECEIVED. 
    * \param rnti the rnti of the user
    */
   virtual void NotifyUlDataObservedNb(uint16_t rnti) = 0;
+
+  /**
+   * True while this RNTI is inside the post-release grace window (the ~200 ms
+   * after an RRC release during which any observed activity is ARQ residue of
+   * the release itself, not new data). 
+   * \param rnti the rnti of the user
+   * \return true if within the release-grace window
+   */
+  virtual bool IsUeInReleaseGraceNb(uint16_t rnti) = 0;
 
   /**
    * \brief Parameters for [re]configuring the UE

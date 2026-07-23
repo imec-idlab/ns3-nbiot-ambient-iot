@@ -1903,6 +1903,8 @@ LteUeMac::DoNotifyConnectionSuccessful ()
   m_uePhySapProvider->NotifyConnectionSuccessful ();
   m_listenToSearchSpaces = true;
   m_suspended = false;   // resumed/connected: the MAC SR machine is live again
+  m_psm = false;         // disarm the re-armable sleep gate: awake until next suspend
+  m_edrx = false;
   m_drbDataSentThisSession = false;  // new session: RAI must wait until this session's DRB data is sent
   // A fresh resume/connection starts NO active grant session. m_grantSessionActive
   // latches true (it is only cleared by a total==0 BSR, which is unreliable), so a
@@ -2715,17 +2717,37 @@ LteUeMac::DoSubframeIndication (uint32_t frameNo, uint32_t subframeNo)
   m_subframeNo = subframeNo;
   //RefreshHarqProcessesPacketBuffer ();
   //
-  if(m_edrx && GetBufferSizeComplete() == 0 && !m_transmissionScheduled){
-    m_listenToSearchSpaces = false;
-    m_cmacSapUser->NotifyEnergyState(NbiotEnergyModel::PowerState::RRC_SUSPENDED_EDRX);
-    m_edrx = false;
+  // Re-armable sleep gate: m_edrx/m_psm stay set for the WHOLE suspension (cleared
+  // on resume in DoNotifyConnectionSuccessful), not consumed on first entry.
+  // Gated periodic diagnostic: why is the armed sleep gate not closing?
+  static uint32_t sleepGateDbgCnt = 0;
+  if (NbIotDebugTrace () && (m_edrx || m_psm) && (++sleepGateDbgCnt % 1000 == 0))
+    {
+      std::cout << "[UE-SLEEPGATE] t=" << Simulator::Now ().GetSeconds ()
+                << " rnti=" << m_rnti << " psm=" << m_psm << " edrx=" << m_edrx
+                << " buf=" << GetBufferSizeComplete ()
+                << " txSched=" << m_transmissionScheduled
+                << " es=" << (int) m_cmacSapUser->GetEnergyState ()
+                << " listen=" << m_listenToSearchSpaces << std::endl;
+    }
+  if((m_edrx || m_psm) && GetBufferSizeComplete() == 0 && !m_transmissionScheduled){
+    NbiotEnergyModel::PowerState target = m_psm
+        ? NbiotEnergyModel::PowerState::RRC_SUSPENDED_PSM
+        : NbiotEnergyModel::PowerState::RRC_SUSPENDED_EDRX;
+    NbiotEnergyModel::PowerState es = m_cmacSapUser->GetEnergyState ();
+    bool resting = (es == NbiotEnergyModel::PowerState::RRC_CONNECTED_IDLE
+                    || es == NbiotEnergyModel::PowerState::RRC_CONNECTED_RECEIVING_NPDCCH
+                    || es == NbiotEnergyModel::PowerState::RRC_SUSPENDED_EDRX
+                    || es == NbiotEnergyModel::PowerState::RRC_SUSPENDED_PSM);
+    if (resting)
+      {
+        m_listenToSearchSpaces = false;
+        if (es != target)
+          {
+            m_cmacSapUser->NotifyEnergyState (target);
+          }
+      }
     // TODO Activate Paging Occasion listening
-  }
-  if(m_psm && GetBufferSizeComplete() == 0 && !m_transmissionScheduled){
-    m_listenToSearchSpaces = false;
-    m_cmacSapUser->NotifyEnergyState(NbiotEnergyModel::PowerState::RRC_SUSPENDED_PSM);
-    // TODO Activate Paging Occasion listening
-    m_psm = false;
   }
   // Connected-mode DRX (TS 36.321 5.7 / DRX-Config-NB-r13): a connected UE only
   // opens NPDCCH search-space occasions during the on-duration of each long DRX
@@ -2885,6 +2907,7 @@ LteUeMac::DoNotifyEdrx(){
 void
 LteUeMac::DoNotifyPsm(){
   m_psm = true;
+  m_edrx = false;   // PSM supersedes eDRX; the re-armable gate targets one state
   m_suspended = true;
   m_srPending = false;
   m_grantSessionActive = false;

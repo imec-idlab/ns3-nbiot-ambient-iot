@@ -160,6 +160,8 @@ public:
   void NotifyDataActivitySchedulerNb();
   /// Radio-level observed-UL wake (received DRB PDU); wakes proactiveFug too.
   void NotifyUlDataObservedNb();
+  /// True while inside the post-release grace window (activity = release ARQ residue)
+  bool InReleaseGraceNb() const;
   uint64_t AttachSuspendedNb(uint32_t imsi);
 
   /** 
@@ -1481,6 +1483,8 @@ private:
 
   void DoNotifyDataActivitySchedulerNb(uint16_t rnti);
   void DoNotifyUlDataObservedNb(uint16_t rnti);
+  /// True while rnti is inside the post-release grace window (see LteEnbCmacSapUser::IsUeInReleaseGraceNb)
+  bool DoIsUeInReleaseGraceNb(uint16_t rnti);
   /**
    * RRC configuration update indication function
    *

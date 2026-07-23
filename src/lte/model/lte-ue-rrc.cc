@@ -2050,6 +2050,10 @@ LteUeRrc::DoRecvRrcConnectionReleaseNb (NbIotRrcSap::RrcConnectionReleaseNb msg)
     if (msg.resumeIdentity != 0){
       m_resumeId = msg.resumeIdentity;
     }
+    if (NbIotDebugTrace ())
+      std::cout << "[UE-SUSPEND-BRANCH] t=" << Simulator::Now ().GetSeconds ()
+                << " imsi=" << m_imsi << " eDRX=" << m_enableEDRX
+                << " PSM=" << m_enablePSM << std::endl;
     if(m_enableEDRX){
       NS_LOG_DEBUG ("UE IMSI=" << m_imsi
                     << " DoRecvRrcConnectionReleaseNb: cause=rrc_Suspend"
