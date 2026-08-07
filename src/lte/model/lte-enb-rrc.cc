@@ -2187,17 +2187,13 @@ void UeManager::NotifyUlDataObservedNb(){
     // never re-suspended -> never-sleeps from packet 2 on.
     NS_LOG_DEBUG ("UeManager::NotifyUlDataObservedNb"
                   << " RNTI=" << m_rnti << " state=" << ToString (m_state));
-    // Same release-grace as scheduler activity: a DRB retransmission landing
-    // right after the release is session residue, not a new session.
-    if (m_lastReleaseTime.IsPositive ()
+    // NO release-grace veto here (unlike scheduler activity above). 
+    if (NbIotDebugTrace ()
+        && m_lastReleaseTime.IsPositive ()
         && Simulator::Now () - m_lastReleaseTime < MilliSeconds (200))
-      {
-        if (NbIotDebugTrace ())
-          std::cout << "[ENB-RELEASE-GRACE] t=" << Simulator::Now ().GetSeconds ()
-                    << " rnti=" << m_rnti << " imsi=" << m_imsi
-                    << " (observed-UL within release-grace: residue, no wake)" << std::endl;
-        return;
-      }
+      std::cout << "[ENB-GRACE-DRB-WAKE] t=" << Simulator::Now ().GetSeconds ()
+                << " rnti=" << m_rnti << " imsi=" << m_imsi
+                << " (DRB data within release-grace: genuine, waking)" << std::endl;
     if (m_persistentGrant &&
         (m_state == IDLE_SUSPEND_EDRX || m_state == IDLE_SUSPEND_PSM || m_state == CONNECTED_TAU)){
       if (NbIotDebugTrace ())
