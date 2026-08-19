@@ -2,6 +2,7 @@
 /*
  * Copyright (c) 2009, 2011 CTTC
  * Copyright (c) 2022 Communication Networks Institute at TU Dortmund University
+ * Copyright (c) 2026 IDLab (UAntwerp & imec)
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -21,6 +22,7 @@
  *         Marco Miozzo <marco.miozzo@cttc.es> (add physical error model)
  * Modified by:
  * 			Tim Gebauer <tim.gebauer@tu-dortmund.de> (NB-IoT Extension)
+ *      Douglas D. Agbeve <douglas.agbeve@uantwerpen.be> (NB-IoT Extension)
  */
 
 

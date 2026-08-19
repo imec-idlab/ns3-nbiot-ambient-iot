@@ -1,6 +1,7 @@
 /* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2010 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
+ * Copyright (c) 2026 IDLab (UAntwerp & imec)
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -17,7 +18,8 @@
  *
  * Author: Nicola Baldo <nbaldo@cttc.es>
  * Modified by : Marco Miozzo <mmiozzo@cttc.es>
- *        (move from CQI to Ctrl and Data SINR Chunk processors
+ *                      (move from CQI to Ctrl and Data SINR Chunk processors
+ *               Douglas D. Agbeve <douglas.agbeve@uantwerpen.be> (NB-IoT Extension)
  */
 
 

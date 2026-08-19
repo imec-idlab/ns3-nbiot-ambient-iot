@@ -2,6 +2,7 @@
 /*
  * Copyright (c) 2011 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  * Copyright (c) 2022 Communication Networks Institute at TU Dortmund University
+ * Copyright (c) 2026 IDLab (UAntwerp & imec)
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as

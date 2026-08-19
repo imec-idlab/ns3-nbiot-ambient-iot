@@ -1,6 +1,7 @@
 /* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2007,2008,2009 INRIA, UDCAST
+ * Copyright (c) 2026 IDLab (UAntwerp & imec)
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -17,6 +18,7 @@
  *
  * Author: Amine Ismail <amine.ismail@sophia.inria.fr>
  *                      <amine.ismail@udcast.com>
+ * Modified by: Douglas D. Agbeve <douglas.agbeve@uantwerpen.be> (NB-IoT Extension)
  *
  */
 

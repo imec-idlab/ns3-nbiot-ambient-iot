@@ -2,6 +2,7 @@
 /*
  * Copyright (c) 2010 TELEMATICS LAB, DEE - Politecnico di Bari
  * Copyright (c) 2022 Communication Networks Institute at TU Dortmund University
+ * Copyright (c) 2026 IDLab (UAntwerp & imec)
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -20,6 +21,7 @@
  *         Marco Miozzo <mmiozzo@cttc.es>
  * Modified by:
  * 			Tim Gebauer <tim.gebauer@tu-dortmund.de> (NB-IoT Extension)
+ *      Douglas D. Agbeve <douglas.agbeve@uantwerpen.be> (NB-IoT Extension)
  */
 
 #include <ns3/object-factory.h>

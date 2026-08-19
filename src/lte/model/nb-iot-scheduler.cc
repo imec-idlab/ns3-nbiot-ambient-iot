@@ -1,6 +1,7 @@
 /* -*-  Mode: C++; c-file-style: "gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2022 Communication Networks Institute at TU Dortmund University
+ * Copyright (c) 2026 IDLab (UAntwerp & imec)
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -18,6 +19,7 @@
  * Author: Tim Gebauer <tim.gebauer@tu-dortmund.de>
  * Modified by:
  *      Pascal Jörke <pascal.joerke@tu-dortmund.de>
+ *      Douglas D. Agbeve <douglas.agbeve@uantwerpen.be>
  */
 
 

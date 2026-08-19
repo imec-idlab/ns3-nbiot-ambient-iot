@@ -2,6 +2,7 @@
 /*
  * Copyright (c) 2012 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  * Copyright (c) 2022 Communication Networks Institute at TU Dortmund University
+ * Copyright (c) 2026 IDLab (UAntwerp & imec)
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -20,7 +21,8 @@
  * Modified by:
  *          Danilo Abrignani <danilo.abrignani@unibo.it> (Carrier Aggregation - GSoC 2015)
  *          Biljana Bojovic <biljana.bojovic@cttc.es> (Carrier Aggregation)
- * 			Tim Gebauer <tim.gebauer@tu-dortmund.de> (NB-IoT Extension)
+ * 			    Tim Gebauer <tim.gebauer@tu-dortmund.de> (NB-IoT Extension)
+ *          Douglas D. Agbeve <douglas.agbeve@uantwerpen.be> (NB-IoT Extension)
  */
 
 #ifndef RRC_HEADER_H

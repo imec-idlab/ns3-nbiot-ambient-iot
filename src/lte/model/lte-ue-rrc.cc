@@ -3,6 +3,7 @@
  * Copyright (c) 2011, 2012 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC)
  * Copyright (c) 2018 Fraunhofer ESK : RLF extensions
  * Copyright (c) 2022 Communication Networks Institute at TU Dortmund University
+ * Copyright (c) 2026 IDLab (UAntwerp & imec)
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -23,7 +24,8 @@
  *          Danilo Abrignani <danilo.abrignani@unibo.it> (Carrier Aggregation - GSoC 2015)
  *          Biljana Bojovic <biljana.bojovic@cttc.es> (Carrier Aggregation)
  *          Vignesh Babu <ns3-dev@esk.fraunhofer.de> (RLF extensions)
- * 			Tim Gebauer <tim.gebauer@tu-dortmund.de> (NB-IoT extensions)
+ * 			    Tim Gebauer <tim.gebauer@tu-dortmund.de> (NB-IoT extensions)
+ *          Douglas D. Agbeve <douglas.agbeve@uantwerpen.be> (NB-IoT Extension)
  */
 
 #include "lte-ue-rrc.h"

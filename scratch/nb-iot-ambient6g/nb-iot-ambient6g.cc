@@ -2,6 +2,7 @@
 /*
  * Copyright (c) 2011-2018 Centre Tecnologic de Telecomunicacions de Catalunya (CTTC),
  * Copyright (c) 2022 Communication Networks Institute at TU Dortmund University
+ * Copyright (c) 2026 IDLab (UAntwerp & imec)
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -144,16 +145,7 @@ static void PollUeEnergy (UeEnergyTracker* t, Time interval, Time simEnd) {
     }
 }
 
-// Warm-up reset at the stats-start cutoff: discard everything accumulated during
-// the warm-up so the END-of-sim energy metrics (duty cycle, uptime, depletion,
-// harvested) reflect ONLY the steady-state window [statsStart, simEnd] -- the
-// same window the app-level loss/delay/throughput already use.
-// Windowed per-UE per-state energy/time table. The per-state maps are cleared
-// at statsStartSec (NbiotEnergyModel::ResetAccounting) and snapshotted here at
-// statsEndSec WITHOUT flushing -- numerically identical to cutting the raw
-// nbiot_energy.log (now debug-gated) at [statsStart, statsEnd], since both
-// book each dwell's energy at the dwell's END. Replaces the multi-hundred-MB
-// raw log as the analysis input for energy-per-bit.
+// Warm-up reset at the stats-start cutoff
 static void DumpEnergyStates (std::string logDir, NetDeviceContainer ueLteDevs) {
     std::ofstream st (logDir + "energy_states.out");
     st << "UE_ID\tState\tTime_ms\tEnergy_J\n";
