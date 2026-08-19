@@ -7,6 +7,8 @@ The original README file moved to [here](README_ORIGINAL.md).
 
 ## Configure and Build
 
+**Requires Python 3.11 or lower**
+
 - Follow the instructions on [ns-3 Installation Guide](https://www.nsnam.org/wiki/Installation) to prepare all dependencies.
 - Clone the project
 - Change directory into the ns3-nbiot-ambient-iot/ directory
@@ -29,7 +31,7 @@ The original README file moved to [here](README_ORIGINAL.md).
     ```
 This runs the simulation in `scratch/nb-iot-ambient6g/nb-iot-ambient6g.cc`. Explanations of the parameters can be found in the said file.
 At the end of the simulation, data is outputed in the output directory.
-- To plot, run
+- To plot, run (more recent python version is preferable here)
 ```shell
 python plotter.py
 ```
